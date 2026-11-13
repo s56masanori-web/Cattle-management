@@ -4002,7 +4002,8 @@ function initApp() {
   window._histAuto = true;   // 開いたときの自動の直しは、変更履歴に入れない
   setTimeout(() => { window._histAuto = false; try { _histReset(); } catch (e) {} }, 3000);
   // 基礎データ：同期で _store に入った _base を読み込む（無ければ警告）
-  if (!applyBaseData(_store.getItem('_base'))) {
+  // 小原農場だけ：昔の台帳を移したときの基礎データ（_base）。ほかの農場にはもともと無いので警告しない
+  if (!applyBaseData(_store.getItem('_base')) && ((window.FARM_CFG && window.FARM_CFG.farmId) || 'obara') === 'obara') {
     setTimeout(() => { try { appAlert('⚠ 基礎データ（牛の一覧・昔の授精簿）がまだクラウドにありません。\n移行用のファイル（手順1）を一度開いてから、このファイルに差し替えてください。'); } catch (e) {} }, 800);
   }
   document.getElementById('reg-date').value = today();
