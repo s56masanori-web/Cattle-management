@@ -11245,7 +11245,8 @@ async function runFarmnoteImport(fileList) {
   insemBookRecords.push(...P.insem.filter(r => newIds.has(r.t)));
   tasks.push(...P.tasks.filter(t => newIds.has(t.cowId) && !tasks.some(x => x.id === t.id)));
   if (newFat.length) fatteningRecords.push(...newFat);
-  if (P.barns.length) { const cur = getBarns(); farmTargets._barns = [...new Set([...(farmTargets._barns ? cur : []), ...P.barns])]; }
+  // 牛群：設定ファイルの牛群（ファームノートと同じ並び）を先に、CSVに出てきた牛群で足りないものを後ろに足す
+  if (P.barns.length) { const cfgB = (window.FARM_CFG && Array.isArray(window.FARM_CFG.barns)) ? window.FARM_CFG.barns : []; farmTargets._barns = [...new Set([...(farmTargets._barns || []), ...cfgB, ...P.barns])]; }
   try { _store.setItem('retiredCows', JSON.stringify(retiredCows)); } catch (e) {}
   if (newFat.length) saveFattening(); else save();
   try { repairMissingPregTasks(); } catch (e) {}
@@ -24787,7 +24788,7 @@ function renderCalves() {
 // 子牛の体格は、生時（calf.weight）に加えて 育成舎①・育成舎②・出荷 の節目で5段階で入れる（体重は量らない代わり）
 const DEFAULT_BARNS = ['繁殖舎', '産室', '育成舎①', '育成舎②', '肥育舎'];
 const SCORE_STAGES = ['育成舎①', '育成舎②', '出荷'];
-function getBarns() { const b = (typeof farmTargets !== 'undefined' && farmTargets && farmTargets._barns) || null; return Array.isArray(b) && b.length ? b : DEFAULT_BARNS; }
+function getBarns() { const b = (typeof farmTargets !== 'undefined' && farmTargets && farmTargets._barns) || null; const cb = window.FARM_CFG && window.FARM_CFG.barns; return Array.isArray(b) && b.length ? b : Array.isArray(cb) && cb.length ? cb : DEFAULT_BARNS; }
 function cowMoves(cow) { return (cow.events || []).map((e, i) => ({ ...e, _idx: i })).filter(e => e.type === 'move').sort((a, b) => a.date.localeCompare(b.date)); }
 function cowLocation(cow) { const m = cowMoves(cow); return m.length ? m[m.length - 1].to : ''; }
 function calfMoves(calf) { return (calf.moves || []).map((m, i) => ({ ...m, _idx: i })).sort((a, b) => a.date.localeCompare(b.date)); }
