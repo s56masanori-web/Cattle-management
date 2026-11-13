@@ -440,6 +440,9 @@ body:not(.is-home) #undo-toast{bottom:calc(76px + env(safe-area-inset-bottom));}
 .view-seg{display:flex;background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:2px;gap:2px;}
 .view-seg button{background:none;border:none;color:var(--muted);font-size:12px;font-weight:700;padding:5px 10px;border-radius:7px;cursor:pointer;white-space:nowrap;}
 .view-seg button.on{background:var(--bg2);color:var(--text);}
+/* 牛舎別ボタンがある農場は、見出し「個体一覧」を省いて3つのボタンを1行に収める */
+html.feat-barnlist .section-header:has(.view-seg) .section-title{display:none;}
+html.feat-barnlist .view-seg button{padding:5px 8px;}
 .adv-box{background:linear-gradient(135deg,#0d1a2e,#101626);border:1px solid #2b4a7a;border-radius:12px;padding:10px 12px;margin-bottom:12px;}
 .adv-head{display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:900;cursor:pointer;color:#93c5fd;}
 .adv-item{background:var(--bg2);border-left:3px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:8px;}
@@ -923,14 +926,13 @@ body:not(.is-home) #undo-toast{bottom:calc(76px + env(safe-area-inset-bottom));}
 <div class="page" id="page-cows">
   <div class="section-header">
     <div class="section-title">個体一覧</div>
-    <div class="view-seg"><button class="on">🐄 カード</button><button onclick="switchTab('herd')">📑 一覧表</button></div>
+    <div class="view-seg"><button class="on">🐄 カード</button><button onclick="switchTab('herd')">📑 一覧表</button><button data-feat="barnlist" onclick="switchTab('barns')">🏠 牛舎別</button></div>
     <div style="display:flex;gap:8px;align-items:center;">
       <div id="cow-count" style="font-size:12px;color:var(--muted);"></div>
       <button class="btn btn-primary" style="font-size:12px;padding:6px 12px;" onclick="openModal('modal-new-cow')">＋ 新規導入</button>
     </div>
   </div>
   <!-- 品種・状態の絞り込みは1行ずつ。入りきらない分は横にスライド -->
-  <div id="barn-board" data-feat="barnlist"></div>
   <div id="cow-breed-summary" class="chip-scroll" style="margin-bottom:8px;"></div>
   <div id="cow-status-summary" class="chip-scroll" style="margin-bottom:12px;"></div>
   <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
@@ -1420,10 +1422,17 @@ body:not(.is-home) #undo-toast{bottom:calc(76px + env(safe-area-inset-bottom));}
 </div>
 
 <!-- STATS -->
+<!-- 🏠 牛舎別（牛群リスト）：個体タブの3つ目の見方。長島さん用（features.barnList） -->
+<div class="page" id="page-barns">
+  <div class="section-header"><div class="section-title">牛舎別</div>
+    <div class="view-seg"><button onclick="switchTab('cows')">🐄 カード</button><button onclick="switchTab('herd')">📑 一覧表</button><button class="on">🏠 牛舎別</button></div></div>
+  <div id="barn-board"></div>
+</div>
+
 <!-- 一覧（並び替え・保存リスト・タグ） -->
 <div class="page" id="page-herd">
   <div class="section-header"><div class="section-title">個体一覧</div>
-    <div class="view-seg"><button onclick="switchTab('cows')">🐄 カード</button><button class="on">📑 一覧表</button></div></div>
+    <div class="view-seg"><button onclick="switchTab('cows')">🐄 カード</button><button class="on">📑 一覧表</button><button data-feat="barnlist" onclick="switchTab('barns')">🏠 牛舎別</button></div></div>
   <div id="herd-container"></div>
 </div>
 
@@ -11040,8 +11049,10 @@ function openVetTab(cowId) {
 
 // ===== 子牛の性別（去勢）と除角の表示 =====
 function calfSexText(c) { return c && c.sex === '雄' && c.castrated ? '去勢' : (c && c.sex) || ''; }
-function calfFlagChips(c) {
-  const sx = c.sex === '雄' ? (c.castrated ? ['♂ 去勢', '#93c5fd'] : ['♂ 雄', '#60a5fa']) : c.sex === '雌' ? ['♀ 雌', '#f472b6'] : null;
+// 性別の記号：去勢済みの♂は記号の代わりに「去勢」（記号と文字の2か所に出さない）
+function calfSexMark(c) { return !c || !c.sex ? '' : c.sex === '雄' ? (c.castrated && window.FARM_FEAT && FARM_FEAT.calfFlags ? '去勢' : '♂') : '♀'; }
+function calfFlagChips(c, withSex) {
+  const sx = !withSex ? null : c.sex === '雄' ? (c.castrated ? ['去勢', '#93c5fd'] : ['♂', '#60a5fa']) : c.sex === '雌' ? ['♀', '#f472b6'] : null;
   return (sx ? `<span style="font-size:11px;font-weight:800;color:${sx[1]};border:1px solid ${sx[1]};padding:0 6px;border-radius:5px;">${sx[0]}</span>` : '') +
     (c.dehorned ? '<span style="font-size:11px;font-weight:800;color:#4ade80;border:1px solid #4ade80;padding:0 6px;border-radius:5px;">✂ 除角済</span>' : '');
 }
@@ -11065,7 +11076,7 @@ function renderBarnBoard() {
     if (x.kind === 'cow') { const c = x.c; let st = ''; try { st = cowDisplayStatus(c).label; } catch (e) {}
       return `<div onclick="showCowDetail('${E(c.id)}')" style="display:flex;gap:8px;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;"><b style="min-width:60px;">${E(c.id)}</b><span style="flex:1;">${E(c.name || '')}</span><span style="color:var(--muted);font-size:11px;">${E(st)}${c.dueDate && c.status === 'pregnant' ? ' 予定' + fmtDateShort(c.dueDate) : ''}</span></div>`; }
     const c = x.c, mo = c.dob ? Math.floor(diffDays(td, c.dob) / 30.4) : null;
-    return `<div onclick="openEditCalfModal('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;"><b style="min-width:60px;">${E(c.earTagId || '')}</b><span style="flex:1;display:flex;gap:5px;flex-wrap:wrap;">${calfFlagChips(c)}</span><span style="color:var(--muted);font-size:11px;">${mo !== null ? mo + 'か月' : ''}</span></div>`;
+    return `<div onclick="openEditCalfModal('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;"><b style="min-width:60px;">${E(c.earTagId || '')}</b><span style="flex:1;display:flex;gap:5px;flex-wrap:wrap;">${calfFlagChips(c, true)}</span><span style="color:var(--muted);font-size:11px;">${mo !== null ? mo + 'か月' : ''}</span></div>`;
   };
   box.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden;">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;background:var(--bg3);"><b style="font-size:13px;">🏠 牛群リスト</b><span style="font-size:12px;color:var(--muted);">在籍 ${total}頭</span></div>
@@ -15847,9 +15858,9 @@ function switchTab(name) {
   try { bbSync(name); } catch (e) {}
   // 個体の「選んでリストに」は、ほかの画面に移ったら終わる
   if (name !== 'cows' && typeof _cowPick !== 'undefined' && _cowPick) { _cowPick = null; try { renderCowPickBar(); } catch (e) {} }
-  const names = ['today','preg','cows','calves','retired','stats','semen','history','fattening','insembook','collection','calc','calendar','herd','vet','check','annual'];
+  const names = ['today','preg','cows','calves','retired','stats','semen','history','fattening','insembook','collection','calc','calendar','herd','barns','vet','check','annual'];
   // ボタンが統合された画面は、親のボタンを光らせる（一覧表→個体、詳細成績→年間まとめ、計算→カレンダー）
-  const navOf = { herd: 'cows', calc: 'calendar' }[name] || name;
+  const navOf = { herd: 'cows', barns: 'cows', calc: 'calendar' }[name] || name;
   names.forEach(n => {
     const btn = document.getElementById(`gnav-${n}`);
     if (btn) btn.classList.toggle('active', n===navOf);
@@ -15873,6 +15884,7 @@ function switchTab(name) {
   if (name==='annual') renderAnnual();
   if (name==='check') renderDataCheck();
   if (name==='herd' && typeof renderHerdList==='function') renderHerdList();
+  if (name==='barns') renderBarnBoard();
   if (name==='vet' && typeof openVetTab==='function') openVetTab();
   if (name==='calc') { const el=document.getElementById('calc-date'); if(el&&!el.value) el.value=today(); runCalc(); }
   if (name==='history') renderHistory();
@@ -24610,7 +24622,7 @@ function renderCalves() {
             lastM = m;
             const ds = c.donor ? (c.donor + (c.sire ? ' × ' + c.sire : '')) : (embryoDonorSire(c.embryoNo) || '');
             const sexC = c.sex === '雄' ? '#60a5fa' : c.sex === '雌' ? '#f472b6' : 'var(--muted)';
-            const sexT = c.sex === '雄' ? (c.castrated ? '♂去' : '♂') : c.sex === '雌' ? '♀' : '？';
+            const sexT = c.sex === '雄' ? (c.castrated ? '去勢' : '♂') : c.sex === '雌' ? '♀' : '？';
             const tag = c.earTagId || (c.nationalId ? String(c.nationalId) : '');
             return head + '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);">'+
               '<div style="width:44px;flex-shrink:0;font-size:11px;color:var(--muted);font-family:\'JetBrains Mono\',monospace;">'+esc(fmtDateShort(c.dob))+'</div>'+
@@ -24781,7 +24793,7 @@ function renderCalves() {
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:8px;">
-            ${calf.sex ? `<span style="font-size:18px;">${calf.sex==='雄'?'♂':'♀'}</span>` : ''}
+            ${calf.sex ? (calfSexMark(calf) === '去勢' ? `<span style="font-size:12px;font-weight:800;color:#93c5fd;">去勢</span>` : `<span style="font-size:18px;">${calf.sex==='雄'?'♂':'♀'}</span>`) : ''}
             ${calf.breed ? `<span style="background:${bc.bg};border:1px solid ${bc.border};color:${bc.color};font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;">${calf.breed}</span>` : ''}
             <span id="calf-chev-${calf.id}" style="color:var(--muted);font-size:14px;transition:transform .2s;">▼</span>
           </div>
@@ -25372,7 +25384,7 @@ function recordCalfDeath(id) {
   document.getElementById('calf-death-id').value = id;
   document.getElementById('calf-death-info').innerHTML =
     `母牛: <strong>${calf.damId} ${damName}</strong><br>生年月日: ${fmtDate(calf.dob)||'不明'}` +
-    (calf.sex ? ` / ${calf.sex === '雄' ? '♂' : '♀'} ${calfSexText(calf)}` : '') +
+    (calf.sex ? ` / ${calfSexMark(calf) === '去勢' ? '去勢' : (calf.sex === '雄' ? '♂ ' : '♀ ') + calf.sex}` : '') +
     (calf.sire ? ` / 父: ${calf.sire}` : '');  document.getElementById('calf-death-date').value = today();
   document.getElementById('calf-death-memo').value = '';
   openModal('modal-calf-death');
@@ -30391,7 +30403,7 @@ function renderRetiredList() {
         <div>死亡日: <strong style="color:var(--text);">${fmtDate(calf.deathDate)}</strong></div>
         <div>生年月日: <strong style="color:var(--text);">${fmtDate(calf.dob)}</strong></div>
         <div>母: <strong style="color:var(--text);">${damName}</strong></div>
-        ${calf.sex?`<div>性別: <strong style="color:var(--text);">${calf.sex}</strong></div>`:''}
+        ${calf.sex?`<div>性別: <strong style="color:var(--text);">${calfSexMark(calf) === '去勢' ? '去勢' : calf.sex}</strong></div>`:''}
         ${calf.deathMemo?`<div style="grid-column:1/-1;">死亡理由: <strong style="color:var(--warn);">${calf.deathMemo}</strong></div>`:''}
         ${calf.memo&&calf.memo!==calf.deathMemo?`<div style="grid-column:1/-1;">メモ: <strong style="color:var(--info);">${calf.memo}</strong></div>`:''}
       </div>
