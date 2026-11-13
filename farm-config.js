@@ -35,9 +35,11 @@ window.FARM_CONFIG = {
     '住　所　中川郡池田町字千代田141-3',
     '氏　名　長島　正典　　　㊞'
   ],
-  // 使わない機能：移植証明書は出さない。薬品管理ツールは使わない
+  // 使わない機能：移植証明書・外部授精簿は出さない。薬品管理ツールは使わない
   // 薬は繁殖管理の「薬の記録」に入れる。牛群リストと、子牛の去勢・除角の表示を使う
-  features: { etCert: false, vetTool: false, barnList: true, calfFlags: true },
+  features: { etCert: false, vetTool: false, barnList: true, calfFlags: true, extInsem: false },
+  // 子牛の予定：生まれて何日目にタスクを出すか（除角は生後2週間。去勢は日数が決まったら castrate: 日数 を足す）
+  calfTasks: { dehorn: 14 },
   // 牛群（ファームノートと同じ並び）
   barns: ['繁殖牛舎', '子牛牛舎', '屋外牛舎A', '屋外牛舎B', '多目的牛舎A', '多目的牛舎B', '多目的牛舎C', '去勢牛舎', '育成牛舎', '育成肥育牛舎',
     '肥育牛マスA', '肥育牛マスB', '肥育牛マスC', '肥育牛マスD', '肥育牛マスE'],
