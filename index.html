@@ -83,9 +83,13 @@
   // vetTool：小原家畜診療所の薬品管理ツールを埋め込むか。ほかの農場は、繁殖管理の中の「薬の記録」を使う
   window.FARM_FEAT = Object.assign({ etCert: true, vetTool: (cfg.farmId || '') === 'obara' }, cfg.features || {});
   if (window.FARM_FEAT.etCert === false) document.documentElement.classList.add('no-etcert');
+  // barnList：個体タブの上に牛群ごとの頭数を出す。calfFlags：子牛の去勢・除角を記録して表示する
+  if (window.FARM_FEAT.barnList) document.documentElement.classList.add('feat-barnlist');
+  if (window.FARM_FEAT.calfFlags) document.documentElement.classList.add('feat-calfflags');
 })();
 </script>
-<style>html.no-etcert [data-feat="etcert"], html.no-etcert label:has(> .et-cert-check), html.no-etcert .et-cert-check { display: none !important; }</style>
+<style>html.no-etcert [data-feat="etcert"], html.no-etcert label:has(> .et-cert-check), html.no-etcert .et-cert-check { display: none !important; }
+[data-feat="calfflags"], [data-feat="barnlist"] { display: none !important; } html.feat-calfflags [data-feat="calfflags"], html.feat-barnlist [data-feat="barnlist"] { display: revert !important; } html.feat-calfflags .lf-row[data-feat="calfflags"] { display: flex !important; }</style>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap');
 :root{--bg:#0f1117;--bg2:#171b26;--bg3:#1e2333;--border:#2a3050;--accent:#4ade80;--accent2:#22c55e;--warn:#f59e0b;--danger:#ef4444;--info:#60a5fa;--purple:#a78bfa;--text:#e2e8f0;--muted:#64748b;--card:#1a1f2e;}
@@ -926,6 +930,7 @@ body:not(.is-home) #undo-toast{bottom:calc(76px + env(safe-area-inset-bottom));}
     </div>
   </div>
   <!-- 品種・状態の絞り込みは1行ずつ。入りきらない分は横にスライド -->
+  <div id="barn-board" data-feat="barnlist"></div>
   <div id="cow-breed-summary" class="chip-scroll" style="margin-bottom:8px;"></div>
   <div id="cow-status-summary" class="chip-scroll" style="margin-bottom:12px;"></div>
   <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
@@ -1088,6 +1093,13 @@ body:not(.is-home) #undo-toast{bottom:calc(76px + env(safe-area-inset-bottom));}
             <option value="雄">♂ 雄</option>
             <option value="雌">♀ 雌</option>
           </select>
+        </div>
+      </div>
+      <div class="lf-row" data-feat="calfflags">
+        <span class="lf-label">✂ 処置</span>
+        <div class="lf-val" style="gap:14px;">
+          <label style="display:flex;align-items:center;gap:5px;font-size:14px;"><input type="checkbox" id="calf-castrated" style="width:20px;height:20px;"> 去勢済</label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:14px;"><input type="checkbox" id="calf-dehorned" style="width:20px;height:20px;"> 除角済</label>
         </div>
       </div>
       <div class="lf-row">
@@ -6008,6 +6020,7 @@ function renderCowList() {
   }
 
   document.getElementById('cow-count').textContent = `${filtered.length}頭`;
+  try { renderBarnBoard(); } catch (e) { console.error('barnBoard', e); }
   { let gb = document.getElementById('gen-sort-bar');
     if (sortKey && sortKey.startsWith('gen_')) {
       if (!gb) { gb = document.createElement('div'); gb.id = 'gen-sort-bar'; const lc = document.getElementById('cow-list-container'); lc.parentNode.insertBefore(gb, lc); }
@@ -11025,6 +11038,45 @@ function openVetTab(cowId) {
   if (hint) hint.innerHTML = cowId ? `<div style="background:#0a1a2a;border:1px solid var(--info);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px;">📝 <b>${_stEsc(cowId)} ${_stEsc(cowDisplayName(cowId) || '')}</b> の治療を、下の薬品管理で記録してください</div>` : '';
 }
 
+// ===== 子牛の性別（去勢）と除角の表示 =====
+function calfSexText(c) { return c && c.sex === '雄' && c.castrated ? '去勢' : (c && c.sex) || ''; }
+function calfFlagChips(c) {
+  const sx = c.sex === '雄' ? (c.castrated ? ['♂ 去勢', '#93c5fd'] : ['♂ 雄', '#60a5fa']) : c.sex === '雌' ? ['♀ 雌', '#f472b6'] : null;
+  return (sx ? `<span style="font-size:11px;font-weight:800;color:${sx[1]};border:1px solid ${sx[1]};padding:0 6px;border-radius:5px;">${sx[0]}</span>` : '') +
+    (c.dehorned ? '<span style="font-size:11px;font-weight:800;color:#4ade80;border:1px solid #4ade80;padding:0 6px;border-radius:5px;">✂ 除角済</span>' : '');
+}
+// ===== 🏠 牛群リスト：どの牛舎に何頭いるか（ファームノートの牛群リストと同じ見え方） =====
+let _barnOpen = null;
+function _barnMembers() {
+  const m = {};
+  const add = (b, x) => { (m[b] = m[b] || []).push(x); };
+  cows.forEach(c => add(cowLocation(c) || '', { kind: 'cow', c }));
+  calves.forEach(c => { if (c.status === 'dead' || cows.some(x => x.id === c.earTagId)) return; add(calfLocation(c) || '', { kind: 'calf', c }); });
+  return m;
+}
+function renderBarnBoard() {
+  const box = document.getElementById('barn-board'); if (!box) return;
+  if (!(window.FARM_FEAT && FARM_FEAT.barnList)) { box.innerHTML = ''; return; }
+  const m = _barnMembers(), E = _stEsc, td = today();
+  const names = [...getBarns(), ...Object.keys(m).filter(b => b && !getBarns().includes(b))];
+  if ((m[''] || []).length) names.push('');
+  const total = Object.values(m).reduce((n, l) => n + l.length, 0);
+  const row = x => {
+    if (x.kind === 'cow') { const c = x.c; let st = ''; try { st = cowDisplayStatus(c).label; } catch (e) {}
+      return `<div onclick="showCowDetail('${E(c.id)}')" style="display:flex;gap:8px;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;"><b style="min-width:60px;">${E(c.id)}</b><span style="flex:1;">${E(c.name || '')}</span><span style="color:var(--muted);font-size:11px;">${E(st)}${c.dueDate && c.status === 'pregnant' ? ' 予定' + fmtDateShort(c.dueDate) : ''}</span></div>`; }
+    const c = x.c, mo = c.dob ? Math.floor(diffDays(td, c.dob) / 30.4) : null;
+    return `<div onclick="openEditCalfModal('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;"><b style="min-width:60px;">${E(c.earTagId || '')}</b><span style="flex:1;display:flex;gap:5px;flex-wrap:wrap;">${calfFlagChips(c)}</span><span style="color:var(--muted);font-size:11px;">${mo !== null ? mo + 'か月' : ''}</span></div>`;
+  };
+  box.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;background:var(--bg3);"><b style="font-size:13px;">🏠 牛群リスト</b><span style="font-size:12px;color:var(--muted);">在籍 ${total}頭</span></div>
+    ${names.map(b => { const l = m[b] || [], open = _barnOpen === b;
+      return `<div onclick="_barnOpen=${open ? 'null' : `'${E(b)}'`};renderBarnBoard();" style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-top:1px solid var(--border);cursor:pointer;${open ? 'background:rgba(96,165,250,.08);' : ''}">
+          <span style="font-size:14px;">${open ? '▾' : '▸'} ${b ? E(b) : '<span style="color:var(--muted);">牛群なし</span>'}</span>
+          <span style="min-width:30px;text-align:center;font-size:12px;font-weight:800;padding:2px 9px;border-radius:12px;background:${l.length ? '#65a30d' : 'var(--bg3)'};color:${l.length ? '#fff' : 'var(--muted)'};">${l.length}</span></div>
+        ${open ? `<div style="padding:0 12px 6px;">${l.length ? l.sort((a, z) => String(a.kind === 'cow' ? a.c.id : a.c.earTagId).localeCompare(String(z.kind === 'cow' ? z.c.id : z.c.earTagId), 'ja', { numeric: true })).map(row).join('') : '<div style="font-size:12px;color:var(--muted);padding:8px 0;">いません</div>'}</div>` : ''}`; }).join('')}
+  </div>`;
+}
+
 // ===== 📥 ファームノートのCSVから取り込む（牛の一覧・状態・牛群・子牛・分娩の履歴・廃用・肥育成績） =====
 // ファームノートの一覧（CSV、Shift-JIS）を何個でもまとめて選ぶ。同じ牛（個体ID）の列は1つにまとめてから振り分ける。
 function _fnDecode(buf) {
@@ -11191,7 +11243,8 @@ function buildFarmnoteImport(texts) {
     return { id: 'fn' + a.fid, earTagId: a.tag, nationalId: a.nat, name: a.name, dob: a.dob, sex: _fnSex(a.sexRaw), breed: _fnBreed(baseTag(a.tag)),
       damId: dam ? dam.id : '', sire: a.sire, maternalSire: dam ? dam.sire : '', maternalGrandSire: dam ? dam.maternalSire : '',
       insemType: /(^|\/)ET(\/|$)/.test(a.tagText) ? 'et' : 'ai', embryoNo: '', donor: '', weight: '',
-      memo: [/去勢/.test(a.sexRaw) ? '去勢' : '', !dam && isCalfTag(a.tag) ? '母:' + baseTag(a.tag) + (a.damName ? '（' + a.damName + '）' : '') : '', 'ファームノートから'].filter(Boolean).join(' ／ '),
+      castrated: /去勢/.test(a.sexRaw), dehorned: a.o['除角済'] === 'YES',
+      memo: [!dam && isCalfTag(a.tag) ? '母:' + baseTag(a.tag) + (a.damName ? '（' + a.damName + '）' : '') : '', 'ファームノートから'].filter(Boolean).join(' ／ '),
       status: moved ? 'moved' : 'active', moves: a.herd ? [{ date: td, to: a.herd, memo: 'ファームノートから' }] : [], fnId: a.fid };
   });
   // ── 肥育成績（出荷日と等級がある牛）
@@ -11228,6 +11281,10 @@ async function runFarmnoteImport(fileList) {
   const calfHave = new Set(calves.map(c => String(c.nationalId || c.earTagId || '')).filter(Boolean));
   const newCows = P.cows.filter(c => !natHave.has(String(c.nationalId)) && !cows.some(x => x.id === c.id));
   const newCalves = P.calves.filter(c => !calfHave.has(String(c.nationalId || c.earTagId)));
+  // すでに入っている子牛にも、ファームノートの去勢・除角を足す
+  let flagUpd = 0;
+  P.calves.forEach(n => { const o = calves.find(c => (n.nationalId && String(c.nationalId) === String(n.nationalId)) || (!n.nationalId && c.earTagId === n.earTagId)); if (!o) return;
+    if (n.castrated && !o.castrated) { o.castrated = true; flagUpd++; } if (n.dehorned && !o.dehorned) { o.dehorned = true; flagUpd++; } });
   const newRet = P.retired.filter(c => !natHave.has(String(c.nationalId)) && !retiredCows.some(x => x.id === c.id));
   const fatHave = new Set(fatteningRecords.map(r => String(r.nationalId || '')));
   const newFat = P.fattening.filter(r => !fatHave.has(String(r.nationalId)));
@@ -11236,7 +11293,7 @@ async function runFarmnoteImport(fileList) {
     `・繁殖牛 ${newCows.length}頭（うち妊娠中 ${preg}頭）\n・分娩の記録 ${newCows.reduce((n, c) => n + c.events.filter(e => e.type === 'calving').length, 0)}件\n` +
     `・子牛・育成・肥育 ${newCalves.filter(c => c.status !== 'dead').length}頭（この2年に死んだ子牛 ${newCalves.filter(c => c.status === 'dead').length}頭）\n` +
     `・廃用・死亡した親牛 ${newRet.length}頭\n・肥育成績 ${newFat.length}頭\n・牛群 ${P.barns.join('、')}\n\n` +
-    (P.cows.length - newCows.length ? `すでに入っている牛 ${P.cows.length - newCows.length}頭は飛ばします。\n` : '') + 'この内容で取り込みますか？';
+    (P.cows.length - newCows.length ? `すでに入っている牛 ${P.cows.length - newCows.length}頭は飛ばします。\n` : '') + (flagUpd ? `すでに入っている子牛に、去勢・除角を${flagUpd}件足します。\n` : '') + 'この内容で取り込みますか？';
   if (!(await appConfirm(msg, { ok: '取り込む' }))) return;
   const newIds = new Set(newCows.map(c => c.id));
   cows.push(...newCows);
@@ -24553,7 +24610,7 @@ function renderCalves() {
             lastM = m;
             const ds = c.donor ? (c.donor + (c.sire ? ' × ' + c.sire : '')) : (embryoDonorSire(c.embryoNo) || '');
             const sexC = c.sex === '雄' ? '#60a5fa' : c.sex === '雌' ? '#f472b6' : 'var(--muted)';
-            const sexT = c.sex === '雄' ? '♂' : c.sex === '雌' ? '♀' : '？';
+            const sexT = c.sex === '雄' ? (c.castrated ? '♂去' : '♂') : c.sex === '雌' ? '♀' : '？';
             const tag = c.earTagId || (c.nationalId ? String(c.nationalId) : '');
             return head + '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);">'+
               '<div style="width:44px;flex-shrink:0;font-size:11px;color:var(--muted);font-family:\'JetBrains Mono\',monospace;">'+esc(fmtDateShort(c.dob))+'</div>'+
@@ -24688,6 +24745,7 @@ function renderCalves() {
               ${calf.name ? `<span style="font-size:14px;font-weight:700;color:var(--text);">${calf.name}</span>` : ''}
               ${calf.earTagId ? `<span style="font-family:'JetBrains Mono',monospace;color:var(--accent);font-weight:700;">${calf.earTagId}</span>` : ''}
               ${calf.nationalId ? `<span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);">${String(calf.nationalId).slice(-5).replace(/(\d{4})(\d)$/, '$1-$2')}</span>` : ''}
+              ${window.FARM_FEAT && FARM_FEAT.calfFlags ? calfFlagChips(calf) : ''}
               <span style="font-size:12px;color:var(--muted);">母: <strong style="color:var(--text);">${calf.damId}${damName?' '+damName:''}</strong>${(()=>{
                 const dm = cows.find(c=>c.id===calf.damId);
                 if(!dm) return '';
@@ -25314,7 +25372,7 @@ function recordCalfDeath(id) {
   document.getElementById('calf-death-id').value = id;
   document.getElementById('calf-death-info').innerHTML =
     `母牛: <strong>${calf.damId} ${damName}</strong><br>生年月日: ${fmtDate(calf.dob)||'不明'}` +
-    (calf.sex ? ` / ${calf.sex === '雄' ? '♂' : '♀'} ${calf.sex}` : '') +
+    (calf.sex ? ` / ${calf.sex === '雄' ? '♂' : '♀'} ${calfSexText(calf)}` : '') +
     (calf.sire ? ` / 父: ${calf.sire}` : '');  document.getElementById('calf-death-date').value = today();
   document.getElementById('calf-death-memo').value = '';
   openModal('modal-calf-death');
@@ -25573,6 +25631,7 @@ function openAddCalf() {
   document.getElementById('calf-maternal-sire').value = '';
   document.getElementById('calf-maternal-grand-sire').value = '';
   document.getElementById('calf-sex').value = '';
+  { const ca = document.getElementById('calf-castrated'), de = document.getElementById('calf-dehorned'); if (ca) ca.checked = false; if (de) de.checked = false; }
   document.getElementById('calf-breed').value = '黒毛';
   clearCalfSize();
   // 仮耳標：生年の年プレフィックス（例: 26-c）まで自動入力。数字部分だけ打てばいい
@@ -25658,6 +25717,7 @@ function openEditCalfModal(id) {
   document.getElementById('calf-maternal-sire').value = calf.maternalSire || '';
   document.getElementById('calf-maternal-grand-sire').value = calf.maternalGrandSire || '';
   document.getElementById('calf-sex').value = calf.sex || '';
+  { const ca = document.getElementById('calf-castrated'), de = document.getElementById('calf-dehorned'); if (ca) ca.checked = !!calf.castrated; if (de) de.checked = !!calf.dehorned; }
   document.getElementById('calf-breed').value = calf.breed || '黒毛';
   if (calf.weight && calf.weight !== '') {
     setCalfSize(String(calf.weight));
@@ -25752,6 +25812,11 @@ async function saveCalf() {
     insemType: document.getElementById('calf-insem-type').value,
     insemDate: document.getElementById('calf-insem-date').value || null,
   };
+  // 去勢・除角（その機能を使う農場だけ）。去勢はオスのときだけ
+  if (window.FARM_FEAT && FARM_FEAT.calfFlags) {
+    data.castrated = data.sex === '雄' && !!(document.getElementById('calf-castrated') || {}).checked;
+    data.dehorned = !!(document.getElementById('calf-dehorned') || {}).checked;
+  }
   // 仮の耳標番号（例: c53）が、過去に使われた別の個体と重複していないか確認する
   // （子牛が個体タブに登録されるとき earTagId がそのまま個体IDになるため、重複すると別牛のデータと混ざる危険がある）
   if (data.earTagId) {
