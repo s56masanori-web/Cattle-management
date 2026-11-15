@@ -11792,8 +11792,28 @@ function openEtShareIn() {
     <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:8px;">獣医さんの「📤 農家に渡す」でコピーしたものを貼り付けてください。受卵牛は個体識別番号で探して授精簿に入れます（新鮮胚・凍結胚の受胎率に使います）。同じ移植がもう入っていれば入れません。</div>
     <textarea id="es-in" placeholder="ここに貼り付け" style="width:100%;height:140px;font-size:11px;font-family:monospace;"></textarea>
     <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="importEtShare()">取り込む</button>
+    <button class="btn btn-secondary" style="width:100%;margin-top:8px;font-size:12px;" onclick="checkEtImport()">🩺 取り込んだ移植の記録を確認する</button>
+    <div id="es-check" style="margin-top:8px;"></div>
   </div>`;
   document.body.appendChild(w);
+}
+// 取り込んだ移植の行が、ストーリー・受胎率にどう入っているかを一覧にする（うまく出ないときの確認用）
+function checkEtImport() {
+  const box = document.getElementById('es-check'); if (!box) return;
+  const rows = [];
+  insemBookRecords.forEach((r, i) => {
+    if (!(r.fromVet || (r.insemType === 'et' && r.d >= '2026-07-01'))) return;
+    const ed = insemBookEdits['dynamic_' + i] || {};
+    const cow = cows.find(c => c.id === r.t) || (retiredCows || []).find(c => c.id === r.t);
+    let st = null; try { st = cow ? buildCowStory(cow.id) : null; } catch (e) {}
+    const ins = st ? (st.insems || []).find(x => x.date === (ed.d || r.d)) : null;
+    const counted = _statsOK(r.d, true);
+    rows.push(`<tr><td>${_stEsc(fmtDateShort(r.d))}</td><td><b>${_stEsc(r.t)}</b>${cow ? '' : ' <span style="color:var(--danger);">牛なし</span>'}</td><td>${_stEsc(r.s || '')}</td><td>${r.pregResult === 'positive' ? '＋' : r.pregResult === 'negative' ? '−' : '待ち'}</td><td>${ins ? (ins.isEt ? 'ET' : 'AI扱い') + '・' + (ins.result || '-') : '<span style="color:var(--danger);">出ない</span>'}</td><td>${counted ? '数える' : '<span style="color:var(--warn);">対象外</span>'}</td><td style="color:var(--warn);">${Object.keys(ed).length ? _stEsc(JSON.stringify(ed)).slice(0, 60) : ''}</td></tr>`);
+  });
+  const sf = _statsFrom(true);
+  box.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">ETを数え始める日：${sf ? fmtDate(sf) : '（設定なし）'}　授精簿の移植の行：${rows.length}行</div>
+    <div style="overflow:auto;max-height:45vh;"><table style="font-size:11px;width:100%;border-collapse:collapse;"><tr style="color:var(--muted);"><td>日</td><td>牛</td><td>胚</td><td>結果</td><td>ストーリー</td><td>受胎率</td><td>修正</td></tr>${rows.join('')}</table></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px;">この画面をスクリーンショットで送ってもらえれば、原因が分かります</div>`;
 }
 function importEtShare(text) {
   let d; try { d = JSON.parse(String(text != null ? text : (document.getElementById('es-in') || {}).value || '').trim()); } catch (e) { appAlert('読み取れませんでした。「📤 農家に渡す」でコピーしたものをそのまま貼り付けてください'); return null; }
@@ -32400,7 +32420,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111511';
+const APP_BUILD = '2026111512';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
