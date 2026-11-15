@@ -52,11 +52,13 @@ window.FARM_CONFIG = {
   // 子牛牛舎以外の牛舎にいる子牛は「移動済み」にする（移動を検討の数に入れない）
   calfBarn: '子牛牛舎',
   // 出さない画面・ボタン：採卵記録、牛の画面の「繁殖履歴」「治療・投薬」タブ（ストーリーにまとめる）、授精簿の移植証・ドナーの列
-  hide: ['collection', 'breedHistory', 'vetTab', 'etCol'],
+  hide: ['collection', 'breedHistory', 'vetTab', 'etCol', 'syncCol'],
   // 産室は使わない：「🏠 産室移動」のタスクを出さない
   sanshitsuTask: false,
   // 色の見分けがつきにくい人向け：授精簿のAI・ETを色ではなく「AI」「ET」の札で見分ける
   colorSafe: true,
+  // タスク画面の上のお知らせと、ホームの「要注意の牛」を、たたんで見出しと頭数だけにする
+  compactAlerts: true,
   // 子牛の予定：生まれて何日目にタスクを出すか（除角は生後2週間。去勢は日数が決まったら castrate: 日数 を足す）
   calfTasks: { dehorn: 14 },
   // 牛群（ファームノートと同じ並び）
