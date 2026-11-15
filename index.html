@@ -3183,10 +3183,61 @@ function cowDisplayName(id) {
 
 // ===== DATA STORE =====
 // localStorage をtry-catchで囲み、ブロックされてもクラッシュしない
+// ★ 2026/11/15：端末（iPhone）の保存場所がいっぱいになると、書き込みが黙って失敗し、
+//   タスクのチェックなどが「画面では付いたのに保存されず、開き直すと外れる」ことがあった。
+//   いっぱいのときは、古いバックアップと変更履歴の古い分を消して書き直す。それでもだめなら赤い表示で知らせる。
+const _HIST_MAX_CHARS = 300000;   // 変更履歴（changeLog）をこの文字数までにする（新しい方を残す）
+function _histCapStr(str) {
+  let L; try { L = JSON.parse(str || '[]'); } catch (e) { return str; }
+  if (!Array.isArray(L)) return str;
+  const lim = new Date(Date.now() - 90 * 86400000).toISOString();
+  L = L.filter(e => e && e.t >= lim);
+  if (L.length > 1500) L = L.slice(-1500);
+  let out = JSON.stringify(L);
+  if (out.length <= _HIST_MAX_CHARS) return out;
+  let n = 0, i = L.length;   // 新しい方から、入るだけ残す
+  while (i > 0 && n + JSON.stringify(L[i - 1]).length + 1 <= _HIST_MAX_CHARS) { n += JSON.stringify(L[i - 1]).length + 1; i--; }
+  return JSON.stringify(L.slice(i));
+}
 const _store = (() => {
   const mem = {};
-  try { localStorage.setItem('_test','1'); localStorage.removeItem('_test'); return localStorage; }
+  try { localStorage.setItem('_test','1'); localStorage.removeItem('_test'); }
   catch(e) { return { getItem: k=>mem[k]||null, setItem: (k,v)=>{mem[k]=v;}, removeItem: k=>{delete mem[k];} }; }
+  const ls = localStorage;
+  const isQuota = e => e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014 || /quota/i.test(e.message || ''));
+  function free(writing) {
+    const rm = [];
+    for (let i = 0; i < ls.length; i++) { const k = ls.key(i); if (/^data_backup_/.test(k)) rm.push(k); }
+    rm.forEach(k => { try { ls.removeItem(k); } catch (e) {} });
+    if (writing !== 'changeLog') { try { const c = ls.getItem('changeLog'); if (c && c.length > 50000) { const L = JSON.parse(c); ls.setItem('changeLog', JSON.stringify(L.slice(Math.floor(L.length / 2)))); } } catch (e) { try { ls.removeItem('changeLog'); } catch (_) {} } }
+  }
+  function showFull() {
+    window._storeFull = true;
+    try { setSyncStatus('error'); } catch (e) {}
+    if (document.getElementById('store-full-banner')) return;
+    const d = document.createElement('div'); d.id = 'store-full-banner';
+    d.style.cssText = 'position:fixed;left:8px;right:8px;top:8px;z-index:99999;background:#7f1d1d;color:#fff;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5;box-shadow:0 4px 16px rgba(0,0,0,.5);';
+    d.innerHTML = '⚠ この端末の保存場所がいっぱいで、いま入れた内容が保存できていません。電波のある所でページを開き直してください。直らないときは千佳さんに連絡してください。 <button onclick="this.parentNode.remove()" style="margin-left:6px;background:#fff;color:#7f1d1d;border:none;border-radius:6px;padding:2px 8px;font-weight:700;">閉じる</button>';
+    (document.body || document.documentElement).appendChild(d);
+  }
+  const st = {
+    getItem: k => ls.getItem(k),
+    removeItem: k => ls.removeItem(k),
+    setItem(k, v) {
+      if (k === 'changeLog') v = _histCapStr(v);
+      try { ls.setItem(k, v); return; } catch (e) { if (!isQuota(e)) throw e; }
+      free(k);
+      try { ls.setItem(k, v); return; } catch (e) { if (!isQuota(e)) throw e; }
+      if (k === 'changeLog') { try { ls.removeItem('changeLog'); } catch (e) {} return; }   // 履歴は消してでも、本体の記録を守る
+      try { ls.removeItem('changeLog'); ls.setItem(k, v); return; } catch (e) {}
+      showFull();
+      console.error('端末の保存場所がいっぱい:', k);
+    }
+  };
+  // 開いたときに、大きくなりすぎた履歴と古いバックアップを片づける
+  try { const c = ls.getItem('changeLog'); if (c && c.length > _HIST_MAX_CHARS) ls.setItem('changeLog', _histCapStr(c)); } catch (e) { try { ls.removeItem('changeLog'); } catch (_) {} }
+  try { for (let i = ls.length - 1; i >= 0; i--) { const k = ls.key(i); if (/^data_backup_v\d+$/.test(k)) { const v = ls.getItem(k); if (v && v.length > 100000) ls.removeItem(k); } } } catch (e) {}   // 昔の版の移行前コピーは消す（クラウドに毎日のバックアップがある）
+  return st;
 })();
 
 // ===== データバージョン管理 =====
@@ -31710,6 +31761,10 @@ function _syncLegacyMerge(k, rv, lv) {
 }
 // クラウドの値と手元の値をまとめる（base があれば3方向、なければ前からのやり方）
 function _syncReconcile(k, rv, lv) {
+  if (k === 'changeLog') { const r = _syncReconcile0(k, rv, lv); return r == null ? r : _histCapStr(r); }
+  return _syncReconcile0(k, rv, lv);
+}
+function _syncReconcile0(k, rv, lv) {
   if (lv == null || lv === rv) return rv;
   if (_syncedStr[k] !== undefined && lv === _syncedStr[k]) return rv;     // 手元はそろえた時のまま → クラウドの方
   const base = _syncBase[k];
