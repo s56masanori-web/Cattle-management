@@ -88,10 +88,13 @@
   if (window.FARM_FEAT.calfFlags) document.documentElement.classList.add('feat-calfflags');
   // extInsem:false → 授精簿の「🚗 外部授精簿」（他農家への移植の記録）を出さない
   if (window.FARM_FEAT.extInsem === false) document.documentElement.classList.add('no-extinsem');
+  (Array.isArray(window.FARM_CFG && window.FARM_CFG.hide) ? window.FARM_CFG.hide : []).forEach(k => document.documentElement.classList.add('hx-' + k));
 })();
 </script>
 <style>html.no-extinsem div:has(> #ibsub-ext) { display: none !important; }
 html body:not(.is-home) #barn-board.home-only { display: none !important; }
+html.hx-collection #gnav-collection { display: none !important; }
+html.hx-etCol #insembook-table th:nth-child(11), html.hx-etCol #insembook-table th:nth-child(12), html.hx-etCol #insembook-tbody td:nth-child(11), html.hx-etCol #insembook-tbody td:nth-child(12) { display: none !important; }
 html:not(.no-etcert) .only-noetcert { display: none !important; }
 html.no-etcert [data-feat="etcert"], html.no-etcert label:has(> .et-cert-check), html.no-etcert .et-cert-check { display: none !important; }
 [data-feat="calfflags"], [data-feat="barnlist"] { display: none !important; } html.feat-calfflags [data-feat="calfflags"], html.feat-barnlist [data-feat="barnlist"] { display: revert !important; } html.feat-calfflags .lf-row[data-feat="calfflags"] { display: flex !important; }</style>
@@ -6898,7 +6901,11 @@ function cowAbortWait(cow) {
 }
 
 // 既存の呼び出し元（削除・修正後の再描画など）はすべてここを通る
+// 設定 hide: [...] で、その農場で使わない画面・ボタンを出さない（例：長島さん ['collection','breedHistory','vetTab','etCol']）
+function _hx(k) { return !!(window.FARM_CFG && Array.isArray(FARM_CFG.hide) && FARM_CFG.hide.includes(k)); }
 function showCowDetail(cowId) {
+  if ((_stMode === 'table' && _hx('breedHistory')) || (_stMode === 'med' && _hx('vetTab'))) _stMode = 'story';
+  if (_stFilter === 'collect' && _hx('collection')) _stFilter = 'all';
   window._openCalfStoryId = null;
   const _isRet = !cows.find(c => c.id === cowId);
   if (_isRet && !(typeof retiredCows !== 'undefined' && retiredCows.find(c => c.id === cowId))) return;
@@ -7606,15 +7613,15 @@ function showCowStory(cowId) {
     ${pendingHTML}
     <div class="st-modes">
       <button class="${_stMode === 'story' ? 'on' : ''}" onclick="_stMode='story';showCowDetail('${esc(cowId)}')">📖 ストーリー</button>
-      <button class="${_stMode === 'table' ? 'on' : ''}" onclick="_stMode='table';showCowDetail('${esc(cowId)}')">📋 繁殖履歴</button>
-      <button class="${_stMode === 'med' ? 'on' : ''}" onclick="_stMode='med';showCowDetail('${esc(cowId)}')">💊 治療・投薬</button>
+      ${_hx('breedHistory') ? '' : `<button class="${_stMode === 'table' ? 'on' : ''}" onclick="_stMode='table';showCowDetail('${esc(cowId)}')">📋 繁殖履歴</button>`}
+      ${_hx('vetTab') ? '' : `<button class="${_stMode === 'med' ? 'on' : ''}" onclick="_stMode='med';showCowDetail('${esc(cowId)}')">💊 治療・投薬</button>`}
       <button class="${_stMode === 'hist' ? 'on' : ''}" onclick="_stMode='hist';showCowDetail('${esc(cowId)}')">🕘 変更履歴</button>
     </div>
     ${_stMode === 'hist' ? histListHTML('cow', cowId)
     : _stMode === 'table' ? buildBreedingTableHTML(cowId, _data)
     : _stMode === 'med' ? (typeof buildCowMedHTML === 'function' ? buildCowMedHTML(cowId) : '')
     : `<div class="st-chips">
-      ${filters.map(([k, l]) => `<button class="st-chip ${_stFilter === k ? 'on' : ''}" onclick="_stFilter='${k}';showCowDetail('${esc(cowId)}')">${l}</button>`).join('')}
+      ${filters.filter(([k]) => !(k === 'collect' && _hx('collection'))).map(([k, l]) => `<button class="st-chip ${_stFilter === k ? 'on' : ''}" onclick="_stFilter='${k}';showCowDetail('${esc(cowId)}')">${l}</button>`).join('')}
     </div>
     ${storyRows || '<div style="color:var(--muted);font-size:12px;text-align:center;padding:16px 0;">記録はありません</div>'}`}
     ${isRet ? '' : `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
@@ -25390,7 +25397,7 @@ function renderCalves() {
             <button class="calf-action-btn" data-calfid="${calf.id}" data-action="keep" style="background:#0a2a0a;border:1px solid var(--accent2);color:var(--accent);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">🌟 繁殖候補として保留</button>
           ` : ''}
           ${calf.status === 'active' && !calf.deathDate ? `
-            <button class="calf-action-btn" data-calfid="${calf.id}" data-action="moved" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">✓ 移動済みにする</button>
+            <button class="calf-action-btn" data-calfid="${calf.id}" data-action="moved" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">${window.FARM_CFG && FARM_CFG.calfBarn ? '🏠 移動' : '✓ 移動済みにする'}</button>
           ` : ''}
           ${(calf.status === 'kept' || calf.isBreedingCandidate) ? `
             ${cows.some(c=>c.id===calf.earTagId)
@@ -25401,7 +25408,7 @@ function renderCalves() {
             }
           ` : ''}
           ${calf.status === 'kept' && !calf.deathDate ? `
-            <button class="calf-action-btn" data-calfid="${calf.id}" data-action="moved" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">✓ 移動済みにする</button>
+            <button class="calf-action-btn" data-calfid="${calf.id}" data-action="moved" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">${window.FARM_CFG && FARM_CFG.calfBarn ? '🏠 移動' : '✓ 移動済みにする'}</button>
             <button class="calf-action-btn" data-calfid="${calf.id}" data-action="active" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">保留を解除</button>
           ` : ''}
           ${calf.status === 'moved' && calf.isBreedingCandidate ? `
@@ -31085,6 +31092,7 @@ document.addEventListener('click', function(e) {
     const id = calfBtn.dataset.calfid;
     const action = calfBtn.dataset.action;
     if (action === 'keep')    { setCalfStatus(id, 'kept'); return; }
+    if (action === 'moved' && window.FARM_CFG && FARM_CFG.calfBarn) { openMoveDialog('calf', id, null); return; }   // 牛舎で移動済みが決まる農場：移動先の牛舎を選ぶだけ
     if (action === 'moved')   { openMoveDialog('calf', id, '育成舎①'); if (window._mv) window._mv.forceMoved = true; return; }   // このボタンから記録したら、移動先にかかわらず移動済みにする   // 日付・移動先・体格も残す
     if (action === 'active')  { setCalfStatus(id, 'active'); return; }
     if (action === 'delete')  { confirmDeleteCalf(id); return; }
@@ -31300,6 +31308,7 @@ try {
           <th style="padding:8px 6px;text-align:center;color:var(--muted);">反映</th>
           <th style="padding:8px 6px;text-align:center;color:var(--purple);">授精証</th>
           <th style="padding:8px 6px;text-align:center;color:var(--info);">移植証</th>
+          <th style="padding:8px 6px;text-align:center;color:var(--muted);font-size:10px;">ドナー</th>
           <th style="padding:8px 6px;text-align:center;color:var(--danger);">削除</th>
           <th id="insembook-preg-th" style="display:none;padding:8px 6px;text-align:center;color:var(--accent);">🔬 妊鑑</th>
         </tr>
