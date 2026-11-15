@@ -2018,6 +2018,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
       <div class="form-group">
         <label>保管場所</label>
         <input type="text" id="semen-location" placeholder="例: タンク1">
+        <div id="semen-canisters" style="display:none;margin-top:8px;"></div>
       </div>
       <div class="form-group">
         <label>メモ</label>
@@ -27589,6 +27590,7 @@ function renderSemen() {
             ${s.breed ? `<span style="font-size:11px;font-weight:700;background:${s.breed==='褐毛'?'#3b0000':s.breed==='黒毛'?'#111827':'#1e293b'};border:1px solid ${s.breed==='褐毛'?'#7f1d1d':s.breed==='黒毛'?'#374151':'#334155'};color:${s.breed==='褐毛'?'#fca5a5':s.breed==='黒毛'?'#d1d5db':'#94a3b8'};padding:1px 7px;border-radius:4px;">${s.breed==='褐毛'?'🟥':'⬛'} ${s.breed}</span>` : ''}
           </div>
           ${s.lot?`<div style="font-size:11px;color:var(--muted);">ロット: ${s.lot}</div>`:''}
+          ${_canList().length && (s.canisters || []).length ? `<div style="display:flex;align-items:center;gap:5px;margin-top:4px;flex-wrap:wrap;font-size:11px;color:var(--muted);">${s.canisters.map(c => `<span style="display:inline-flex;align-items:center;gap:3px;">${_canDot(c, 14)}${c}</span>`).join('')}</div>` : ''}
         </div>
         <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
           <div style="text-align:right;">
@@ -27681,6 +27683,20 @@ function deleteInventoryHistory(kind, id, idx) {
   openModal('modal-confirm');
 }
 
+// ===== キャニスターの色（設定 canisters: ['赤','青',…]）：精液がどの色のキャニスターに入っているか。いくつでも選べる =====
+const _CAN_COLOR = { 赤: '#ef4444', 青: '#3b82f6', 黄: '#facc15', 緑: '#22c55e', 黒: '#111111', 白: '#ffffff', 橙: '#f97316', 紫: '#a855f7', 桃: '#f472b6', 茶: '#92400e', 灰: '#9ca3af' };
+let _canSel = [];
+function _canList() { return (window.FARM_CFG && Array.isArray(FARM_CFG.canisters)) ? FARM_CFG.canisters : []; }
+function _canDot(c, size) { const col = _CAN_COLOR[c] || '#888'; return `<span title="${c}" style="display:inline-block;width:${size}px;height:${size}px;border-radius:50%;background:${col};border:2px solid ${c === '黒' ? '#9ca3af' : 'rgba(255,255,255,.35)'};vertical-align:middle;flex-shrink:0;"></span>`; }
+function _canRender(sel) {
+  const box = document.getElementById('semen-canisters'), L = _canList(); if (!box) return;
+  if (!L.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  _canSel = (sel || []).filter(c => L.includes(c));
+  box.style.display = 'block';
+  box.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:6px;">キャニスターの色（いくつでも選べます）</div><div style="display:flex;gap:6px;flex-wrap:wrap;">` +
+    L.map(c => { const on = _canSel.includes(c); return `<button type="button" onclick="_canToggle('${c}')" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:700;background:${on ? 'rgba(74,222,128,.15)' : 'var(--bg3)'};border:2px solid ${on ? 'var(--accent)' : 'var(--border)'};color:${on ? 'var(--text)' : 'var(--muted)'};">${_canDot(c, 16)}${c}${on ? ' ✓' : ''}</button>`; }).join('') + `</div>`;
+}
+function _canToggle(c) { _canSel = _canSel.includes(c) ? _canSel.filter(x => x !== c) : [..._canSel, c]; const L = _canList(); _canSel.sort((a, b) => L.indexOf(a) - L.indexOf(b)); _canRender(_canSel); }
 function openAddSemen() {
   document.getElementById('semen-edit-id').value = '';
   document.getElementById('semen-edit-title').textContent = '💉 精液を登録';
@@ -27695,6 +27711,7 @@ function openAddSemen() {
   document.getElementById('semen-sire-cert').value = '';
   document.getElementById('semen-reg-org').value = '';
   document.getElementById('semen-reg-no').value = '';
+  _canRender([]);
   openModal('modal-semen-edit');
 }
 
@@ -27715,6 +27732,7 @@ function openEditSemen(id) {
   document.getElementById('semen-sire-cert').value = s.sireCert || '';
   document.getElementById('semen-reg-org').value = s.regOrg || regOrgByBreed(s.breed);
   document.getElementById('semen-reg-no').value = s.regNo || '';
+  _canRender(s.canisters || []);
   openModal('modal-semen-edit');
 }
 
@@ -27797,6 +27815,7 @@ function saveSemen() {
     regOrg: document.getElementById('semen-reg-org').value.trim(),
     regNo: document.getElementById('semen-reg-no').value.trim(),
   };
+  if (_canList().length) data.canisters = _canSel.slice();
   let newItem;
   const oldName = id ? semenInventory.find(s=>s.id===id)?.name : null;
   if (id) {

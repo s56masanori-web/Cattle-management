@@ -39,6 +39,8 @@ window.FARM_CONFIG = {
   // 薬は繁殖管理の「薬の記録」に入れる。牛群リストと、子牛の去勢・除角の表示を使う
   features: { etCert: false, vetTool: false, barnList: true, calfFlags: true, extInsem: false, calfYear: true },
   // calfYear：子牛タブは開いたとき今年度（4月〜）生まれだけを出す。年度は選び直せる
+  // 窒素タンクのキャニスターの色（精液の保管場所で選べる。いくつでも選べる）
+  canisters: ['赤', '青', '黄', '緑', '黒', '白'],
   // 子牛の予定：生まれて何日目にタスクを出すか（除角は生後2週間。去勢は日数が決まったら castrate: 日数 を足す）
   calfTasks: { dehorn: 14 },
   // 牛群（ファームノートと同じ並び）
