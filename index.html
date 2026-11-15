@@ -982,8 +982,6 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
     <button id="calf-filter-moved" onclick="setCalfFilter('moved')" style="background:var(--bg3);color:var(--muted);border:1px solid var(--border);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">移動済み</button>
     <button id="calf-filter-certTodo" onclick="setCalfFilter('certTodo')" style="background:var(--bg3);color:var(--muted);border:1px solid var(--border);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">📄 証明書まだ</button>
     <button onclick="markCalfCertIssued()" style="background:#1a0a2a;border:1px dashed var(--purple);color:var(--purple);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">✅ チェックした子牛を証明書発行済みに</button>
-    <button data-feat="calfflags" onclick="markCheckedCalvesFlag('dehorned')" style="background:var(--bg3);border:1px dashed #4ade80;color:#4ade80;font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">✂ チェックした子牛を除角済に</button>
-    <button data-feat="calfflags" onclick="markCheckedCalvesFlag('castrated')" style="background:var(--bg3);border:1px dashed #93c5fd;color:#93c5fd;font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">チェックした♂を去勢済に</button>
     <button onclick="goToInsemBookForCalves()" style="background:#1a0a2a;border:1px solid var(--purple);color:var(--purple);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">📄 授精証明書を発行</button>
     <button onclick="printCalvesList()" style="background:#0d2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">🖨 リストを印刷</button>
   </div>
@@ -3836,6 +3834,7 @@ function save() {
   try { cows.forEach(normalizePregEvents); } catch (e) { console.error('normalizePregEvents', e); }
   try { syncPregStages(); } catch (e) { console.error('syncPregStages', e); }
   try { syncCalfFlagTasks(); } catch (e) { console.error('syncCalfFlagTasks', e); }
+  try { repairSemenOpening(); } catch (e) { console.error('repairSemenOpening', e); }
   try { if (typeof _undoCheckOnSave === 'function') _undoCheckOnSave(); } catch (e) {}
   try { if (typeof _histOnSave === 'function') _histOnSave(); } catch (e) { console.error('history', e); }
   try { stampChangedCows(); } catch (e) { console.error('stampChangedCows', e); }
@@ -27710,6 +27709,20 @@ function importSemenShare() {
   document.getElementById('semen-share-modal')?.remove();
   appAlert(`新しく${add}頭分を登録しました${fill ? `（すでにあった${fill}頭分は空欄を埋めました）` : ''}。在庫は0本なので、本数を入れてください`);
 }
+// 入庫の記録がないのに在庫本数だけ入っている精液（在庫を手で入れた・取り込んだ）→ 最初の本数を「繰越」として履歴に足す
+// （これがないと月別集計の月末在庫がマイナスになる）。入庫の記録がある精液には何もしない
+function repairSemenOpening() {
+  (semenInventory || []).forEach(s => {
+    const h = s.history = s.history || [];
+    if (h.some(e => ['restock', 'carryover', 'selfcollect'].includes(e.type))) return;
+    const out = h.reduce((a, e) => a + (['use', 'transfer', 'discard'].includes(e.type) ? (e.count || 0) : 0), 0);
+    const open = (parseInt(s.stock) || 0) + out;
+    if (open <= 0) return;
+    const first = h.map(e => e.date).filter(Boolean).sort()[0];
+    const d = first && first < today() ? first : today();
+    h.unshift({ date: d, type: 'carryover', count: open, memo: '在庫本数を手で入力（最初の本数）' });
+  });
+}
 function saveSemen() {
   const id = document.getElementById('semen-edit-id').value;
   const name = document.getElementById('semen-name').value.trim();
@@ -27733,7 +27746,12 @@ function saveSemen() {
   const oldName = id ? semenInventory.find(s=>s.id===id)?.name : null;
   if (id) {
     const s = semenInventory.find(s=>s.id===id);
-    if (s) { Object.assign(s, data); newItem = s; }
+    if (s) {
+      // 在庫本数を手で直したら、その差を「繰越」として履歴に残す（月別集計・月末在庫が合うように）
+      const diff = stock - (parseInt(s.stock) || 0);
+      Object.assign(s, data); newItem = s;
+      if (diff) { s.history = s.history || []; s.history.push({ date: today(), type: 'carryover', count: diff, memo: '在庫本数を手で入力' }); }
+    }
   } else {
     newItem = { id: Math.random().toString(36).slice(2), history: [], ...data };
     if (newItem.stock > 0) {
