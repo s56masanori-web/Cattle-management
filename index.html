@@ -396,7 +396,9 @@ body:not(.is-home) #undo-toast{bottom:calc(76px + env(safe-area-inset-bottom));}
 #app-dialog .ad-ok.danger{background:var(--danger);border-color:var(--danger)!important;color:#fff;}
 /* 元に戻す */
 #undo-toast{position:fixed;left:50%;bottom:18px;transform:translate(-50%,140%);background:#111827;border:1px solid var(--border);color:var(--text);border-radius:12px;padding:10px 12px 10px 16px;display:flex;align-items:center;gap:14px;font-size:13px;z-index:9000;box-shadow:0 6px 24px rgba(0,0,0,.5);transition:transform .25s;max-width:calc(100vw - 32px);}
-#undo-toast.show{transform:translate(-50%,0);}
+#undo-toast:not(.show){opacity:0;visibility:hidden;pointer-events:none;}
+#undo-toast.show{transform:translate(-50%,0);opacity:1;visibility:visible;}
+#undo-toast{transition:transform .25s,opacity .25s,visibility .25s;}
 #undo-toast button{background:var(--accent2);color:#04130a;border:none;border-radius:8px;font-size:13px;font-weight:900;padding:8px 14px;cursor:pointer;white-space:nowrap;}
 /* 今日の要注意 */
 .tw-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:14px;}
@@ -12160,7 +12162,7 @@ function showUndoToast() {
   if (!_undoReady) return;
   let el = document.getElementById('undo-toast');
   if (!el) { el = document.createElement('div'); el.id = 'undo-toast'; document.body.appendChild(el); }
-  el.innerHTML = `<span>🗑 ${_stEsc(_undoReady.label)}</span><button onclick="doUndo()">元に戻す</button><button onclick="hideUndoToast()" aria-label="閉じる" style="background:none;color:var(--muted);padding:4px 6px;font-size:15px;">✕</button>`;
+  el.innerHTML = `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">🗑 ${_stEsc(_undoReady.label)}</span><button onclick="doUndo()">元に戻す</button><button onclick="hideUndoToast()" aria-label="閉じる" style="background:none;color:var(--muted);padding:4px 6px;font-size:15px;">✕</button>`;
   el.classList.add('show'); window._undoShownAt = Date.now();
   clearTimeout(_undoTimer);
   _undoTimer = setTimeout(hideUndoToast, 7000);
@@ -32398,7 +32400,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111503';
+const APP_BUILD = '2026111511';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
