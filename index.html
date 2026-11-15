@@ -24811,7 +24811,6 @@ function renderCalves() {
               ${calf.name ? `<span style="font-size:14px;font-weight:700;color:var(--text);">${calf.name}</span>` : ''}
               ${calf.earTagId ? `<span style="font-family:'JetBrains Mono',monospace;color:var(--accent);font-weight:700;">${calf.earTagId}</span>` : ''}
               ${calf.nationalId ? `<span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);">${String(calf.nationalId).slice(-5).replace(/(\d{4})(\d)$/, '$1-$2')}</span>` : ''}
-              ${window.FARM_FEAT && FARM_FEAT.calfFlags ? calfFlagChips(calf) : ''}
               <span style="font-size:12px;color:var(--muted);">母: <strong style="color:var(--text);">${calf.damId}${damName?' '+damName:''}</strong>${(()=>{
                 const dm = cows.find(c=>c.id===calf.damId);
                 if(!dm) return '';
@@ -24847,6 +24846,7 @@ function renderCalves() {
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:8px;">
+            ${window.FARM_FEAT && FARM_FEAT.calfFlags && calf.dehorned ? `<span style="font-size:10px;font-weight:800;color:#4ade80;border:1px solid #4ade80;padding:0 5px;border-radius:4px;white-space:nowrap;">✂除角済</span>` : ''}
             ${calf.sex ? (calfSexMark(calf) === '去勢' ? `<span style="font-size:12px;font-weight:800;color:#93c5fd;">去勢</span>` : `<span style="font-size:18px;">${calf.sex==='雄'?'♂':'♀'}</span>`) : ''}
             ${calf.breed ? `<span style="background:${bc.bg};border:1px solid ${bc.border};color:${bc.color};font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;">${calf.breed}</span>` : ''}
             <span id="calf-chev-${calf.id}" style="color:var(--muted);font-size:14px;transition:transform .2s;">▼</span>
