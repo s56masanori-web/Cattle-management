@@ -988,7 +988,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
     <button onclick="printCalvesList()" style="background:#0d2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">🖨 リストを印刷</button>
   </div>
   <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-    <span style="font-size:11px;color:var(--muted);">🌟 繁殖候補の年度で絞る:</span>
+    <span id="calf-cand-year-label" style="font-size:11px;color:var(--muted);">🌟 繁殖候補の年度で絞る:</span>
     <select id="calf-cand-year" onchange="renderCalves()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:700;padding:5px 10px;border-radius:8px;cursor:pointer;">
       <option value="all">全年度</option>
     </select>
@@ -24649,7 +24649,21 @@ function renderCalves() {
 
   // 繁殖候補の年度セレクタを組み立て（生年の年度＝R◯で分類）
   const candYearSel = document.getElementById('calf-cand-year');
-  if (candYearSel) {
+  // 長島さん用（features.calfYear）：繁殖候補だけでなく子牛全部を生まれた年度で絞る。開いたときは今年度
+  if (candYearSel && window.FARM_FEAT && FARM_FEAT.calfYear) {
+    const fy = dob => { if(!dob) return null; const d=new Date(dob+'T00:00:00'); const y=d.getFullYear(); return (d.getMonth()>=3?y:y-1)-2018; };
+    const curFy = fy(todayStr);
+    const lb = document.getElementById('calf-cand-year-label'); if (lb) lb.textContent = '📅 生まれた年度で絞る:';
+    const yrs = [...new Set([curFy, ...calves.map(c=>fy(c.dob)).filter(v=>v!=null)])].sort((a,b)=>b-a);
+    const cur = window._calfYearInit ? (candYearSel.value || 'all') : 'R' + curFy;
+    window._calfYearInit = true;
+    candYearSel.innerHTML = '<option value="all">全年度</option>' + yrs.map(y=>`<option value="R${y}">R${y}（${y+2018}年4月〜）生まれ${y===curFy?'・今年度':''}</option>`).join('');
+    candYearSel.value = yrs.map(y=>'R'+y).includes(cur) ? cur : 'all';
+    if (candYearSel.value !== 'all') {
+      const targetFy = parseInt(candYearSel.value.replace('R',''));
+      filtered = filtered.filter(c => fy(c.dob)===targetFy);
+    }
+  } else if (candYearSel) {
     const fy = dob => { if(!dob) return null; const d=new Date(dob+'T00:00:00'); const y=d.getFullYear(); return (d.getMonth()>=3?y:y-1)-2018; };
     const yrs = [...new Set(calves.filter(c=>c.status==='kept'||c.isBreedingCandidate).map(c=>fy(c.dob)).filter(v=>v!=null))].sort((a,b)=>b-a);
     const cur = candYearSel.value || 'all';
