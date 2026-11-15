@@ -94,8 +94,11 @@
 <style>html.no-extinsem div:has(> #ibsub-ext) { display: none !important; }
 html body:not(.is-home) #barn-board.home-only { display: none !important; }
 html.hx-collection #gnav-collection { display: none !important; }
+.ib-preg-m { display: block !important; }
+html.hx-syncCol #insembook-table th:nth-child(9), html.hx-syncCol #insembook-tbody td:nth-child(9), html.hx-syncCol #ib-sync-all-btn { display: none !important; }
 html.hx-etCol #insembook-table th:nth-child(11), html.hx-etCol #insembook-table th:nth-child(12), html.hx-etCol #insembook-tbody td:nth-child(11), html.hx-etCol #insembook-tbody td:nth-child(12) { display: none !important; }
 html:not(.no-etcert) .only-noetcert { display: none !important; }
+html.no-etcert .only-own-fat { display: none !important; }
 html.no-etcert [data-feat="etcert"], html.no-etcert label:has(> .et-cert-check), html.no-etcert .et-cert-check { display: none !important; }
 [data-feat="calfflags"], [data-feat="barnlist"] { display: none !important; } html.feat-calfflags [data-feat="calfflags"], html.feat-barnlist [data-feat="barnlist"] { display: revert !important; } html.feat-calfflags .lf-row[data-feat="calfflags"] { display: flex !important; }</style>
 <style>
@@ -1213,6 +1216,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
     </div>
 
     <button class="btn btn-primary" onclick="saveCalf()" style="width:100%;">保存する</button>
+    <button id="calf-del-btn" type="button" onclick="const id=document.getElementById('calf-edit-id').value;closeModal('modal-calf-edit');confirmDeleteCalf(id);" style="display:none;width:100%;margin-top:14px;background:none;border:1px solid var(--danger);color:var(--danger);font-size:12px;padding:8px;border-radius:8px;cursor:pointer;">🗑 この子牛を削除する</button>
   </div>
 </div>
 
@@ -1588,6 +1592,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
       <option value="dam">母牛別</option>
       <option value="homerun">🎯 産子ベスト</option>
       <option value="record">個体一覧</option>
+      <option value="table">📋 年度の一覧表</option>
       <option value="koubutsu">📊 上物率グラフ</option>
     </select>
     <div id="fat-farmer-wrap" style="position:relative;">
@@ -1603,6 +1608,8 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
       <input type="checkbox" id="fat-living-only" onchange="toggleFatLivingOnly()" style="cursor:pointer;margin:0;">🐄 現存牛のみ</label>
     <span style="flex-basis:100%;height:0;"></span>
     <button onclick="exportFarmerReport()" style="height:30px;box-sizing:border-box;background:none;border:1px solid var(--accent);color:var(--accent);font-size:11px;padding:0 10px;border-radius:6px;cursor:pointer;white-space:nowrap;">📄 農家別レポート出力</button>
+    <button onclick="openFatShareOut()" class="only-own-fat" style="height:30px;box-sizing:border-box;background:none;border:1px solid var(--info);color:var(--info);font-size:11px;padding:0 10px;border-radius:6px;cursor:pointer;white-space:nowrap;">📤 農家に渡す</button>
+    <button onclick="openFatShareIn()" class="only-noetcert" style="height:30px;box-sizing:border-box;background:none;border:1px solid var(--info);color:var(--info);font-size:11px;padding:0 10px;border-radius:6px;cursor:pointer;white-space:nowrap;">📥 渡された成績を取り込む</button>
     <button onclick="confirmClearFattening()" style="height:30px;box-sizing:border-box;background:none;border:1px solid var(--danger);color:var(--danger);font-size:11px;padding:0 10px;border-radius:6px;cursor:pointer;white-space:nowrap;">🗑 データ削除</button>
     <div id="fat-living-note" style="flex-basis:100%;font-size:10px;color:var(--warn);"></div>
   </div>
@@ -11269,6 +11276,18 @@ function openVetTab(cowId) {
 }
 
 // ===== 子牛の性別（去勢）と除角の表示 =====
+// 子牛カードの右の札：鼻紋・除角・去勢。済んでいれば「✓」付きで塗り、まだなら灰色の枠。押すとその場で記録（もう一度押すと取り消し）
+function calfFlagToggles(c) {
+  if (c.deathDate || c.status === 'dead') return (c.nosePrint ? _cfChip(c, 'nosePrint', '鼻紋', true, false) : '') + (c.dehorned ? _cfChip(c, 'dehorned', '除角', true, false) : '');
+  return _cfChip(c, 'nosePrint', '鼻紋', !!c.nosePrint, true) + _cfChip(c, 'dehorned', '除角', !!c.dehorned, true) +
+    (c.sex === '雄' && !c.castrated ? _cfChip(c, 'castrated', '去勢', false, true) : '');
+}
+function _cfChip(c, kind, label, done, tap) {
+  const st = done
+    ? 'background:rgba(74,222,128,.16);border:1px solid rgba(74,222,128,.55);color:var(--text);'
+    : 'background:none;border:1px dashed var(--border);color:var(--muted);';
+  return `<span ${tap ? `onclick="event.stopPropagation();markCalfFlag('${c.id}','${kind}')" role="button"` : ''} title="${done ? label + '済（押すと取り消し）' : label + 'を記録'}" style="${st}font-size:11px;font-weight:700;padding:2px 7px;border-radius:12px;white-space:nowrap;${tap ? 'cursor:pointer;' : ''}">${done ? '✓' : ''}${label}</span>`;
+}
 function calfSexText(c) { return c && c.sex === '雄' && c.castrated ? '去勢' : (c && c.sex) || ''; }
 // 性別の記号：去勢済みの♂は記号の代わりに「去勢」（記号と文字の2か所に出さない）
 function calfSexMark(c) { return !c || !c.sex ? '' : c.sex === '雄' ? (c.castrated && window.FARM_FEAT && FARM_FEAT.calfFlags ? '去勢' : '♂') : '♀'; }
@@ -13145,7 +13164,10 @@ function renderDataCheck() {
     </div>`).join('') : '<div style="color:var(--accent);font-size:13px;padding:8px 0;">✓ 食い違いは見つかりませんでした</div>';
   if (!window._watchRows) { try { renderTodayWatch(); } catch (e) {} }
   const wr = window._watchRows || [];
-  const watchHTML = wr.length ? wr.map(([h, body]) => `<div class="tw-row"><div class="tw-h">${h}</div><div>${body}</div></div>`).join('') : '<div style="color:var(--accent);font-size:13px;padding:6px 0;">✓ 今、注意が必要な牛はいません</div>';
+  const _cmp = window.FARM_CFG && FARM_CFG.compactAlerts;   // 長島さん：項目ごとにたたんで、見出しと頭数だけ出す
+  const watchHTML = wr.length ? wr.map(([h, body]) => _cmp
+    ? `<details class="tw-row"><summary class="tw-h" style="cursor:pointer;list-style:none;">${h}<span style="color:var(--muted);font-weight:500;margin-left:6px;font-size:11px;">▼ 開く</span></summary><div>${body}</div></details>`
+    : `<div class="tw-row"><div class="tw-h">${h}</div><div>${body}</div></div>`).join('') : '<div style="color:var(--accent);font-size:13px;padding:6px 0;">✓ 今、注意が必要な牛はいません</div>';
   let advHTML = '', advCount = 0;
   if (typeof advisorOn === 'function' && advisorOn()) {
     try {
@@ -16317,6 +16339,16 @@ function applyFixPreg(result) {
   if (pg && pg.classList.contains('active')) renderPregList();
 }
 
+// タスク画面の上のお知らせを、たたんで1行にする（設定 compactAlerts: true）。開いた・閉じたは端末に覚えておく
+function _foldBanner(container, key, title) {
+  if (!container || !(window.FARM_CFG && FARM_CFG.compactAlerts)) return;
+  const html = container.innerHTML; if (!html.trim() || html.includes('data-fold=')) return;
+  const n = (html.match(/showCowDetail\(/g) || []).length;
+  let open = false; try { open = localStorage.getItem('fold_' + key) === '1'; } catch (e) {}
+  container.innerHTML = `<details data-fold="${key}" ${open ? 'open' : ''} ontoggle="try{localStorage.setItem('fold_${key}',this.open?'1':'0')}catch(e){}" style="background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;">
+    <summary style="cursor:pointer;list-style:none;padding:9px 12px;font-size:12px;font-weight:700;color:var(--warn);display:flex;gap:6px;align-items:center;">${title}${n ? `<span style="color:var(--muted);font-weight:500;">（${n}頭）</span>` : ''}<span style="margin-left:auto;font-size:11px;color:var(--muted);font-weight:500;">▼ タップで開く</span></summary>
+    <div style="padding:0 6px 6px;">${html}</div></details>`;
+}
 function renderKyoreikaiAlert() {
   const container = document.getElementById('kyoreikai-alert');
   if (!container) return;
@@ -16400,6 +16432,7 @@ function renderKyoreikaiAlert() {
         </div>
         ${readyHtml}
       </div>`;
+    _foldBanner(container, 'kyo', '🏆 共励会 強化月間');
     return;
   }
   // 予告バナー（強化月間の開始が30日以内に迫っている）
@@ -16414,6 +16447,7 @@ function renderKyoreikaiAlert() {
         あと${daysLeft}日（${fmtDate(upcoming.start)}〜）で、${upcoming.mode==='AI'?'AI（人工授精）':'ET（胚移植）'}すると<strong style="color:var(--accent2);">${compYear}年10月の共励会</strong>に間に合う時期になります。
       </div>
     </div>`;
+  _foldBanner(container, 'kyo', '🏆 共励会のお知らせ');
 }
 
 function renderCalvingAlerts() {
@@ -16487,6 +16521,7 @@ function renderCalvingAlerts() {
           </div>
         </div>`).join('')}
     </div>`;
+  _foldBanner(container, 'calv', '⚠ 授精・移植がまだの牛');
 }
 
 // ===== TABS =====
@@ -17514,7 +17549,7 @@ function renderInsemBook() {
         '<td style="padding:2px 4px;"><input id="ib-m-' + idx + '" value="' + (r.m||'') + '" oninput="saveInsemBookRecord(\'dynamic\',' + idx + ')" style="width:80px;background:var(--bg);border:1px solid var(--border);color:' + (/^\d{2}[A-L]\d{2}B\d+-?[A-Z]$/.test(r.m||'') ? 'var(--purple)' : 'var(--text)') + ';font-size:11px;padding:3px 5px;border-radius:4px;"></td>' +
         '<td style="padding:2px 4px;"><input id="ib-op-dynamic' + idx + '" value="' + (r.op||'') + '" oninput="saveInsemBookRecord(\'dynamic\',' + idx + ')" placeholder="術者" style="width:70px;background:var(--bg);border:1px solid var(--warn);color:var(--warn);font-size:11px;padding:3px 5px;border-radius:4px;"></td>' +
         '<td style="padding:4px;text-align:center;">' + syncBtn + '</td>' +
-        '<td style="padding:4px;text-align:center;">' + (r.donorAI && r.op ? '<span style="font-size:10px;color:var(--muted);">—</span>' : '<label style="display:flex;align-items:center;justify-content:center;gap:4px;cursor:pointer;"><input type="checkbox" class="insem-cert-check" data-idx="' + idx + '" data-src="dynamic" style="width:14px;height:14px;cursor:pointer;"><span style="font-size:11px;color:var(--purple);">📄</span></label>') + '</td>' +
+        '<td style="padding:4px;text-align:center;">' + ((r.donorAI && r.op) || et ? '<span style="font-size:10px;color:var(--muted);">—</span>' : '<label style="display:flex;align-items:center;justify-content:center;gap:4px;cursor:pointer;"><input type="checkbox" class="insem-cert-check" data-idx="' + idx + '" data-src="dynamic" style="width:14px;height:14px;cursor:pointer;"><span style="font-size:11px;color:var(--purple);">📄</span></label>') + '</td>' +
         '<td style="padding:4px;text-align:center;">' + (et && !r.op ? '<label style="display:flex;align-items:center;justify-content:center;gap:4px;cursor:pointer;"><input type="checkbox" class="et-cert-check" data-idx="' + idx + '" data-src="dynamic" style="width:14px;height:14px;cursor:pointer;"><span style="font-size:11px;color:var(--info);">🧬</span></label>' : '<span style="color:var(--muted);font-size:10px;">—</span>') + '</td>' +
         '<td style="padding:4px;text-align:center;">' + (r.donorAI ? '<button onclick="toggleDonorAIFlag(\'dynamic\',' + idx + ')" style="background:#2a0a0a;border:1px solid var(--danger);color:var(--danger);font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;cursor:pointer;" title="ドナーAIフラグOFF→通常AIに変更">🐄→OFF</button>' : '<button onclick="toggleDonorAIFlag(\'dynamic\',' + idx + ')" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:9px;padding:2px 5px;border-radius:4px;cursor:pointer;" title="ドナーAIフラグON">🐄</button>') + '</td>' +
         '<td style="padding:4px;text-align:center;"><button onclick="deleteInsemRecord(\'dynamic\',' + idx + ')" style="background:none;border:1px solid var(--danger);color:var(--danger);font-size:10px;padding:2px 6px;border-radius:4px;cursor:pointer;">🗑</button></td>' +
@@ -17541,7 +17576,7 @@ function renderInsemBook() {
       '<td style="padding:2px 4px;"><input id="ib-m-' + sid + '" value="' + dispM.replace(/"/g,"&quot;") + '" oninput="saveInsemBookRecord(\'static\',' + r._idx + ')" style="width:80px;background:var(--bg);border:1px solid var(--border);color:' + (/^\d{2}[A-L]\d{2}B\d+-?[A-Z]$/.test(dispM) ? 'var(--purple)' : 'var(--text)') + ';font-size:11px;padding:3px 5px;border-radius:4px;"></td>' +
       '<td style="padding:2px 4px;"><input id="ib-op-' + r.d + '-' + r.t + '" value="' + (dispOp||'').replace(/"/g,"&quot;") + '" oninput="saveInsemBookRecord(\'static\',' + r._idx + ')" placeholder="術者" style="width:70px;background:var(--bg);border:1px solid var(--warn);color:var(--warn);font-size:11px;padding:3px 5px;border-radius:4px;"></td>' +
       '<td style="padding:4px;text-align:center;">' + syncBtn + '</td>' +
-      '<td style="padding:4px;text-align:center;"><label style="display:flex;align-items:center;justify-content:center;gap:4px;cursor:pointer;"><input type="checkbox" class="insem-cert-check" data-idx="' + r._idx + '" data-src="' + r._src + '" style="width:14px;height:14px;cursor:pointer;"><span style="font-size:11px;color:var(--purple);">📄</span></label></td>' +
+      '<td style="padding:4px;text-align:center;">' + (et ? '<span style="font-size:10px;color:var(--muted);">—</span>' : '<label style="display:flex;align-items:center;justify-content:center;gap:4px;cursor:pointer;"><input type="checkbox" class="insem-cert-check" data-idx="' + r._idx + '" data-src="' + r._src + '" style="width:14px;height:14px;cursor:pointer;"><span style="font-size:11px;color:var(--purple);">📄</span></label>') + '</td>' +
       '<td style="padding:4px;text-align:center;">' + (et && !dispOp ? '<label style="display:flex;align-items:center;justify-content:center;gap:4px;cursor:pointer;"><input type="checkbox" class="et-cert-check" data-idx="' + r._idx + '" data-src="' + r._src + '" style="width:14px;height:14px;cursor:pointer;"><span style="font-size:11px;color:var(--info);">🧬</span></label>' : '<span style="color:var(--muted);font-size:10px;">—</span>') + '</td>' +
       '<td style="padding:4px;text-align:center;">' + (dispDonorAI ? '<button onclick="toggleDonorAIFlag(\'static\',' + r._idx + ')" style="background:#2a0a0a;border:1px solid var(--danger);color:var(--danger);font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;cursor:pointer;" title="ドナーAIフラグOFF">🐄→OFF</button>' : '<button onclick="toggleDonorAIFlag(\'static\',' + r._idx + ')" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:9px;padding:2px 5px;border-radius:4px;cursor:pointer;" title="ドナーAIフラグON">🐄</button>') + '</td>' +
       '<td style="padding:4px;text-align:center;"><button onclick="deleteInsemRecord(\'' + r._src + '\',' + r._idx + ')" style="background:none;border:1px solid var(--danger);color:var(--danger);font-size:10px;padding:2px 6px;border-radius:4px;cursor:pointer;">🗑</button></td>' +
@@ -17587,8 +17622,8 @@ function renderInsemBook() {
       const sireEsc2 = r.s.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
       const isETRec2 = r.s.includes('×') || r.insemType === 'et';
       const addInv2  = r.d >= '2025-01-01' && r.d <= '2025-11-05' && !isETRec2;
-      const showSyncBtn2 = addInv2 || isETRec2 || true; // 全記録に反映ボタンを表示
-      const syncBtn2 = alreadySynced2
+      const showSyncBtn2 = !_hx('syncCol'); // 全記録に反映ボタンを表示（長島さんは出さない）
+      const syncBtn2 = _hx('syncCol') ? '' : alreadySynced2
         ? '<button onclick="syncOneInsemRecord(\'' + r.d + '\',\'' + r.t + '\',\'' + sireEsc2 + '\',' + addInv2 + ')" style="background:#0a1a0a;border:1px solid var(--accent);color:var(--accent);font-size:11px;font-weight:700;padding:6px 12px;border-radius:6px;cursor:pointer;">✓済</button>'
         : showSyncBtn2 ? '<button onclick="syncOneInsemRecord(\'' + r.d + '\',\'' + r.t + '\',\'' + sireEsc2 + '\',' + addInv2 + ')" style="background:#0a1a2a;border:1px solid var(--info);color:var(--info);font-size:11px;font-weight:700;padding:6px 12px;border-radius:6px;cursor:pointer;">📥' + (addInv2 ? '💉' : '') + '</button>' : '<span style="font-size:10px;color:var(--muted);">—</span>';
       const uid    = 'imb-' + i;
@@ -17621,6 +17656,8 @@ function renderInsemBook() {
             '</div>' +
             '<div style="color:var(--muted);font-size:16px;transition:transform .2s;" id="' + uid + '-chev">▼</div>' +
           '</div>' +
+          // 妊鑑はカードを開かなくても見える・押せる（PCの表の「妊鑑」の列と同じ中身）
+          '<div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:8px;padding:6px 12px 8px;background:var(--bg2);border-top:1px dashed var(--border);"><span style="font-size:10px;color:var(--muted);font-weight:700;white-space:nowrap;">🔬 妊鑑</span><div class="insembook-preg-col ib-preg-m" style="flex:1;">' + getPregCellHtml(r.t, dispD2, r.donorAI||false) + '</div></div>' +
           '<div id="' + uid + '" style="display:none;padding:10px 12px;border-top:1px solid var(--border);">' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">' +
               '<div><div style="font-size:10px;color:var(--muted);margin-bottom:3px;">証明書No</div>' +
@@ -17632,11 +17669,10 @@ function renderInsemBook() {
             '<input id="' + mId + '" value="' + dispM2.replace(/"/g,'&quot;') + '" onchange="' + onSave + '" style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:13px;padding:6px 8px;border-radius:6px;"></div>' +
             '<div style="margin-bottom:10px;"><div style="font-size:10px;color:var(--muted);margin-bottom:3px;">術者</div>' +
             '<input id="' + opId + '" value="' + (dispOp2||'').replace(/"/g,'&quot;') + '" onchange="' + onSave + '" placeholder="術者" style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--warn);color:var(--warn);font-size:13px;padding:6px 8px;border-radius:6px;"></div>' +
-            '<div style="margin-bottom:10px;"><div style="font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:700;">🔬 妊娠鑑定</div>' +
-            getPregCellHtml(r.t, dispD2, r.donorAI||false) + '</div>' +
+
             '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
               syncBtn2 +
-              '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="insem-cert-check" data-idx="' + r._idx + '" data-src="' + r._src + '" style="width:16px;height:16px;"><span style="font-size:12px;color:var(--purple);">📄 授精証</span></label>' +
+              (et2 ? '' : '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="insem-cert-check" data-idx="' + r._idx + '" data-src="' + r._src + '" style="width:16px;height:16px;"><span style="font-size:12px;color:var(--purple);">📄 授精証</span></label>') +
               (et2 && !dispOp2 ? '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="et-cert-check" data-idx="' + r._idx + '" data-src="' + r._src + '" style="width:16px;height:16px;"><span style="font-size:12px;color:var(--info);">🧬 移植証</span></label>' : '') +
               '<button onclick="deleteInsemRecord(\'' + r._src + '\',' + r._idx + ')" style="background:none;border:1px solid var(--danger);color:var(--danger);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">🗑</button>' +
             '</div>' +
@@ -25485,9 +25521,8 @@ function renderCalves() {
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:8px;">
-            ${window.FARM_FEAT && FARM_FEAT.calfFlags && calf.nosePrint ? `<span style="font-size:10px;font-weight:800;color:#c4b5fd;border:1px solid #c4b5fd;padding:0 5px;border-radius:4px;white-space:nowrap;">鼻紋済</span>` : ''}
-            ${window.FARM_FEAT && FARM_FEAT.calfFlags && calf.dehorned ? `<span style="font-size:10px;font-weight:800;color:#4ade80;border:1px solid #4ade80;padding:0 5px;border-radius:4px;white-space:nowrap;">✂除角済</span>` : ''}
-            ${calf.sex ? (calfSexMark(calf) === '去勢' ? `<span style="font-size:12px;font-weight:800;color:#93c5fd;">去勢</span>` : `<span style="font-size:18px;">${calf.sex==='雄'?'♂':'♀'}</span>`) : ''}
+            ${window.FARM_FEAT && FARM_FEAT.calfFlags ? calfFlagToggles(calf) : ''}
+            ${calf.sex ? (calfSexMark(calf) === '去勢' ? `<span ${window.FARM_FEAT && FARM_FEAT.calfFlags && !calf.deathDate ? `onclick="event.stopPropagation();markCalfFlag('${calf.id}','castrated')" title="押すと去勢を取り消せます" style="cursor:pointer;font-size:12px;font-weight:800;color:var(--text);"` : `style="font-size:12px;font-weight:800;color:#93c5fd;"`}>去勢</span>` : `<span style="font-size:18px;">${calf.sex==='雄'?'♂':'♀'}</span>`) : ''}
             ${calf.breed ? `<span style="background:${bc.bg};border:1px solid ${bc.border};color:${bc.color};font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;">${calf.breed}</span>` : ''}
             <span id="calf-chev-${calf.id}" style="color:var(--muted);font-size:14px;transition:transform .2s;">▼</span>
           </div>
@@ -25505,7 +25540,7 @@ function renderCalves() {
             <button onclick="event.stopPropagation();openCalfHistory('${calf.id}')" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">🕘 変更履歴</button>
             <button onclick="event.stopPropagation();toggleCalfCertIssued('${calf.id}')" style="background:${calf.authCertIssued ? 'rgba(139,92,246,.15)' : 'var(--bg3)'};border:1px solid var(--purple);color:var(--purple);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">${calf.authCertIssued ? '📄 授精証明書 発行済み ✓（' + fmtDate(calf.authCertIssued) + '）' : '📄 授精証明書を発行済みにする'}</button>
             <button onclick="event.stopPropagation();showCalfStory('${calf.id}')" style="background:#0a1a2a;border:1px solid var(--info);color:var(--info);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">📖 ストーリー</button>
-            ${window.FARM_FEAT && FARM_FEAT.calfFlags && !calf.deathDate ? `<button onclick="event.stopPropagation();markCalfFlag('${calf.id}','nosePrint')" style="background:${calf.nosePrint ? 'rgba(196,181,253,.12)' : 'var(--bg3)'};border:1px solid #c4b5fd;color:#c4b5fd;font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">${calf.nosePrint ? '鼻紋済' + (calf.nosePrintDate ? ' ' + fmtDateShort(calf.nosePrintDate) : '') : '鼻紋とった'}</button><button onclick="event.stopPropagation();markCalfFlag('${calf.id}','dehorned')" style="background:${calf.dehorned ? 'rgba(74,222,128,.12)' : 'var(--bg3)'};border:1px solid #4ade80;color:#4ade80;font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">✂ ${calf.dehorned ? '除角済' + (calf.dehornDate ? ' ' + fmtDateShort(calf.dehornDate) : '') : '除角した'}</button>${calf.sex === '雄' ? `<button onclick="event.stopPropagation();markCalfFlag('${calf.id}','castrated')" style="background:${calf.castrated ? 'rgba(147,197,253,.12)' : 'var(--bg3)'};border:1px solid #93c5fd;color:#93c5fd;font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">${calf.castrated ? '去勢済' + (calf.castrateDate ? ' ' + fmtDateShort(calf.castrateDate) : '') : '去勢した'}</button>` : ''}` : ''}
+            ${false ? `<button onclick="event.stopPropagation();markCalfFlag('${calf.id}','nosePrint')" style="background:${calf.nosePrint ? 'rgba(196,181,253,.12)' : 'var(--bg3)'};border:1px solid #c4b5fd;color:#c4b5fd;font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">${calf.nosePrint ? '鼻紋済' + (calf.nosePrintDate ? ' ' + fmtDateShort(calf.nosePrintDate) : '') : '鼻紋とった'}</button><button onclick="event.stopPropagation();markCalfFlag('${calf.id}','dehorned')" style="background:${calf.dehorned ? 'rgba(74,222,128,.12)' : 'var(--bg3)'};border:1px solid #4ade80;color:#4ade80;font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">✂ ${calf.dehorned ? '除角済' + (calf.dehornDate ? ' ' + fmtDateShort(calf.dehornDate) : '') : '除角した'}</button>${calf.sex === '雄' ? `<button onclick="event.stopPropagation();markCalfFlag('${calf.id}','castrated')" style="background:${calf.castrated ? 'rgba(147,197,253,.12)' : 'var(--bg3)'};border:1px solid #93c5fd;color:#93c5fd;font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">${calf.castrated ? '去勢済' + (calf.castrateDate ? ' ' + fmtDateShort(calf.castrateDate) : '') : '去勢した'}</button>` : ''}` : ''}
             <button onclick="event.stopPropagation();openEditCalfModal('${calf.id}')" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">✏ 編集</button>
           </div>
           ${isEtFemale && calf.status === 'active' && !isFreemartin ? `<div style="font-size:11px;color:var(--purple);margin-bottom:8px;">🧬 ET産仔の雌牛です — 繁殖候補の保留を検討してください</div>` : ''}
@@ -25535,7 +25570,7 @@ function renderCalves() {
           ${calf.status === 'moved' ? `
             <button class="calf-action-btn" data-calfid="${calf.id}" data-action="active" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">↩ 移動済みを取り消す</button>
           ` : ''}
-          <button class="calf-action-btn" data-calfid="${calf.id}" data-action="delete" style="background:none;border:1px solid var(--danger);color:var(--danger);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">🗑 削除</button>
+          ${window.FARM_FEAT && FARM_FEAT.calfFlags ? '' : `<button class="calf-action-btn" data-calfid="${calf.id}" data-action="delete" style="background:none;border:1px solid var(--danger);color:var(--danger);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">🗑 削除</button>`}
           ${!calf.deathDate ? `
             <button class="calf-action-btn" data-calfid="${calf.id}" data-action="death" style="background:#1a0808;border:1px solid #7f1d1d;color:#fca5a5;font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">💀 死亡を記録</button>
           ` : `
@@ -26351,6 +26386,7 @@ function openAddCalf() {
   const lastNatPrefix = _store.getItem('lastCalfNatIdPrefix') || '';
   if (lastNatPrefix) document.getElementById('calf-national-id-a').value = lastNatPrefix;
   document.getElementById('calf-memo').value = '';
+  { const db = document.getElementById('calf-del-btn'); if (db) db.style.display = (window.FARM_FEAT && FARM_FEAT.calfFlags && document.getElementById('calf-edit-id').value) ? '' : 'none'; }
   openModal('modal-calf-edit');
 }
 // 生年月日から「YY-c」形式の仮耳標プレフィックスを作る（西暦下2桁）
@@ -26482,6 +26518,7 @@ function openEditCalfModal(id) {
   // 繁殖候補保留中で個体識別番号未入力の場合はヒントを表示
   const hint = document.getElementById('calf-id-hint');
   if (hint) hint.style.display = (calf.status === 'kept' && !calf.nationalId) ? '' : 'none';
+  { const db = document.getElementById('calf-del-btn'); if (db) db.style.display = (window.FARM_FEAT && FARM_FEAT.calfFlags && document.getElementById('calf-edit-id').value) ? '' : 'none'; }
   openModal('modal-calf-edit');
   if (calf.status === 'kept' && !calf.nationalId) {
     setTimeout(() => document.getElementById('calf-national-id-a')?.focus(), 300);
@@ -30066,6 +30103,87 @@ function damMaternalPedigree(recs){
   if(msire) return `母の父 ${msire}`;
   return '';
 }
+// ===== 肥育成績：部会平均・年度の一覧表・農家に渡す =====
+function _fatDateKey(d) { const m = String(d || '').match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/); return m ? `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}` : String(d || ''); }
+function _fatQ(r) { const m = String(r.meatGrade || '').match(/[1-5]/); return m ? +m[0] : 0; }
+function _joRate(rs) { return rs.length ? Math.round(rs.filter(r => _fatQ(r) >= 3).length / rs.length * 1000) / 10 : 0; }
+// 年ごとの平均（全農家）。渡すときに使う
+function _fatYearAvgs(recs) {
+  const by = {};
+  recs.forEach(r => { if (!r.year) return; (by[r.year] = by[r.year] || []).push(r); });
+  const out = {};
+  Object.entries(by).forEach(([y, rs]) => {
+    const pick = (f, k) => rs.filter(f).map(r => r[k]).filter(v => v != null);
+    const sum = a => a.reduce((x, v) => x + v, 0);
+    const bm = pick(() => true, 'bms'), yr = pick(() => true, 'yieldRate'), ag = pick(() => true, 'age'), wa = pick(() => true, 'weight'), wc = pick(r => r.sex === '去勢', 'weight'), wh = pick(r => r.sex === '未経', 'weight');
+    out[y] = { n: rs.length, sBms: sum(bm), nBms: bm.length, sY: sum(yr), nY: yr.length, sA: sum(ag), nA: ag.length, sW: sum(wa), nW: wa.length, sWc: sum(wc), nWc: wc.length, sWh: sum(wh), nWh: wh.length, jo3: rs.filter(r => _fatQ(r) >= 3).length, jo4: rs.filter(r => _fatQ(r) >= 4).length };
+  });
+  return out;
+}
+// 表示中の成績と同じ年の部会平均（年ごとの合計から出す）
+function _bukaiAvgFor(breed, recs) {
+  const B = farmTargets && farmTargets._bukaiAvg;
+  if (!B || !B.by || (breed && breed !== 'all' && B.breed && B.breed !== breed)) return null;
+  const yrs = fatSelectedYears && fatSelectedYears.length ? fatSelectedYears : [...new Set((recs || []).map(r => r.year).filter(Boolean))];
+  const L = yrs.map(y => B.by[y]).filter(Boolean);
+  if (!L.length) return null;
+  const t = k => L.reduce((a, x) => a + (x[k] || 0), 0);
+  const d = (s, n) => t(n) ? Math.round(t(s) / t(n) * 10) / 10 : null;
+  return { n: t('n'), bms: d('sBms', 'nBms'), yieldRate: d('sY', 'nY'), age: d('sA', 'nA'), w: d('sW', 'nW'), wCast: d('sWc', 'nWc'), wHeif: d('sWh', 'nWh'), jo3: t('n') ? Math.round(t('jo3') / t('n') * 1000) / 10 : 0, from: B.from };
+}
+function _fatShareText(farmer) {
+  const all = fatteningRecords.filter(r => r.breed === '褐毛');
+  const own = fatteningRecords.filter(r => r.farmer === farmer);
+  return JSON.stringify({ kind: 'fat-share', farmer, from: (window.FARM && FARM.name) || '', date: today(), records: own, bukai: { breed: '褐毛', by: _fatYearAvgs(all) } });
+}
+function openFatShareOut() {
+  document.getElementById('fatshare-modal')?.remove();
+  const farmers = [...new Set(fatteningRecords.map(r => r.farmer).filter(Boolean))].filter(f => f !== OWN_FARMER).sort();
+  const w = document.createElement('div'); w.id = 'fatshare-modal';
+  w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9300;display:flex;align-items:center;justify-content:center;padding:16px;';
+  w.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;width:100%;max-width:440px;max-height:90vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>📤 肥育成績を農家に渡す</b><button class="modal-close" onclick="document.getElementById('fatshare-modal').remove()">✕</button></div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:8px;">選んだ農家<b>本人の成績</b>（1頭ずつ）と、褐毛の<b>あか牛部会の年ごとの平均</b>だけを渡します。ほかの農家の1頭ずつの成績は渡しません。</div>
+    <select id="fs-farmer" onchange="document.getElementById('fs-text').value=_fatShareText(this.value);const d=JSON.parse(document.getElementById('fs-text').value);document.getElementById('fs-n').textContent=d.records.length+'頭分・部会平均 '+Object.keys(d.bukai.by).length+'年分'" style="margin-bottom:8px;">${farmers.map(f => `<option value="${_stEsc(f)}" ${/長島/.test(f) ? 'selected' : ''}>${_stEsc(f)}</option>`).join('')}</select>
+    <div style="font-size:12px;margin-bottom:6px;" id="fs-n"></div>
+    <textarea id="fs-text" readonly style="width:100%;height:100px;font-size:10px;font-family:monospace;"></textarea>
+    <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="(async()=>{const t=document.getElementById('fs-text');try{await navigator.clipboard.writeText(t.value);appAlert('コピーしました。相手の肥育成績の「📥 渡された成績を取り込む」に貼り付けてください');}catch(e){t.select();document.execCommand('copy');appAlert('コピーしました');}})()">📋 コピーする</button>
+  </div>`;
+  document.body.appendChild(w);
+  document.getElementById('fs-farmer').onchange();
+}
+function openFatShareIn() {
+  document.getElementById('fatshare-modal')?.remove();
+  const w = document.createElement('div'); w.id = 'fatshare-modal';
+  w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9300;display:flex;align-items:center;justify-content:center;padding:16px;';
+  w.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;width:100%;max-width:440px;max-height:90vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>📥 渡された肥育成績を取り込む</b><button class="modal-close" onclick="document.getElementById('fatshare-modal').remove()">✕</button></div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:8px;">「📤 農家に渡す」でコピーしたものを貼り付けてください。自分の牛の成績（入っていない牛は足し、入っている牛は空いている欄を埋める）と、あか牛部会の平均が入ります。</div>
+    <textarea id="fs-in" placeholder="ここに貼り付け" style="width:100%;height:140px;font-size:11px;font-family:monospace;"></textarea>
+    <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="importFatShare()">取り込む</button>
+  </div>`;
+  document.body.appendChild(w);
+}
+function importFatShare(text) {
+  let d; try { d = JSON.parse(String(text != null ? text : (document.getElementById('fs-in') || {}).value || '').trim()); } catch (e) { appAlert('読み取れませんでした。「📤 農家に渡す」でコピーしたものをそのまま貼り付けてください'); return null; }
+  if (!d || d.kind !== 'fat-share' || !Array.isArray(d.records)) { appAlert('肥育成績ではないようです'); return null; }
+  armUndo('肥育成績を取り込みました');
+  let add = 0, fill = 0;
+  const own = (window.FARM && FARM.owner) || d.farmer || '';
+  d.records.forEach(x => {
+    if (!x || !x.nationalId) return;
+    const nid = String(x.nationalId).replace(/\D/g, '');
+    const ex = fatteningRecords.find(r => String(r.nationalId || '').replace(/\D/g, '') === nid);
+    if (ex) { let f = false; Object.keys(x).forEach(k => { if (k === 'id' || k === 'farmer') return; if ((ex[k] == null || ex[k] === '') && x[k] != null && x[k] !== '') { ex[k] = x[k]; f = true; } }); if (f) fill++; return; }
+    fatteningRecords.push({ ...x, id: Math.random().toString(36).slice(2), farmer: own });
+    add++;
+  });
+  if (d.bukai && d.bukai.by) farmTargets._bukaiAvg = { ...d.bukai, from: d.from || '', date: d.date || today() };
+  save(); try { renderFattening(); } catch (e) {}
+  document.getElementById('fatshare-modal')?.remove();
+  appAlert(`肥育成績を${add}頭足しました${fill ? `（${fill}頭は空いている欄を埋めました）` : ''}。あか牛部会の平均も入れました（${Object.keys((d.bukai || {}).by || {}).length}年分）`);
+  return { add, fill };
+}
 function renderFattening() {
   _damInfoCache=null;
   { const _n=document.getElementById('fat-living-note'); if(_n)_n.textContent=''; }
@@ -30121,7 +30239,14 @@ function renderFattening() {
           <div style="font-size:${v.includes('/')? '11':'18'}px;font-weight:900;color:${c};font-family:'JetBrains Mono',monospace;line-height:1.3;">${v}</div>
           <div style="font-size:10px;color:var(--muted);margin-top:2px;">${l}</div>
         </div>`).join('')}
-    </div>`;
+    </div>
+    ${(() => { const b = _bukaiAvgFor(breedFilter, recs); if (!b) return '';
+      const w = [b.wCast != null ? `去勢 ${b.wCast}kg` : '', b.wHeif != null ? `未経 ${b.wHeif}kg` : ''].filter(Boolean).join(' / ') || '—';
+      return `<div style="font-size:11px;font-weight:700;color:var(--muted);margin:10px 0 6px;">🟥 あか牛部会平均（同じ年の${b.n}頭）</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;">
+        ${[['BMS', fmtVal(b.bms)], ['枝重', w], ['歩留率', fmtVal(b.yieldRate,'%')], ['月齢', fmtVal(b.age,'ヶ月')]].map(([l,v])=>`<div style="border:1px dashed var(--border);border-radius:8px;padding:6px 4px;"><div style="font-size:${String(v).includes('/')?'11':'15'}px;font-weight:800;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.3;">${v}</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">${l}</div></div>`).join('')}
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px;">上物率（3等級以上）：自分 ${_joRate(recs)}% ／ 部会 ${b.jo3}%　（${_stEsc(b.from || '')}から渡された平均。ほかの農家の個別の成績は入っていません）</div>`; })()}`;
 
   // グループキー決定
   const groupKey = (view === 'dam') ? 'dam' : 'sire';
@@ -30140,6 +30265,27 @@ function renderFattening() {
     if (fatSelectedYears.length > 0) allRecs = allRecs.filter(r=>fatSelectedYears.includes(r.year));
     if (breedFilter !== 'all') allRecs = allRecs.filter(r=>r.breed===breedFilter);
     list.innerHTML = renderKoubutsu(recs, allRecs);
+    return;
+  }
+
+  // 📋 年度の一覧表：選んだ年の全頭を出荷日順に1行ずつ。下に平均と部会平均
+  if (view === 'table') {
+    const rs = [...recs].sort((a,b)=>String(_fatDateKey(a.slaughterDate)).localeCompare(String(_fatDateKey(b.slaughterDate))));
+    const th = 'padding:6px 5px;font-size:10px;color:var(--muted);font-weight:700;text-align:left;white-space:nowrap;border-bottom:1px solid var(--border);';
+    const td = 'padding:6px 5px;font-size:12px;white-space:nowrap;border-bottom:1px solid var(--border);';
+    const row = (cells, st) => `<tr style="${st||''}">${cells.map(c=>`<td style="${td}">${c}</td>`).join('')}</tr>`;
+    const a = k => avg(rs.filter(r=>r[k]!=null).map(r=>r[k]));
+    const b = _bukaiAvgFor(breedFilter, recs);
+    const yrs = [...new Set(rs.map(r=>r.year).filter(Boolean))].sort();
+    list.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:6px;">${yrs.length ? yrs.map(y=>y+'年').join('・') : '全年'}の出荷 ${rs.length}頭（出荷日順）。年は上の「年度」ボタンで選べます。横にスクロールできます</div>
+    <div style="overflow-x:auto;background:var(--card);border:1px solid var(--border);border-radius:10px;">
+      <table style="border-collapse:collapse;width:100%;min-width:720px;">
+        <tr>${['出荷日','個体識別','性別','種雄牛','母牛（母の父）','月齢','枝重','歩留','BMS','等級'].map(h=>`<th style="${th}">${h}</th>`).join('')}</tr>
+        ${rs.map(r=>row([_stEsc(r.slaughterDate||''), `<span style="font-family:'JetBrains Mono',monospace;font-size:11px;">${_stEsc(r.nationalId||'')}</span>`, _stEsc(r.sex||''), `<b>${_stEsc(r.sire||'—')}</b>`, _stEsc(r.dam||'—') + (r.grandsire?`<span style="color:var(--muted);font-size:10px;">（${_stEsc(r.grandsire)}）</span>`:''), fmtVal(r.age,''), fmtVal(r.weight,''), fmtVal(r.yieldRate,''), `<b style="color:${bmsColor(r.bms)};">${r.bms??'—'}</b>`, `<b style="color:${gradeColor(r.meatGrade||'')};">${_stEsc((r.yieldGrade||'')+(r.meatGrade||'')) || '—'}</b>`])).join('')}
+        ${row(['<b>平均</b>','',`${rs.length}頭`,'','',fmtVal(a('age'),''),fmtVal(a('weight'),''),fmtVal(a('yieldRate'),''),`<b>${fmtVal(a('bms'),'')}</b>`,`3以上 ${_joRate(rs)}%`],'background:var(--bg3);')}
+        ${b ? row(['<b>部会平均</b>','',`${b.n}頭`,'','',fmtVal(b.age,''),fmtVal(b.w,''),fmtVal(b.yieldRate,''),`<b>${fmtVal(b.bms,'')}</b>`,`3以上 ${b.jo3}%`],'background:var(--bg3);color:var(--muted);') : ''}
+      </table>
+    </div>`;
     return;
   }
 
@@ -31404,7 +31550,7 @@ try {
     <select id="insembook-year" onchange="this.dataset.userChanged='1';window._ibOnly=null;renderInsemBook()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);font-size:13px;font-weight:700;padding:8px 12px;border-radius:8px;cursor:pointer;">
     </select>
     <input type="text" id="insembook-search" placeholder="🔍 耳標・牛名・種雄牛で検索..." oninput="window._ibOnly=null;renderInsemBook()" style="flex:1;min-width:150px;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-size:13px;padding:8px 12px;border-radius:8px;outline:none;">
-    <button onclick="syncInsemBookToCows()" style="background:#0a1a2a;border:1px solid var(--info);color:var(--info);font-size:12px;font-weight:700;padding:8px 12px;border-radius:8px;cursor:pointer;white-space:nowrap;">📥 種付け記録に反映</button>
+    <button id="ib-sync-all-btn" onclick="syncInsemBookToCows()" style="background:#0a1a2a;border:1px solid var(--info);color:var(--info);font-size:12px;font-weight:700;padding:8px 12px;border-radius:8px;cursor:pointer;white-space:nowrap;">📥 種付け記録に反映</button>
     <button onclick="toggleInsemBookPreg()" id="insembook-preg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:700;padding:8px 12px;border-radius:8px;cursor:pointer;white-space:nowrap;">🔬 妊鑑</button>
     <span id="insembook-count" style="font-size:12px;color:var(--muted);white-space:nowrap;"></span>
   </div>
@@ -32430,7 +32576,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111513';
+const APP_BUILD = '2026111603';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
