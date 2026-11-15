@@ -3517,6 +3517,57 @@ function resetInsemSnap() {
   _ibeSnap = new Map(Object.entries(insemBookEdits || {}).map(([k, v]) => [k, _ibStrip(v)]));
   _ibrSnap = (insemBookRecords || []).map(r => _ibStrip(r));
 }
+// ★ 2026/11/15：授精簿の行には「その行だけの番号（id）」がなかったので、同じ行を2つの端末（または開き直す前の画面）で
+//   直すと、同期のときに別の行として両方残り、同じ授精が何行も並ぶことがあった。→ 行ごとに id を付ける。
+//   id は「日付・牛・種雄牛・同じ組の何行目か」から作るので、どの端末で付けても同じ番号になる。
+function ensureInsemIds() {
+  const seen = new Set(), occ = new Map();
+  let changed = false;
+  (insemBookRecords || []).forEach(r => {
+    if (!r || typeof r !== 'object') return;
+    const g = `${r.d}|${r.t}|${r.s}`;
+    const n = occ.get(g) || 0; occ.set(g, n + 1);
+    if (r.id && !seen.has(r.id)) { seen.add(r.id); return; }
+    let k = n, id;
+    do { const str = `${g}|${k}`; let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); } id = 'ib' + (h >>> 0).toString(36); k++; } while (seen.has(id));
+    r.id = id; seen.add(id); changed = true;
+  });
+  return changed;
+}
+// 上の不具合で増えてしまった同じ授精の行（2026/11以降）を1行にまとめる。
+// まとめるのは「同じ日・同じ牛・同じ種雄牛」の行が、その牛のその日の授精・移植の記録の数より多いときだけ（ドナーの複数回授精は対象外）
+function dedupeInsemDupRows() {
+  const groups = new Map();
+  (insemBookRecords || []).forEach(r => {
+    if (!r || !r.d || r.d < '2026-11-01' || r.donorAI) return;
+    const g = `${r.d}|${r.t}|${r.s}|${r._seq || ''}`;
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(r);
+  });
+  const drop = new Set();
+  groups.forEach(list => {
+    if (list.length < 2) return;
+    const r0 = list[0];
+    if ((collectionRecordsNew || []).some(cr => cr.donorId === r0.t && (cr.aiDates || []).some(a => a.date === r0.d && (a.count || 1) > 1))) return;
+    const cow = cows.find(c => c.id === r0.t) || (retiredCows || []).find(c => c.id === r0.t);
+    const evN = ((cow && cow.events) || []).filter(e => e.date === r0.d && ['ai_done', 'et_done', 'estrus_ai'].includes(e.type)).length;
+    const keepN = Math.max(1, evN);
+    if (list.length <= keepN) return;
+    // 一番新しく直した行を残し、空いている欄はほかの行から埋める
+    const sorted = list.slice().sort((a, b) => (b._mt || 0) - (a._mt || 0));
+    const keep = sorted.slice(0, keepN), extra = sorted.slice(keepN);
+    const k = keep[0];
+    extra.forEach(x => {
+      ['n', 'q', 'm', 'op', 'pregResult', 'certOk'].forEach(f => { if ((k[f] === undefined || k[f] === '' || k[f] === null) && x[f] !== undefined && x[f] !== '' && x[f] !== null) k[f] = x[f]; });
+      drop.add(x);
+    });
+  });
+  if (!drop.size) return false;
+  insemBookRecords = insemBookRecords.filter(r => !drop.has(r));
+  try { resetInsemSnap(); } catch (e) {}
+  console.log('授精簿の重なった行をまとめました:', drop.size);
+  return true;
+}
 function stampChangedInsem() {
   if (!_ibeSnap || !_ibrSnap) { resetInsemSnap(); return; }
   const now = Date.now();
@@ -3838,6 +3889,8 @@ function save() {
   try { if (typeof _undoCheckOnSave === 'function') _undoCheckOnSave(); } catch (e) {}
   try { if (typeof _histOnSave === 'function') _histOnSave(); } catch (e) { console.error('history', e); }
   try { stampChangedCows(); } catch (e) { console.error('stampChangedCows', e); }
+  try { dedupeInsemDupRows(); } catch (e) { console.error('dedupeInsemDupRows', e); }
+  try { ensureInsemIds(); } catch (e) { console.error('ensureInsemIds', e); }
   try { stampChangedInsem(); } catch (e) { console.error('stampChangedInsem', e); }
   try { stampDonorFlags(); } catch (e) { console.error('stampDonorFlags', e); }
   if (!_firebaseReady) {
