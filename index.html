@@ -4159,6 +4159,8 @@ function initApp() {
   try { initCalfCertIssuedOnce(); } catch (e) {}
   try { if (repairMissingPregTasks()) save(); } catch (e) { console.error('repairPreg', e); }
   try { cows.forEach(normalizePregEvents); if (syncPregStages()) save(); } catch (e) { console.error('pregStages', e); }
+  // 開いたときにも、同期で重なった授精簿の行をまとめ、行の番号を付ける（記録を保存しなくても直るように）
+  try { const d1 = dedupeInsemDupRows(), d2 = ensureInsemIds(); if (d1 || d2) save(); } catch (e) { console.error('insemDup', e); }
   renderAll();
   initSwipe();
 }
