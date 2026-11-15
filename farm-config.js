@@ -49,6 +49,8 @@ window.FARM_CONFIG = {
   estrusRecipient: true,
   // ツールを開いたときの最初の画面（'home' = ホーム。書かなければタスク）
   startTab: 'home',
+  // 子牛牛舎以外の牛舎にいる子牛は「移動済み」にする（移動を検討の数に入れない）
+  calfBarn: '子牛牛舎',
   // 子牛の予定：生まれて何日目にタスクを出すか（除角は生後2週間。去勢は日数が決まったら castrate: 日数 を足す）
   calfTasks: { dehorn: 14 },
   // 牛群（ファームノートと同じ並び）

@@ -3890,6 +3890,7 @@ function save() {
   try { cows.forEach(normalizePregEvents); } catch (e) { console.error('normalizePregEvents', e); }
   try { syncPregStages(); } catch (e) { console.error('syncPregStages', e); }
   try { syncCalfFlagTasks(); } catch (e) { console.error('syncCalfFlagTasks', e); }
+  try { syncCalfMovedByBarn(); } catch (e) { console.error('syncCalfMovedByBarn', e); }
   try { repairSemenOpening(); } catch (e) { console.error('repairSemenOpening', e); }
   try { if (typeof _undoCheckOnSave === 'function') _undoCheckOnSave(); } catch (e) {}
   try { if (typeof _histOnSave === 'function') _histOnSave(); } catch (e) { console.error('history', e); }
@@ -4167,6 +4168,7 @@ function initApp() {
   // 開いたときにも、同期で重なった授精簿の行をまとめ、行の番号を付ける（記録を保存しなくても直るように）
   try { const d1 = dedupeInsemDupRows(), d2 = ensureInsemIds(); if (d1 || d2) save(); } catch (e) { console.error('insemDup', e); }
   try { if (initNosePrintFlags()) save(); } catch (e) { console.error('nosePrint', e); }
+  try { if (syncCalfMovedByBarn()) save(); } catch (e) { console.error('calfMoved', e); }
   renderAll();
   initSwipe();
   // 開いたときの最初の画面（設定 startTab: 'home' ならホーム）。開いた最初の1回だけ
@@ -8468,10 +8470,18 @@ function saveCowNote(cowId, evIdx) {
 async function deleteStoryEvent(cowId, evIdx) {
   const cow = cows.find(c => c.id === cowId);
   const e = cow && (cow.events || [])[evIdx];
-  if (!e || !['note', 'estrus', 'move'].includes(e.type)) return;
-  const what = e.type === 'note' ? 'メモ' : e.type === 'move' ? `移動（${e.to}）` : (e.skip ? '発情・見送りの記録' : '発情の記録');
+  if (!e || !['note', 'estrus', 'move', 'estrus_et', 'estrus_ai'].includes(e.type)) return;
+  const prog = e.type === 'estrus_et' || e.type === 'estrus_ai';
+  const what = e.type === 'note' ? 'メモ' : e.type === 'move' ? `移動（${e.to}）` : prog ? (e.type === 'estrus_et' ? '発情（ET予定）の記録と、移植までの予定（ゲストロン・移植・再発情確認）' : '発情（AI予定）の記録と、その予定') : (e.skip ? '発情・見送りの記録' : '発情の記録');
   if (!await appConfirm(`${fmtDate(e.date)} の${what}を削除しますか？`)) return;
-  cow.events.splice(evIdx, 1);
+  if (prog) {
+    // 同じ日の「発情」も一緒に消し、まだ済んでいない予定（その発情から3週間以内）を消す
+    const acts = e.type === 'estrus_et' ? ['発情確認（ET予定）', 'ゲストロン投与', '胚移植（ET）★目安', '再発情確認'] : ['発情確認・AI実施', '再発情確認'];
+    tasks = tasks.filter(t => !(t.cowId === cowId && !t.done && acts.includes(t.action) && t.date >= e.date && t.date <= addDays(e.date, 22)));
+    cow.events = cow.events.filter((x, i) => i !== evIdx && !(x.type === 'estrus' && x.date === e.date && !x.skip));
+    if (cow.status === 'program' && cow.estrusDate === e.date) { cow.status = 'open'; delete cow.estrusDate; }
+    try { if (typeof reconcileCow === 'function') reconcileCow(cow); } catch (er) {}
+  } else cow.events.splice(evIdx, 1);
   _rptCache = null;
   save();
   try { renderAll(); } catch (er) {}
@@ -25210,9 +25220,11 @@ function renderCalves() {
   // 移動待ちアラート
   const overdueCount = calves.filter(c => c.status==='active' && !c.deathDate && c.dob && diffDays(todayStr, c.dob)>=120).length;
   const alertEl = document.getElementById('calf-move-alert');
-  if (overdueCount) {
+  // ✕で閉じたら、頭数が増えるまで出さない
+  let _hid = 0; try { _hid = +localStorage.getItem('_calfMoveAlertHide') || 0; } catch (e) {}
+  if (overdueCount && overdueCount > _hid) {
     alertEl.style.display = '';
-    alertEl.innerHTML = `⚠️ <strong>生後4ヶ月超の子牛が${overdueCount}頭います。</strong> 移動を検討してください。`;
+    alertEl.innerHTML = `<div style="display:flex;gap:8px;align-items:flex-start;"><span style="flex:1;">⚠️ <strong>生後4ヶ月超の子牛が${overdueCount}頭います。</strong> 移動を検討してください。</span><button onclick="event.stopPropagation();try{localStorage.setItem('_calfMoveAlertHide','${overdueCount}')}catch(e){};document.getElementById('calf-move-alert').style.display='none';" style="background:none;border:none;color:inherit;font-size:16px;line-height:1;cursor:pointer;padding:0 2px;" aria-label="閉じる">✕</button></div>`;
   } else { alertEl.style.display = 'none'; }
 
   const container = document.getElementById('calf-list-container');
@@ -32580,6 +32592,19 @@ function toggleCalfCertIssued(id) {
 }
 // ===== 除角・去勢の予定（設定 calfTasks: { dehorn: 14, castrate: 日数 }）=====
 // 生まれて◯日目にタスクを出す。チェックすると、その子牛を「除角済／去勢済」にする。先にボタンで記録していたら自動で済みにする
+// 牛舎で移動済みを決める農場（設定 calfBarn: '子牛牛舎'）：子牛牛舎以外の牛舎にいる子牛は「移動済み」にする
+function syncCalfMovedByBarn() {
+  const cb = window.FARM_CFG && FARM_CFG.calfBarn;
+  if (!cb) return false;
+  let ch = false;
+  calves.forEach(c => {
+    if (c.deathDate || c.status === 'dead') return;
+    const loc = calfLocation(c);
+    if (c.status === 'active' && loc && loc !== cb) { c.status = 'moved'; c._autoMoved = true; ch = true; }
+    else if (c.status === 'moved' && c._autoMoved && loc === cb) { c.status = 'active'; delete c._autoMoved; ch = true; }
+  });
+  return ch;
+}
 function syncCalfFlagTasks() {
   const ct = (window.FARM_FEAT && FARM_FEAT.calfFlags && window.FARM_CFG && FARM_CFG.calfTasks) || null;
   if (!ct) return false;
