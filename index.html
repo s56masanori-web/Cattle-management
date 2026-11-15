@@ -761,6 +761,11 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
       <input type="file" id="restore-tasks-file" accept=".html,text/html" style="display:none;" onchange="restoreTasksFromBackupFile(this)">
       <button onclick="document.getElementById('restore-tasks-file').click()" style="background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">📂 バックアップファイルを選ぶ</button>
     </div>
+    <div style="background:#0a2a1a;border:1px solid var(--accent2);border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+      <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:4px;">📥 クラウドのバックアップから、消えた授精簿の行を戻す</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">毎日クラウドに取っているバックアップ（8日分）と今の授精簿を比べ、今は無い行だけを戻します。今ある行はそのままです。</div>
+      <button onclick="closeModal('modal-settings');openIbRestore()" style="background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">☁ バックアップを調べる</button>
+    </div>
     <div style="background:#0a1a2a;border:1px solid var(--info);border-radius:10px;padding:12px 14px;margin-bottom:10px;">
       <div style="font-size:13px;font-weight:700;color:var(--info);margin-bottom:4px;">🧹 重複したタスクを整理</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">同じ牛・同じ日・同じ内容の完了タスク（妊娠鑑定の押し直しなど）と、重複した未完了の「分娩予定」「産室移動」を1件にまとめます。牛・授精簿・妊鑑結果のデータには触れません。実行前に件数を確認できます。</div>
@@ -3568,7 +3573,7 @@ function dedupeInsemDupRows() {
     });
   });
   if (!drop.size) return false;
-  insemBookRecords = insemBookRecords.filter(r => !drop.has(r));
+  ibRemoveWhere(r => drop.has(r));   // 授精簿の修正内容（行番号で紐づく）もずらさずに消す
   try { resetInsemSnap(); } catch (e) {}
   console.log('授精簿の重なった行をまとめました:', drop.size);
   return true;
@@ -8279,7 +8284,12 @@ function openEstrusSkip(cowId, defDate, mode) {
     <div class="form-group" style="margin-bottom:10px;"><label>発情を見た日</label><input type="date" id="es-date" value="${esc(d)}" onchange="_esHint()"></div>
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px;">この発情でどうする？</div>
     <div id="es-next" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
-      ${opt('et', '🧬', 'ETする（AIせず）', '6日目ゲストロン・7日目移植の予定も作る')}
+      ${opt('et', '🧬', 'ETする（AIせず）', 'ゲストロンと移植の予定も作る（発情を見たのが朝か夕方かで日を合わせる）')}
+      <div id="es-et-tod" style="display:none;padding:2px 4px 4px;">
+        <div style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);">発情を見たのは
+          <span class="st-chips" id="es-et-todk" style="overflow:visible;"><button type="button" class="st-chip on" data-k="pm" onclick="_esPick('es-et-todk',this)">夕方</button><button type="button" class="st-chip" data-k="am" onclick="_esPick('es-et-todk',this)">朝</button></span></div>
+        <div id="es-et-etd" style="font-size:12px;color:var(--accent);margin-top:4px;"></div>
+      </div>
       ${opt('ai', '💉', 'AIする', 'AIの記録画面を開く')}
       ${opt('skip', '⏸', '授精しない（見送り）', '理由を選んで残す（様子見もここ）')}
     </div>
@@ -8306,18 +8316,21 @@ function openEstrusSkip(cowId, defDate, mode) {
 function _esPick(groupId, btn) {
   document.querySelectorAll('#' + groupId + ' > *').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
-  if (groupId === 'es-next' || groupId === 'es-reasons' || groupId === 'es-recip-k' || groupId === 'es-recip-todk') _esHint();
+  if (groupId === 'es-next' || groupId === 'es-reasons' || groupId === 'es-recip-k' || groupId === 'es-recip-todk' || groupId === 'es-et-todk') _esHint();
 }
 // 見送りの理由。設定 estrusRecipient: true の農場（長島さん）は「受け牛に回す」も出す
 function _esReasons() { const L = ESTRUS_SKIP_REASONS.slice(); if (window.FARM_CFG && FARM_CFG.estrusRecipient) L.splice(L.length - 1, 0, '受け牛に回す'); return L; }
 function _esMode(k) { const b = document.querySelector(`#es-next [data-k="${k}"]`); if (b) _esPick('es-next', b); }
 function _esHint() {
-  const k = document.querySelector('#es-next .on')?.dataset.k;
+  const k = document.querySelector('#es-next > .on')?.dataset.k;
   const sk = document.getElementById('es-skip'); if (sk) sk.style.display = k === 'skip' ? '' : 'none';
   const rc = document.querySelector('#es-reasons .st-chip.on')?.textContent === '受け牛に回す';
   const rb = document.getElementById('es-recip'); if (rb) rb.style.display = k === 'skip' && rc ? '' : 'none';
   const rk = document.querySelector('#es-recip-k > .on')?.dataset.k;
   const rd = document.getElementById('es-recip-d0'); if (rd) rd.style.display = rk === 'cidr_ai_start' ? '' : 'none';
+  const ett = document.getElementById('es-et-tod');
+  if (ett) { ett.style.display = k === 'et' ? '' : 'none'; const ed = document.getElementById('es-date')?.value || today(); const pm = document.querySelector('#es-et-todk .on')?.dataset.k !== 'am';
+    document.getElementById('es-et-etd').textContent = `→ ゲストロン ${fmtDateShort(addDays(ed, pm ? 7 : 6))}・移植 ${fmtDateShort(addDays(ed, pm ? 8 : 7))}（${pm ? '夕方に見た発情から8日目' : '朝に見た発情から7日目'}）`; }
   const tod = document.getElementById('es-recip-tod'); if (tod) tod.style.display = rk === 'estrus_et' ? 'flex' : 'none';
   const etd = document.getElementById('es-recip-etd');
   if (etd) { const ed = document.getElementById('es-date')?.value || today(); const pm = document.querySelector('#es-recip-todk .on')?.dataset.k !== 'am';
@@ -8339,11 +8352,19 @@ function _startEstrusProgram(cow, kind, date, memo) {
     if (!existing) tasks.push({ ...s, cowId: cow.id, memo });
   });
 }
+// 夕方に見た発情は、翌朝を0日目とみなしてゲストロン・移植を1日うしろにする（高橋式：D11夕〜D12朝の発情 → D19移植 と同じ日）
+function _esShiftPm(cow, date) {
+  tasks.forEach(t => {
+    if (t.cowId !== cow.id || t.done) return;
+    if (t.action === 'ゲストロン投与' && t.date === addDays(date, 6)) { t.date = addDays(date, 7); t.detail = 'ゲストロン1500IU 筋注（移植前日）'; }
+    if (t.action === '胚移植（ET）★目安' && t.date === addDays(date, 7)) { t.date = addDays(date, 8); t.detail = '夕方に見た発情から8日目 移植実施 ★日付は実施日に変更 → チェックすると妊鑑予定が自動追加されます'; }
+  });
+}
 function saveEstrusSkip(cowId) {
   const cow = cows.find(c => c.id === cowId);
   if (!cow) return;
   const w = document.getElementById('es-modal');
-  const k = document.querySelector('#es-next .on')?.dataset.k || 'watch';
+  const k = document.querySelector('#es-next > .on')?.dataset.k || 'watch';
   const date = document.getElementById('es-date').value || today();
   const memo = document.getElementById('es-memo').value.trim();
   if (k === 'ai') { w?.remove(); stRecord('ai', cowId); return; }   // AIは授精の記録で入れる（ここで二重に数えない）
@@ -8356,11 +8377,7 @@ function saveEstrusSkip(cowId) {
       // 夕方に見た発情は、翌朝を0日目とみなして1日うしろにずらす（高橋式：D11夕〜D12朝の発情 → D19移植 と同じ日になる）
       const pm = document.querySelector('#es-recip-todk .on')?.dataset.k !== 'am';
       _startEstrusProgram(cow, 'et', date, `受け牛に回す（発情：${pm ? '夕方' : '朝'}）${memo ? '　' + memo : ''}`);
-      if (pm) tasks.forEach(t => {
-        if (t.cowId !== cow.id || t.done) return;
-        if (t.action === 'ゲストロン投与' && t.date === addDays(date, 6)) { t.date = addDays(date, 7); t.detail = 'ゲストロン1500IU 筋注（移植前日）'; }
-        if (t.action === '胚移植（ET）★目安' && t.date === addDays(date, 7)) { t.date = addDays(date, 8); t.detail = '夕方に見た発情から8日目 移植実施 ★日付は実施日に変更 → チェックすると妊鑑予定が自動追加されます'; }
-      });
+      if (pm) _esShiftPm(cow, date);
     } else {
       cow.events.push({ type: 'estrus', date, skip: true, reason, memo: `発情あり・見送り（${reason}）${memo ? '　' + memo : ''}` });
       if (rk === 'cidr_ai_start') {
@@ -8373,7 +8390,11 @@ function saveEstrusSkip(cowId) {
         });
       }
     }
-  } else _startEstrusProgram(cow, 'et', date, memo);
+  } else {
+    const pm = document.querySelector('#es-et-todk .on')?.dataset.k !== 'am';
+    _startEstrusProgram(cow, 'et', date, [`発情：${pm ? '夕方' : '朝'}`, memo].filter(Boolean).join('　'));
+    if (pm) _esShiftPm(cow, date);
+  }
   save();
   w?.remove();
   _rptCache = null;
@@ -12088,6 +12109,66 @@ function installUndoHooks() {
   });
 }
 
+// ===== クラウドのバックアップ（毎日・8日分）から、消えた授精簿の行だけを戻す =====
+const _ibIdent = x => `${x.d}|${x.t}|${x.s}|${x._seq || ''}`;
+let _ibRestoreData = null;
+async function openIbRestore() {
+  const db = window._fbDb;
+  if (!db || !window._DATA_PATH) { appAlert('ログインして、電波のある所で使ってください'); return; }
+  const key = String(window._DATA_PATH).split('/').pop();
+  const cur = new Set(insemBookRecords.map(_ibIdent));
+  appAlert('バックアップを調べています…');
+  const days = []; for (let i = 0; i <= 9; i++) days.push(addDays(today(), -i));
+  const res = [];
+  for (const d of days) {
+    try {
+      const snap = await db.ref(`backups/${key}/${d}/insemBookRecords`).once('value');
+      let v = snap.val(); if (!v) continue;
+      const L = typeof v === 'string' ? JSON.parse(v) : v;
+      if (!Array.isArray(L)) continue;
+      const miss = L.filter(r => r && r.d && !cur.has(_ibIdent(r)));
+      res.push({ d, n: L.length, miss });
+    } catch (e) { console.warn('backup', d, e); }
+  }
+  try { closeModal('modal-confirm'); } catch (e) {}
+  document.getElementById('ibr-modal')?.remove();
+  if (!res.length) { appAlert('クラウドに授精簿のバックアップが見つかりませんでした'); return; }
+  // 一番多く戻せる日（同じなら新しい日）を最初に選んでおく
+  const best = res.slice().sort((a, b) => b.miss.length - a.miss.length || b.d.localeCompare(a.d))[0];
+  _ibRestoreData = res;
+  const w = document.createElement('div'); w.id = 'ibr-modal';
+  w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9300;display:flex;align-items:center;justify-content:center;padding:12px;';
+  w.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;width:100%;max-width:520px;max-height:92vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>📥 消えた授精簿の行を戻す</b><button class="modal-close" onclick="document.getElementById('ibr-modal').remove()">✕</button></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">今の授精簿：${insemBookRecords.length}行。バックアップの日を選ぶと、今は無い行が出ます。</div>
+    <select id="ibr-date" onchange="_ibrList()" style="margin-bottom:8px;">${res.map(r => `<option value="${r.d}" ${r === best ? 'selected' : ''}>${fmtDate(r.d)} のバックアップ（${r.n}行・今は無い行 ${r.miss.length}）</option>`).join('')}</select>
+    <div id="ibr-list"></div>
+    <button class="btn btn-primary" style="width:100%;margin-top:10px;" onclick="runIbRestore()">チェックした行を戻す</button>
+  </div>`;
+  document.body.appendChild(w);
+  _ibrList();
+}
+function _ibrList() {
+  const d = document.getElementById('ibr-date').value, r = (_ibRestoreData || []).find(x => x.d === d);
+  const box = document.getElementById('ibr-list'); if (!r) { box.innerHTML = ''; return; }
+  if (!r.miss.length) { box.innerHTML = '<div style="font-size:13px;color:var(--accent);">✓ このバックアップにあって今は無い行はありません</div>'; return; }
+  box.innerHTML = `<div style="display:flex;gap:6px;margin-bottom:6px;"><button class="st-act" onclick="document.querySelectorAll('#ibr-list .ibr').forEach(c=>c.checked=true)">すべて選ぶ</button><button class="st-act" onclick="document.querySelectorAll('#ibr-list .ibr').forEach(c=>c.checked=false)">すべて外す</button></div>
+    <div style="max-height:50vh;overflow:auto;">${r.miss.slice().sort((a, b) => String(b.d).localeCompare(String(a.d))).map(x => `<label style="display:flex;gap:6px;align-items:center;font-size:12px;padding:4px 2px;border-bottom:1px solid var(--border);text-transform:none;letter-spacing:0;font-weight:400;color:var(--text);">
+      <input type="checkbox" class="ibr" data-i="${r.miss.indexOf(x)}" checked> <span style="font-family:'JetBrains Mono',monospace;">${_stEsc(fmtDate(x.d))}</span> <b>${_stEsc(x.t)}</b> ${_stEsc(x.s || '')} <span style="color:var(--muted);">${_stEsc([x.n && 'No.' + x.n, x.m].filter(Boolean).join(' '))}</span></label>`).join('')}</div>`;
+}
+function runIbRestore() {
+  const d = document.getElementById('ibr-date').value, r = (_ibRestoreData || []).find(x => x.d === d); if (!r) return;
+  const pick = [...document.querySelectorAll('#ibr-list .ibr')].filter(c => c.checked).map(c => r.miss[+c.dataset.i]).filter(Boolean);
+  if (!pick.length) { appAlert('戻す行を選んでください'); return; }
+  const cur = new Set(insemBookRecords.map(_ibIdent));
+  armUndo(`授精簿の行を${pick.length}行戻しました`);
+  let n = 0;
+  pick.forEach(x => { if (cur.has(_ibIdent(x))) return; const c = JSON.parse(JSON.stringify(x)); delete c.id; c._mt = Date.now(); insemBookRecords.push(c); cur.add(_ibIdent(c)); n++; });
+  try { ensureInsemIds(); resetInsemSnap(); } catch (e) {}
+  save(); try { renderAll(); } catch (e) {}
+  document.getElementById('ibr-modal')?.remove();
+  appAlert(`授精簿に${n}行戻しました`);
+}
 // ===== バックアップから消えた予定（タスク）だけを戻す =====
 function _parseBackupData(text) {
   const i = text.indexOf('<script id="backup-restore">');
@@ -32141,6 +32222,20 @@ function syncMerge3(k, base, remoteStr, localStr) {
       if (!bm && key.startsWith('h:')) { out.push(rx); return; }
       out.push(rx);                                                  // ほかの端末で足した → 残す
     });
+    // ★ 2026/11/15：自動でまとめるときに、授精簿・牛・子牛の記録が一度にたくさん消えることはしない。
+    //   （端末の古い画面や保存の失敗で「消した」と見えてしまうことがあるため）。たくさん消えそうなときは消さずに残す
+    const GUARD = { insemBookRecords: x => `${x.d}|${x.t}|${x.s}|${x._seq || ''}`, cows: x => x.id, calves: x => x.id, retiredCows: x => x.id, calvingRecords: x => x.id || JSON.stringify(x), transferBook: x => x.id || JSON.stringify(x) };
+    if (GUARD[k]) {
+      const idOf = x => { try { return x && typeof x === 'object' ? GUARD[k](x) : JSON.stringify(x); } catch (e) { return JSON.stringify(x); } };
+      const have = new Set(out.map(idOf));
+      const lost = new Map();
+      [...R, ...L].forEach(x => { const i = idOf(x); if (!have.has(i) && !lost.has(i)) lost.set(i, x); });
+      const big = Math.max(R.length, L.length);
+      if (lost.size >= 5 && lost.size > big * 0.1) {
+        console.warn(`同期：${k} が ${lost.size}件消えそうだったので、消さずに残しました`);
+        lost.forEach(x => out.push(x));
+      }
+    }
     return JSON.stringify(out);
   }
   if (R && L && typeof R === 'object' && typeof L === 'object' && !Array.isArray(R) && !Array.isArray(L) && (!base || base.t === 'o')) {
