@@ -47,6 +47,8 @@ window.FARM_CONFIG = {
   statsFrom: { ai: '2026-11-15', et: '2026-07-21' },
   // 発情で授精を見送るとき「受け牛に回す」を選べる（自然発情→ET か CIDRプログラムの予定を作る）
   estrusRecipient: true,
+  // ツールを開いたときの最初の画面（'home' = ホーム。書かなければタスク）
+  startTab: 'home',
   // 子牛の予定：生まれて何日目にタスクを出すか（除角は生後2週間。去勢は日数が決まったら castrate: 日数 を足す）
   calfTasks: { dehorn: 14 },
   // 牛群（ファームノートと同じ並び）

@@ -91,6 +91,7 @@
 })();
 </script>
 <style>html.no-extinsem div:has(> #ibsub-ext) { display: none !important; }
+html body:not(.is-home) #barn-board.home-only { display: none !important; }
 html:not(.no-etcert) .only-noetcert { display: none !important; }
 html.no-etcert [data-feat="etcert"], html.no-etcert label:has(> .et-cert-check), html.no-etcert .et-cert-check { display: none !important; }
 [data-feat="calfflags"], [data-feat="barnlist"] { display: none !important; } html.feat-calfflags [data-feat="calfflags"], html.feat-barnlist [data-feat="barnlist"] { display: revert !important; } html.feat-calfflags .lf-row[data-feat="calfflags"] { display: flex !important; }</style>
@@ -937,7 +938,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
 <div class="page" id="page-cows">
   <div class="section-header">
     <div class="section-title">個体一覧</div>
-    <div class="view-seg"><button class="on">🐄 カード</button><button onclick="switchTab('herd')">📑 一覧表</button><button data-feat="barnlist" onclick="switchTab('barns')">🏠 牛舎別</button></div>
+    <div class="view-seg"><button class="on">🐄 カード</button><button onclick="switchTab('herd')">📑 一覧表</button></div>
     <div style="display:flex;gap:8px;align-items:center;">
       <div id="cow-count" style="font-size:12px;color:var(--muted);"></div>
       <button class="btn btn-primary" style="font-size:12px;padding:6px 12px;" onclick="openModal('modal-new-cow')">＋ 新規導入</button>
@@ -1434,17 +1435,10 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
 </div>
 
 <!-- STATS -->
-<!-- 🏠 牛舎別（牛群リスト）：個体タブの3つ目の見方。長島さん用（features.barnList） -->
-<div class="page" id="page-barns">
-  <div class="section-header"><div class="section-title">牛舎別</div>
-    <div class="view-seg"><button onclick="switchTab('cows')">🐄 カード</button><button onclick="switchTab('herd')">📑 一覧表</button><button class="on">🏠 牛舎別</button></div></div>
-  <div id="barn-board"></div>
-</div>
-
 <!-- 一覧（並び替え・保存リスト・タグ） -->
 <div class="page" id="page-herd">
   <div class="section-header"><div class="section-title">個体一覧</div>
-    <div class="view-seg"><button onclick="switchTab('cows')">🐄 カード</button><button class="on">📑 一覧表</button><button data-feat="barnlist" onclick="switchTab('barns')">🏠 牛舎別</button></div></div>
+    <div class="view-seg"><button onclick="switchTab('cows')">🐄 カード</button><button class="on">📑 一覧表</button></div></div>
   <div id="herd-container"></div>
 </div>
 
@@ -1463,6 +1457,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
 
 <!-- データ点検 -->
 <div class="page" id="page-check">
+  <div id="barn-board" class="home-only" data-feat="barnlist" style="margin-bottom:14px;"></div>
   <div class="section-header"><div class="section-title">🔔 要確認</div></div>
   <div style="font-size:11px;color:var(--muted);margin:-6px 0 10px;">注意が必要な牛・改善が必要な成績・記録の食い違いを、ここにまとめています</div>
   <div id="check-container"></div>
@@ -4174,6 +4169,8 @@ function initApp() {
   try { if (initNosePrintFlags()) save(); } catch (e) { console.error('nosePrint', e); }
   renderAll();
   initSwipe();
+  // 開いたときの最初の画面（設定 startTab: 'home' ならホーム）。開いた最初の1回だけ
+  if (!window._startTabDone) { window._startTabDone = true; try { if (window.FARM_CFG && FARM_CFG.startTab === 'home' && typeof bbGo === 'function') bbGo('home'); } catch (e) {} }
 }
 
 // 使い始めに昔の廃用牛をまとめて登録したため、廃用日が「登録した日」になっている牛を「廃用日不明」にする（1回だけ）
@@ -16403,9 +16400,9 @@ function switchTab(name) {
   try { bbSync(name); } catch (e) {}
   // 個体の「選んでリストに」は、ほかの画面に移ったら終わる
   if (name !== 'cows' && typeof _cowPick !== 'undefined' && _cowPick) { _cowPick = null; try { renderCowPickBar(); } catch (e) {} }
-  const names = ['today','preg','cows','calves','retired','stats','semen','history','fattening','insembook','collection','calc','calendar','herd','barns','vet','check','annual'];
+  const names = ['today','preg','cows','calves','retired','stats','semen','history','fattening','insembook','collection','calc','calendar','herd','vet','check','annual'];
   // ボタンが統合された画面は、親のボタンを光らせる（一覧表→個体、詳細成績→年間まとめ、計算→カレンダー）
-  const navOf = { herd: 'cows', barns: 'cows', calc: 'calendar' }[name] || name;
+  const navOf = { herd: 'cows', calc: 'calendar' }[name] || name;
   names.forEach(n => {
     const btn = document.getElementById(`gnav-${n}`);
     if (btn) btn.classList.toggle('active', n===navOf);
@@ -16429,7 +16426,7 @@ function switchTab(name) {
   if (name==='annual') renderAnnual();
   if (name==='check') renderDataCheck();
   if (name==='herd' && typeof renderHerdList==='function') renderHerdList();
-  if (name==='barns') renderBarnBoard();
+  if (name==='check') { try { renderBarnBoard(); } catch (e) {} }
   if (name==='vet' && typeof openVetTab==='function') openVetTab();
   if (name==='calc') { const el=document.getElementById('calc-date'); if(el&&!el.value) el.value=today(); runCalc(); }
   if (name==='history') renderHistory();
