@@ -5754,7 +5754,7 @@ function renderPregList() {
 
 // 月別の分娩頭数を前の年とくらべる棒グラフ
 //   1か月に棒は1本（今年＝緑、分娩予定は点線の枠）。♂♀の頭数は月の下に、棒の列にそろえて出す（♂青・♀からし色の文字）
-//   前の年は棒の後ろの灰色の枠（影）で重ねる。枠の方が高ければ、前の年の方が多かった。
+//   前の年は左に灰色の棒を同じ太さで並べる（記録のない月は「·」）。
 //   色は色の見分けがつきにくい人でも分かれる青×からし色（検証ずみ）。月をタップすると下に内訳が出る
 function _calvCompareChart(y, py, B, D, P, SC, SP) {
   const MALE = '#3987e5', FEM = '#c98500';
@@ -5773,11 +5773,21 @@ function _calvCompareChart(y, py, B, D, P, SC, SP) {
   const thisM = +today().slice(5, 7), isThisYear = today().slice(0, 4) === y;
   let bars = '';
   for (let i = 0; i < 12; i++) {
-    const x0 = L + i * gw, bw = gw * 0.56, bx = x0 + (gw - bw) / 2;
+    const x0 = L + i * gw;
+    // 前の年の記録があれば、灰色（前の年）と緑（今年）の2本を同じ太さで並べる
+    const pair = known.length > 0;
+    const bw = pair ? gw * 0.38 : gw * 0.56, px = x0 + (gw - bw * 2 - 2) / 2, bx = pair ? px + bw + 2 : x0 + (gw - bw) / 2;
     const p = P[i], b = B[i], d = D[i];
     if (isThisYear && i + 1 === thisM) bars += `<rect x="${x0 + 1}" y="${top - 8}" width="${gw - 2}" height="${h + 8}" rx="3" style="fill:var(--text);fill-opacity:.05"/>`;
-    // 前の年（影の枠）
-    if (p) bars += `<rect x="${bx - 2.5}" y="${yy(p)}" width="${bw + 5}" height="${top + h - yy(p)}" rx="3" style="fill:none;stroke:#9ca3af;stroke-width:1.3;stroke-opacity:.8"/>`;
+    // 前の年：灰色の棒（記録がない月は下に「·」）
+    if (pair) {
+      if (p) {
+        const y1 = yy(p), y0 = top + h;
+        bars += `<path d="M${px},${y0} V${y1 + 3} Q${px},${y1} ${px + 3},${y1} H${px + bw - 3} Q${px + bw},${y1} ${px + bw},${y1 + 3} V${y0} Z" style="fill:#9ca3af;fill-opacity:.55"/>`;
+        bars += `<text x="${px + bw / 2}" y="${y1 - 4}" text-anchor="middle" style="font-size:8.5px;fill:#9ca3af">${p}</text>`;
+      } else if (p == null) bars += `<text x="${px + bw / 2}" y="${top + h - 3}" text-anchor="middle" style="font-size:9px;fill:#9ca3af">·</text>`;
+      else bars += `<text x="${px + bw / 2}" y="${top + h - 3}" text-anchor="middle" style="font-size:8px;fill:#9ca3af">0</text>`;
+    }
     // 今年：♂（下）→ ♀ → 性別未入力 → 分娩予定（点線）。区切りは2pxのすき間
     const parts = [];
     parts.push([b, 'var(--accent)', 1]);
@@ -5791,7 +5801,7 @@ function _calvCompareChart(y, py, B, D, P, SC, SP) {
     });
     if (d) { const y1 = yy(b + d), y0 = yy(b) - (b ? 1.5 : 0); bars += `<rect x="${bx + .6}" y="${y1 + .6}" width="${bw - 1.2}" height="${Math.max(0, y0 - y1 - 1.2)}" rx="3" style="fill:var(--text);fill-opacity:.05;stroke:var(--text);stroke-opacity:.75;stroke-width:1.2;stroke-dasharray:3 2"/>`; }
     const tot = b + d;
-    if (tot) bars += `<text x="${bx + bw / 2}" y="${Math.min(yy(tot), p ? yy(p) : 1e9) - 4}" text-anchor="middle" style="font-size:9.5px;font-weight:700;fill:var(--text)">${tot}</text>`;
+    if (tot) bars += `<text x="${bx + bw / 2}" y="${yy(tot) - 4}" text-anchor="middle" style="font-size:9.5px;font-weight:700;fill:var(--text)">${tot}</text>`;
     const ly = top + h + 13;
     bars += `<text x="${x0 + gw / 2}" y="${ly}" text-anchor="middle" style="font-size:9px;fill:var(--muted)">${i + 1}月</text>`;
     // ♂♀の内訳：月の下に、棒の列にそろえて
@@ -5815,7 +5825,7 @@ function _calvCompareChart(y, py, B, D, P, SC, SP) {
     <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--text);margin:8px 0 2px;">
       <span>${sw('background:var(--accent)')}生まれた ${B.reduce((a, b) => a + b, 0)}${SEXOK ? `（<span style="color:${MALE};font-weight:700;">♂${sm(SC, 0)}</span>・<span style="color:${FEM};font-weight:700;">♀${sm(SC, 1)}</span>）` : ''}</span>
       <span>${sw('border:1.2px dashed var(--text);box-sizing:border-box')}予定 ${D.reduce((a, b) => a + b, 0)}</span>
-      ${known.length ? `<span style="color:var(--muted);">${sw('border:1.3px solid #9ca3af;box-sizing:border-box')}${py}年</span>` : ''}
+      ${known.length ? `<span style="color:var(--muted);">${sw('background:#9ca3af;opacity:.55')}${py}年（左の灰色）</span>` : ''}
     </div>
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" role="img" aria-label="${y}年の月別分娩頭数（${py}年とくらべる）">
       ${g}<line x1="${L}" x2="${W - R}" y1="${top + h}" y2="${top + h}" style="stroke:var(--muted);stroke-width:.8"/>${bars}
@@ -32936,7 +32946,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111713';
+const APP_BUILD = '2026111714';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
