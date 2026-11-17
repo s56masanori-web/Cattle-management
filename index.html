@@ -6751,8 +6751,8 @@ function renderCowList() {
       return `<div class="cow-card nui-cc" data-cowid="${cow.id}" style="${cardStyle}cursor:pointer;" onclick="cowCardClick('${cow.id}')">
         ${(cow.tags || []).length ? `<div class="nui-tags nui-tags-top" onclick="event.stopPropagation()">${cow.tags.map(t => `<button class="nui-tagc" style="${nuiTagStyle(t)}" onclick="nuiTagFilter('${String(t).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')}')">🏷 ${_stEsc(t)}</button>`).join('')}</div>` : ''}
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <div style="min-width:0;"><span class="cow-id">${cow.id}</span> <span style="font-size:15px;font-weight:700;">${cowName}</span>${(() => { const m = getMasterCow(cow.id); const d = String((m && m.nationalId) || cow.nationalId || '').replace(/\D/g, ''); return d.length >= 5 ? ` <span class="nui-nid">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}${breedBadge}${roleBadge}${abortionRiskBadge(cow.id)}</div>
-          <div style="font-size:12px;white-space:nowrap;"><span class="cow-status-dot ${displayDot}"></span>${displayStatus}</div>
+          <div class="nui-cc-name"><span class="cow-id">${cow.id}</span><span style="font-size:15px;font-weight:700;">${cowName}</span>${(() => { const m = getMasterCow(cow.id); const d = String((m && m.nationalId) || cow.nationalId || '').replace(/\D/g, ''); return d.length >= 5 ? ` <span class="nui-nid">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}${breedBadge}${roleBadge}${abortionRiskBadge(cow.id)}</div>
+          ${(() => { const t = String(displayStatus || ''), m = t.match(/^([^（(<]+)[（(](.+)[）)]$/); return `<div class="nui-cc-st"><span style="white-space:nowrap;"><span class="cow-status-dot ${displayDot}"></span>${m ? m[1] : t}</span>${m ? `<div style="font-size:11px;color:var(--muted);">${m[2].replace(/^授精可能[:：]\s*/, '授精可能 ').replace(/\d{4}\//, '')}</div>` : ''}</div>`; })()}
         </div>
         ${_sub ? `<div style="font-size:12px;color:var(--muted);margin-top:3px;">${_sub}</div>` : ''}
         ${_key}
@@ -12714,20 +12714,87 @@ function runInvRestore() {
   document.getElementById('invr-modal')?.remove();
   appAlert(`在庫の記録を${pick.length}件戻しました`);
 }
-function runIbRestore() {
+// ★ 2026/11/18：授精簿の行を消すと、牛のストーリー（授精・移植・妊鑑の結果）、分娩予定、在庫の使用記録もいっしょに消える。
+//   行を戻すときは、同じ日のバックアップから、その行に関係する記録もいっしょに戻す（今ある記録はそのまま・二重にしない）
+async function runIbRestore() {
   const d = document.getElementById('ibr-date').value, r = (_ibRestoreData || []).find(x => x.d === d); if (!r) return;
   const pick = [...document.querySelectorAll('#ibr-list .ibr')].filter(c => c.checked).map(c => r.miss[+c.dataset.i]).filter(Boolean);
   if (!pick.length) { appAlert('戻す行を選んでください'); return; }
+  const db = window._fbDb, key = String(window._DATA_PATH || '').split('/').pop();
+  const bk = {};
+  for (const k of ['cows', 'tasks', 'semenInventory', 'embryoInventory', 'etRecords']) {
+    try { const v = (await db.ref(`backups/${key}/${d}/${k}`).once('value')).val(); bk[k] = v ? (typeof v === 'string' ? JSON.parse(v) : v) : null; } catch (e) { bk[k] = null; }
+  }
   armUndo(`授精簿の行を${pick.length}行戻しました`);
-  let n = 0;
-  let inv = 0;
-  pick.forEach(x => { const c = JSON.parse(JSON.stringify(x)); delete c.id; c._mt = Date.now(); insemBookRecords.push(c); n++;
-    // 戻した行の精液・受精卵を在庫にも反映（もう在庫の記録があるものは二重にしない）
-    try { if (!/在庫反映なし/.test(c.op || '') && !_invHasUse(c) && syncInsemInventoryForRecord(c)) inv++; } catch (e) {} });
+  const INS = ['ai_done', 'et_done', 'estrus_ai', 'estrus_et'];
+  const evSig = e => [e.type, e.date, e.memo || '', e.insemDate || ''].join('|');
+  let n = 0, inv = 0, evN = 0, stN = 0, tkN = 0, etN = 0;
+  const touched = new Set();
+  pick.forEach(x => {
+    const c = JSON.parse(JSON.stringify(x)); delete c.id; c._mt = Date.now(); insemBookRecords.push(c); n++;
+    // ① 牛のストーリー：その日の授精・移植と、その授精の妊鑑の結果
+    const bc = (bk.cows || []).find(o => o && o.id === x.t), cc = cows.find(o => o.id === x.t);
+    if (bc && cc) {
+      cc.events = cc.events || [];
+      const have = new Set(cc.events.map(evSig));
+      const nextIns = (bc.events || []).filter(e => INS.includes(e.type) && e.date > x.d).map(e => e.date).sort()[0] || '9999';
+      (bc.events || []).forEach(e => {
+        const rel = (INS.includes(e.type) && e.date === x.d) ||
+          (['preg_positive', 'preg_negative'].includes(e.type) && (e.insemDate === x.d || (!e.insemDate && e.date >= x.d && e.date < nextIns && e.date <= addDays(x.d, 280))));
+        if (rel && !have.has(evSig(e))) { cc.events.push(JSON.parse(JSON.stringify(e))); have.add(evSig(e)); evN++; touched.add(cc.id); }
+      });
+      cc.events.sort((p, q) => String(p.date || '').localeCompare(String(q.date || '')));
+    }
+    // ② 在庫の使用記録：バックアップにあった、その日・その牛の使用記録を戻す
+    const s0 = x.s || '';
+    const isET = x.insemType === 'et' || isEmbryoNo(s0) || new RegExp('^' + ANY_LIC_RE).test(s0) || s0.includes('×');
+    const arrB = bk[isET ? 'embryoInventory' : 'semenInventory'], arrC = isET ? embryoInventory : semenInventory;
+    let invDone = false;
+    (arrB || []).forEach(bi => {
+      const ci = arrC.find(i => i.id === bi.id); if (!ci) return;
+      (bi.history || []).forEach(h => {
+        if (h.date !== x.d || !['use', 'transfer'].includes(h.type) || h.cowId !== x.t) return;
+        if (!isET && bi.name !== s0) return;
+        const hs = JSON.stringify(h);
+        if ((ci.history || []).some(y => JSON.stringify(y) === hs)) { invDone = true; return; }
+        ci.history = ci.history || []; ci.history.push(JSON.parse(hs));
+        ci.history.sort((p, q) => String(p.date || '').localeCompare(String(q.date || '')));
+        ci.stock = (ci.stock || 0) - (+h.count || 1); inv++; invDone = true;
+      });
+    });
+    if (!invDone) { try { if (!/在庫反映なし/.test(c.op || '') && !_invHasUse(c) && syncInsemInventoryForRecord(c)) inv++; } catch (e) {} }
+    // ③ 移植の記録
+    if (isET && Array.isArray(bk.etRecords)) {
+      bk.etRecords.filter(e => e && e.date === x.d && e.cowId === x.t).forEach(e => {
+        const es = JSON.stringify(e);
+        if (!etRecords.some(y => JSON.stringify(y) === es)) { etRecords.push(JSON.parse(es)); etN++; }
+      });
+    }
+  });
+  // ④ 妊娠中・分娩予定：消したせいで空胎に戻った牛だけ、バックアップの状態に戻す（その後に新しい授精があれば戻さない）
+  touched.forEach(id => {
+    const cc = cows.find(o => o.id === id), bc = (bk.cows || []).find(o => o && o.id === id);
+    if (!cc || !bc) return;
+    const bLast = (bc.events || []).filter(e => INS.includes(e.type)).map(e => e.date).sort().pop() || '';
+    const newer = (cc.events || []).some(e => INS.includes(e.type) && e.date > bLast);
+    if (!newer && cc.status === 'open' && bc.status && bc.status !== 'open') { cc.status = bc.status; if (bc.dueDate) cc.dueDate = bc.dueDate; stN++; }
+    else if (bc.dueDate && !cc.dueDate && cc.status === 'pregnant') { cc.dueDate = bc.dueDate; stN++; }
+    // 分娩予定・産室移動・妊鑑・再発情の予定（まだ済んでいないもの）
+    const ids = new Set(tasks.map(t => t.id));
+    (bk.tasks || []).forEach(t => {
+      if (!t || t.cowId !== id || t.done || ids.has(t.id)) return;
+      const a = t.action || '';
+      const preg = a === '分娩予定' || a === '🏠 産室移動';
+      if (!(preg || a.includes('妊娠鑑定') || a.includes('再発情'))) return;
+      if (preg && !(cc.status === 'pregnant' && cc.dueDate === bc.dueDate)) return;
+      tasks.push(JSON.parse(JSON.stringify(t))); tkN++;
+    });
+  });
   try { ensureInsemIds(); resetInsemSnap(); } catch (e) {}
   save(); try { renderAll(); } catch (e) {}
   document.getElementById('ibr-modal')?.remove();
-  appAlert(`授精簿に${n}行戻しました` + (inv ? `（在庫にも${inv}本反映）` : ''));
+  const more = [evN ? `ストーリーの記録 ${evN}件` : '', stN ? `妊娠中・分娩予定 ${stN}頭` : '', tkN ? `予定 ${tkN}件` : '', inv ? `在庫 ${inv}本` : '', etN ? `移植の記録 ${etN}件` : ''].filter(Boolean);
+  appAlert(`授精簿に${n}行戻しました` + (more.length ? `\nいっしょに戻したもの：${more.join('・')}` : ''));
 }
 // ★ 2026/11/17：授精簿の行に対応する在庫の使用記録があるか（syncInsemInventoryForRecord と同じ見方）
 function _invHasUse(rec) {
@@ -22159,10 +22226,13 @@ function deleteInsemRecord(src, idx) {
       var cow = cows.find(function(c) { return c.id === cowId; });
       if (cow && cow.events) {
         // 授精記録に対応する妊鑑結果を特定して削除
+        // ★ 2026/11/18：この授精のあとに別の授精・移植があるときは、そのあとの妊娠（分娩予定・状態）にはさわらない
+        var nextInsDate = (cow.events||[]).filter(function(e) { return ['ai_done','et_done','estrus_ai','estrus_et'].includes(e.type) && e.date > date; }).map(function(e) { return e.date; }).sort()[0] || '9999';
         var pregToDelete = (cow.events||[]).find(function(e) {
           return (e.type==='preg_positive'||e.type==='preg_negative') &&
-            (e.insemDate === date || (!e.insemDate && e.date >= date && e.date <= addDays(date, 280)));
+            (e.insemDate === date || (!e.insemDate && e.date >= date && e.date < nextInsDate && e.date <= addDays(date, 280)));
         });
+        var isLatestIns = nextInsDate === '9999';
         cow.events = cow.events.filter(function(ev) {
           if (ev.date !== date) return true;
           var evType = isET ? 'et_done' : 'ai_done';
@@ -22171,17 +22241,19 @@ function deleteInsemRecord(src, idx) {
         // 妊鑑結果も削除
         if (pregToDelete) {
           cow.events = cow.events.filter(function(e) { return e !== pregToDelete; });
-          // 分娩予定・産室移動タスクも削除
-          tasks = tasks.filter(function(t) {
-            return !(t.cowId === cowId && !t.done && (t.action === '分娩予定' || t.action === '🏠 産室移動'));
-          });
-          cow.dueDate = null;
+          // 分娩予定・産室移動タスクも削除（いちばん新しい授精のときだけ）
+          if (isLatestIns) {
+            tasks = tasks.filter(function(t) {
+              return !(t.cowId === cowId && !t.done && (t.action === '分娩予定' || t.action === '🏠 産室移動'));
+            });
+            cow.dueDate = null;
+          }
         }
         // ステータスをopenに戻す（次のイベントがなければ）
         var hasActiveEvent = (cow.events||[]).some(function(ev) {
-          return ['ai_done','et_done','cidr_ai_start','et_recipient','donor_et_start'].includes(ev.type) && ev.date >= date;
+          return ['ai_done','et_done','cidr_ai_start','et_recipient','donor_et_start','calving','abortion'].includes(ev.type) && ev.date >= date;
         });
-        if (!hasActiveEvent) cow.status = 'open';
+        if (!hasActiveEvent && isLatestIns) cow.status = 'open';
       }
 
       // 3. 妊鑑タスク・再発情タスクを削除
@@ -22200,7 +22272,8 @@ function deleteInsemRecord(src, idx) {
         semenInventory.forEach(function(inv) {
           if (!inv.history) return;
           inv.history = inv.history.filter(function(h) {
-            var isThis = (h.type === 'use' || h.type === 'transfer') && h.date === date && (h.cowId === cowId || (inv.name === sire.trim()));
+            // ★ 2026/11/18：同じ日に同じ精液を使った別の牛の記録まで消さない
+            var isThis = (h.type === 'use' || h.type === 'transfer') && h.date === date && inv.name === sire.trim() && (h.cowId === cowId || !h.cowId);
             if (isThis) inv.stock = (inv.stock||0) + (h.count||1);
             return !isThis;
           });
@@ -33065,7 +33138,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111736';
+const APP_BUILD = '2026111801';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
@@ -33788,6 +33861,10 @@ html.nui .nui-ibfoot{display:flex;flex-wrap:wrap;gap:10px;align-items:center;bac
 #nui-side .it.on{background:#0d2a1a;border-color:#166534;color:#4ade80;}
 #nui-side .bd{background:#f59e0b;color:#000;font-size:10px;font-weight:900;border-radius:999px;padding:1px 7px;}
 html.hx-collection #nui-side [data-p="collection"], html.hx-collection #page-more [data-p="collection"]{display:none !important;}
+.nui-cc-name{min-width:0;flex:1 1 auto;display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;}
+.nui-cc-name>*{white-space:nowrap;margin-left:0 !important;}
+.nui-cc-name .nui-nid{margin-left:0;}
+.nui-cc-st{flex:0 1 auto;max-width:46%;text-align:right;font-size:12px;line-height:1.4;}
 .nui-cc-key{font-size:13px;margin-top:6px;}
 .nui-nid{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:#cbd5e1;background:#1e2333;border:1px solid #2a3050;border-radius:6px;padding:1px 6px;margin-left:4px;}
 .nui-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
