@@ -100,7 +100,13 @@ html.hx-etCol #insembook-table th:nth-child(11), html.hx-etCol #insembook-table 
 html:not(.no-etcert) .only-noetcert { display: none !important; }
 html.no-etcert .only-own-fat { display: none !important; }
 html.no-etcert [data-feat="etcert"], html.no-etcert label:has(> .et-cert-check), html.no-etcert .et-cert-check { display: none !important; }
-[data-feat="calfflags"], [data-feat="barnlist"] { display: none !important; } html.feat-calfflags [data-feat="calfflags"], html.feat-barnlist [data-feat="barnlist"] { display: revert !important; } html.feat-calfflags .lf-row[data-feat="calfflags"] { display: flex !important; }</style>
+[data-feat="calfflags"], [data-feat="barnlist"] { display: none !important; } html.feat-calfflags [data-feat="calfflags"], html.feat-barnlist [data-feat="barnlist"] { display: revert !important; } html.feat-calfflags .lf-row[data-feat="calfflags"] { display: flex !important; }
+/* ★ 2026/11/17：画面がせまい・文字が大きいスマホ（TORQUE など）で、子牛カードの左側が1文字ずつ折り返さないように。
+   左（番号・母）が150px以上とれないときは、右の札（鼻紋・除角・去勢・性別・品種）を次の行に回す */
+.calf-sum { flex-wrap: wrap; row-gap: 6px; }
+.calf-sum-main { flex: 1 1 150px !important; }
+.calf-sum-tags { flex-shrink: 1 !important; flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; column-gap: 6px; margin-left: auto !important; }
+</style>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap');
 :root{--bg:#0f1117;--bg2:#171b26;--bg3:#1e2333;--border:#2a3050;--accent:#4ade80;--accent2:#22c55e;--warn:#f59e0b;--danger:#ef4444;--info:#60a5fa;--purple:#a78bfa;--text:#e2e8f0;--muted:#64748b;--card:#1a1f2e;}
@@ -25850,11 +25856,11 @@ function renderCalves() {
 
       return `<div style="background:var(--card);${cardBg}border-radius:12px;margin-bottom:10px;overflow:hidden;">
         <!-- サマリー行（常時表示） -->
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;cursor:pointer;" onclick="event.stopPropagation();toggleCalfCard('${calf.id}')">
+        <div class="calf-sum" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;cursor:pointer;" onclick="event.stopPropagation();toggleCalfCard('${calf.id}')">
           <div style="flex-shrink:0;margin-right:8px;" onclick="event.stopPropagation();">
             <input type="checkbox" class="calf-cert-check" data-calfid="${calf.id}" data-damid="${calf.damId}" data-dob="${calf.dob}" style="width:16px;height:16px;cursor:pointer;accent-color:var(--purple);">
           </div>
-          <div style="flex:1;min-width:0;">
+          <div class="calf-sum-main" style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
               ${calf.name ? `<span style="font-size:14px;font-weight:700;color:var(--text);">${calf.name}</span>` : ''}
               ${calf.earTagId ? `<span style="font-family:'JetBrains Mono',monospace;color:var(--accent);font-weight:700;">${calf.earTagId}</span>` : ''}
@@ -25893,7 +25899,7 @@ function renderCalves() {
               ${isOverdue ? ' <span style="color:var(--warn);font-weight:700;">⚠️ 移動検討</span>' : ''}
             </div>
           </div>
-          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:8px;">
+          <div class="calf-sum-tags" style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:8px;">
             ${window.FARM_FEAT && FARM_FEAT.calfFlags ? calfFlagToggles(calf) : ''}
             ${calf.sex ? (calfSexMark(calf) === '去勢' ? `<span ${window.FARM_FEAT && FARM_FEAT.calfFlags && !calf.deathDate ? `onclick="event.stopPropagation();markCalfFlag('${calf.id}','castrated')" title="押すと去勢を取り消せます" style="cursor:pointer;font-size:12px;font-weight:800;color:var(--text);"` : `style="font-size:12px;font-weight:800;color:#93c5fd;"`}>去勢</span>` : `<span style="font-size:18px;">${calf.sex==='雄'?'♂':'♀'}</span>`) : ''}
             ${calf.breed ? `<span style="background:${bc.bg};border:1px solid ${bc.border};color:${bc.color};font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;">${calf.breed}</span>` : ''}
@@ -32956,7 +32962,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111718';
+const APP_BUILD = '2026111719';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
