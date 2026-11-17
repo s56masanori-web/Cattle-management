@@ -6742,8 +6742,9 @@ function renderCowList() {
       if (cow.status === 'pregnant' && cow.dueDate) { const dl = diffDays(cow.dueDate, today()); _key = `<div class="nui-cc-key">🍼 分娩予定 <b style="color:var(--purple);">${fmtDate(cow.dueDate)}</b> <span style="color:${dl < 0 ? 'var(--danger)' : 'var(--muted)'};">${dl < 0 ? '（' + (-dl) + '日超過）' : '（あと' + dl + '日）'}</span></div>`; }
       else if (openDays !== null && cow.status === 'open' && !isPregWaiting) _key = `<div class="nui-cc-key">空胎 <b style="color:${openDays > 90 ? 'var(--danger)' : openDays > 60 ? 'var(--warn)' : 'var(--text)'};">${openDays}日</b>${nextEstrusLabel ? ' ・ ' + nextEstrusLabel.replace(/<\/?div[^>]*>/g, '') : ''}</div>`;
       return `<div class="cow-card nui-cc" data-cowid="${cow.id}" style="${cardStyle}cursor:pointer;" onclick="cowCardClick('${cow.id}')">
+        ${(cow.tags || []).length ? `<div class="nui-tags nui-tags-top" onclick="event.stopPropagation()">${cow.tags.map(t => `<button class="nui-tagc" style="${nuiTagStyle(t)}" onclick="nuiTagFilter('${String(t).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')}')">🏷 ${_stEsc(t)}</button>`).join('')}</div>` : ''}
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <div style="min-width:0;"><span class="cow-id">${cow.id}</span> <span style="font-size:15px;font-weight:700;">${cowName}</span>${breedBadge}${roleBadge}${abortionRiskBadge(cow.id)}</div>
+          <div style="min-width:0;"><span class="cow-id">${cow.id}</span> <span style="font-size:15px;font-weight:700;">${cowName}</span>${(() => { const m = getMasterCow(cow.id); const d = String((m && m.nationalId) || cow.nationalId || '').replace(/\D/g, ''); return d.length >= 5 ? ` <span class="nui-nid">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}${breedBadge}${roleBadge}${abortionRiskBadge(cow.id)}</div>
           <div style="font-size:12px;white-space:nowrap;"><span class="cow-status-dot ${displayDot}"></span>${displayStatus}</div>
         </div>
         ${_sub ? `<div style="font-size:12px;color:var(--muted);margin-top:3px;">${_sub}</div>` : ''}
@@ -33057,7 +33058,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111733';
+const APP_BUILD = '2026111735';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
@@ -33781,6 +33782,13 @@ html.nui .nui-ibfoot{display:flex;flex-wrap:wrap;gap:10px;align-items:center;bac
 #nui-side .bd{background:#f59e0b;color:#000;font-size:10px;font-weight:900;border-radius:999px;padding:1px 7px;}
 html.hx-collection #nui-side [data-p="collection"], html.hx-collection #page-more [data-p="collection"]{display:none !important;}
 .nui-cc-key{font-size:13px;margin-top:6px;}
+.nui-nid{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:#cbd5e1;background:#1e2333;border:1px solid #2a3050;border-radius:6px;padding:1px 6px;margin-left:4px;}
+.nui-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+.nui-tags-top{margin:0 0 8px;}
+.nui-tagc{font-size:12px;font-weight:700;border-radius:999px;padding:3px 10px;border:1px solid;cursor:pointer;font-family:inherit;}
+.nui-tagbar{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:-4px 0 12px;padding-bottom:2px;}
+.nui-tagbar::-webkit-scrollbar{display:none;}
+.nui-tagbar>*{flex-shrink:0;white-space:nowrap;}
 .nui-cc-act{display:flex;gap:6px;margin-top:10px;}
 .nui-cc-act button{flex:1;height:38px;border-radius:9px;background:#1e2333;border:1px solid #2a3050;color:#e2e8f0;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
 .nui-cc-act button.g{background:#0d2a1a;border-color:#166534;color:#4ade80;}
@@ -34304,6 +34312,31 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     if (inp && src && inp.value !== src.value) inp.value = src.value;
   }
 
+  // タグ：同じタグはいつも同じ色。押すとそのタグの牛だけ出す
+  const TAGPAL = [['#fbbf24', '#1f1600'], ['#4ade80', '#0d2a1a'], ['#c4a5f5', '#1c1230'], ['#22d3ee', '#06232a'], ['#f472b6', '#2a0f1f'], ['#fb923c', '#1a0f00'], ['#a3e635', '#16210a'], ['#e2e8f0', '#1e2333']];
+  window.nuiTagStyle = function (t) { let h = 0; String(t).split('').forEach(ch => { h = (h * 31 + ch.charCodeAt(0)) >>> 0; }); const [fg, bg] = TAGPAL[h % TAGPAL.length]; return `color:${fg};background:${bg};border-color:${fg}66;`; };
+  window.nuiTagFilter = function (t) {
+    const src = $('cow-search'); if (!src) return;
+    const v = t ? '🏷' + t : '';
+    src.value = src.value === v ? '' : v;
+    if (curPage() !== 'cows') switchTab('cows');
+    renderCowList(); try { cowBarSync('cows'); } catch (e) {}
+    window.scrollTo(0, 0);
+  };
+  function tagBar() {
+    const box = $('cow-list-container'); if (!box) return;
+    let bar = $('nui-tagbar');
+    const cnt = {}; cows.forEach(c => (c.tags || []).forEach(t => { cnt[t] = (cnt[t] || 0) + 1; }));
+    const names = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a] || a.localeCompare(b, 'ja'));
+    if (!names.length) { if (bar) bar.remove(); return; }
+    if (!bar) { bar = document.createElement('div'); bar.id = 'nui-tagbar'; bar.className = 'nui-tagbar'; box.parentNode.insertBefore(bar, box); }
+    const cur = (($('cow-search') || {}).value || '').replace(/^🏷/, '');
+    const on = (($('cow-search') || {}).value || '').startsWith('🏷');
+    bar.innerHTML = `<span style="font-size:12px;color:#94a3b8;align-self:center;">🏷 タグ</span>` + names.map(t => `<button class="nui-tagc" style="${nuiTagStyle(t)}${on && cur === t ? 'box-shadow:0 0 0 2px #fff inset;' : on ? 'opacity:.45;' : ''}" onclick="nuiTagFilter('${jsq(t)}')">${esc(t)} ${cnt[t]}</button>`).join('') + (on ? `<button class="nui-chip" onclick="nuiTagFilter('')">✕ 解除</button>` : '');
+  }
+  const _rcl = window.renderCowList;
+  if (typeof _rcl === 'function') window.renderCowList = function () { const r = _rcl.apply(this, arguments); try { tagBar(); } catch (e) { console.error('nuiTag', e); } return r; };
+
   window.nuiCowMenu = function (id) {
     const c = cowOf(id); if (!c) return;
     let ov = $('modal-nui-menu');
@@ -34311,6 +34344,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const role = c.role === 'recipient' ? '受け牛' : c.role === 'donor' ? 'ドナー' : 'なし';
     const it = (l, js) => `<button onclick="closeModal('modal-nui-menu');${js}" style="display:flex;width:100%;justify-content:space-between;align-items:center;padding:14px 4px;background:none;border:none;border-bottom:1px solid rgba(255,255,255,.06);color:#e2e8f0;font-size:15px;cursor:pointer;font-family:inherit;text-align:left;"><span>${l}</span><span style="color:#64748b;">›</span></button>`;
     ov.firstChild.innerHTML = `<div class="modal-title"><span><span class="nui-mono" style="color:#4ade80;">${esc(id)}</span> ${esc(nm(id))}</span><button class="modal-close" onclick="closeModal('modal-nui-menu')">✕</button></div>
+      ${it('🏷 タグを付ける・直す', `openTagEditor('cow','${jsq(id)}')`)}
       ${it('🔄 役割を切りかえる <span style="font-size:12px;color:#94a3b8;">（今：' + role + '）</span>', `cycleCowRole('${jsq(id)}')`)}
       ${it('📊 産子成績を見る', `jumpToDamRanking('${jsq(id)}','${jsq(nm(id))}')`)}
       ${it('🧬 交配を見る', `openKoubaiForCow('${jsq(id)}')`)}
@@ -34340,7 +34374,9 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     let sub = '';
     try { const br = c.breed === '褐毛' ? '🟥 褐毛' : c.breed === '黒毛' ? '⬛ 黒毛' : c.breed ? c.breed : ''; const lt = lin ? lin.textContent.replace(/🐄\s*血統\s*/, '').replace(/\s+母\s+/, ' ・ 母 ').trim() : ''; const loc = (typeof cowLocation === 'function') ? cowLocation(c) : ''; sub = [br, lt, loc].filter(Boolean).join(' ・ '); } catch (e) {}
     const head = document.createElement('div');
-    head.innerHTML = sub ? `<div style="font-size:12px;color:#94a3b8;margin:-6px 0 10px;">${esc(sub)}</div>` : '';
+    let nid = ''; try { const mc = getMasterCow(c.id); const d = String((mc && mc.nationalId) || c.nationalId || '').replace(/\D/g, ''); if (d.length >= 5) nid = `<span class="nui-nid" style="margin:0 6px 0 0;">${d.slice(-5, -1)}-${d.slice(-1)}</span>`; } catch (e) {}
+    const tg = (c.tags || []).map(t => `<button class="nui-tagc" style="${nuiTagStyle(t)}" onclick="closeModal('modal-cow');nuiTagFilter('${jsq(t)}')">🏷 ${esc(t)}</button>`).join('');
+    head.innerHTML = (nid || sub ? `<div style="font-size:12px;color:#94a3b8;margin:-6px 0 8px;">${nid}${esc(sub)}</div>` : '') + (tg ? `<div class="nui-tags" style="margin:-2px 0 10px;">${tg}</div>` : '');
     met.parentNode.insertBefore(head, met);
     met.parentNode.insertBefore(m4, met);
     const dt = document.createElement('details'); dt.className = 'nui-more-met';
