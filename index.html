@@ -6289,6 +6289,13 @@ document.addEventListener('click', function(e) {
   }
 });
 
+// タグの札の色（同じタグはいつも同じ色）。個体カードを描くときに使うので、ここで先に決めておく
+function nuiTagStyle(t) {
+  const PAL = [['#fbbf24', '#1f1600'], ['#4ade80', '#0d2a1a'], ['#c4a5f5', '#1c1230'], ['#22d3ee', '#06232a'], ['#f472b6', '#2a0f1f'], ['#fb923c', '#1a0f00'], ['#a3e635', '#16210a'], ['#e2e8f0', '#1e2333']];
+  let h = 0; String(t).split('').forEach(ch => { h = (h * 31 + ch.charCodeAt(0)) >>> 0; });
+  const [fg, bg] = PAL[h % PAL.length]; return `color:${fg};background:${bg};border-color:${fg}66;`;
+}
+function nuiTagFilter(t) { if (typeof window._nuiTagFilter === 'function') window._nuiTagFilter(t); }
 function renderCowList() {
   const todayStr = today();
 
@@ -33058,7 +33065,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111735';
+const APP_BUILD = '2026111736';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
@@ -34313,9 +34320,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   }
 
   // タグ：同じタグはいつも同じ色。押すとそのタグの牛だけ出す
-  const TAGPAL = [['#fbbf24', '#1f1600'], ['#4ade80', '#0d2a1a'], ['#c4a5f5', '#1c1230'], ['#22d3ee', '#06232a'], ['#f472b6', '#2a0f1f'], ['#fb923c', '#1a0f00'], ['#a3e635', '#16210a'], ['#e2e8f0', '#1e2333']];
-  window.nuiTagStyle = function (t) { let h = 0; String(t).split('').forEach(ch => { h = (h * 31 + ch.charCodeAt(0)) >>> 0; }); const [fg, bg] = TAGPAL[h % TAGPAL.length]; return `color:${fg};background:${bg};border-color:${fg}66;`; };
-  window.nuiTagFilter = function (t) {
+  window._nuiTagFilter = function (t) {
     const src = $('cow-search'); if (!src) return;
     const v = t ? '🏷' + t : '';
     src.value = src.value === v ? '' : v;
