@@ -3324,16 +3324,37 @@ function isEmbryoNo(s) {
 function ibRemoveWhere(pred) {
   const keep = [], ed = {};
   Object.keys(insemBookEdits).forEach(k => { if (!k.startsWith('dynamic_')) ed[k] = insemBookEdits[k]; });
-  let removed = 0;
+  let removed = 0; const gone = [];
   insemBookRecords.forEach((r, i) => {
-    if (pred(r, i)) { removed++; return; }
+    if (pred(r, i)) { removed++; gone.push(r); return; }
     const e = insemBookEdits['dynamic_' + i];
     if (e) ed['dynamic_' + keep.length] = e;
     keep.push(r);
   });
   insemBookRecords = keep; insemBookEdits = ed;
+  try { _ibTombAdd(gone); } catch (e) {}
   return removed;
 }
+// ★ 2026/11/17：授精簿の行を「消した」記録（どの端末で・いつ）。
+//   同期のときは、この記録がある行だけを消す。記録が無いのに無くなっている行は、端末の古いデータや保存の失敗とみなして残す
+function _ibRowKey(r) {
+  if (r && typeof r === 'object' && r.id != null) return 'i:' + r.id;
+  const s = JSON.stringify(r); let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return 'h:' + (h >>> 0).toString(36);
+}
+function _ibTombLoad() { try { return JSON.parse(_store.getItem('insemBookDelLog') || '{}') || {}; } catch (e) { return {}; } }
+function _ibTombAdd(rows) {
+  if (!rows || !rows.length) return;
+  const T = _ibTombLoad(), now = Date.now();
+  let dev = ''; try { dev = _histDevice(); } catch (e) {}
+  rows.forEach(r => { if (r && typeof r === 'object') T[_ibRowKey(r)] = { t: now, d: r.d, c: r.t, s: r.s, dev }; });
+  const lim = now - 150 * 86400000;
+  Object.keys(T).forEach(k => { if (!T[k] || (T[k].t || 0) < lim) delete T[k]; });
+  _store.setItem('insemBookDelLog', JSON.stringify(T));
+}
+// この行を消してよいか：消した記録があり、その後に直したり戻したりしていない
+function _ibTombOK(T, r, key) { const e = T && T[key]; return !!(e && (e.t || 0) >= ((r && r._mt) || 0)); }
 let staticDonorAIFlags = JSON.parse(_store.getItem('staticDonorAIFlags') || '{}'); // ドナーAIフラグ専用
 let collectionRecordsNew = JSON.parse(_store.getItem('collectionRecordsNew') || '[]'); // 採卵記録
 let transferBook = JSON.parse(_store.getItem('transferBook') || '[]'); // 授精所の移植簿（他農家への移植・法令記録）
@@ -3906,6 +3927,8 @@ function save() {
   // 産室を使わない農場（設定 sanshitsuTask: false）：「🏠 産室移動」のタスクは作られても残さない
   try { if (window.FARM_CFG && FARM_CFG.sanshitsuTask === false) tasks = tasks.filter(t => t.done || t.action !== '🏠 産室移動'); } catch (e) {}
   try { repairSemenOpening(); } catch (e) { console.error('repairSemenOpening', e); }
+  try { fixFnEtDup(); } catch (e) { console.error('fixFnEtDup', e); }
+  try { if (window.FARM_CFG && FARM_CFG.autoNegReinsem) autoNegOnReinsem(); } catch (e) { console.error('autoNegOnReinsem', e); }
   try { if (typeof _undoCheckOnSave === 'function') _undoCheckOnSave(); } catch (e) {}
   try { if (typeof _histOnSave === 'function') _histOnSave(); } catch (e) { console.error('history', e); }
   try { stampChangedCows(); } catch (e) { console.error('stampChangedCows', e); }
@@ -4181,6 +4204,7 @@ function initApp() {
   try { cows.forEach(normalizePregEvents); if (syncPregStages()) save(); } catch (e) { console.error('pregStages', e); }
   // 開いたときにも、同期で重なった授精簿の行をまとめ、行の番号を付ける（記録を保存しなくても直るように）
   try { const d1 = dedupeInsemDupRows(), d2 = ensureInsemIds(); if (d1 || d2) save(); } catch (e) { console.error('insemDup', e); }
+  try { const a1 = fixFnEtDup(), a2 = (window.FARM_CFG && FARM_CFG.autoNegReinsem) ? autoNegOnReinsem() : false; if (a1 || a2) save(); } catch (e) { console.error('autoNeg', e); }
   try { if (initNosePrintFlags()) save(); } catch (e) { console.error('nosePrint', e); }
   try { if (syncCalfMovedByBarn()) save(); } catch (e) { console.error('calfMoved', e); }
   try { if (window.FARM_CFG && FARM_CFG.sanshitsuTask === false && tasks.some(t => !t.done && t.action === '🏠 産室移動')) save(); } catch (e) {}
@@ -13216,6 +13240,56 @@ function scheduleTodayWatch() {
 // ET の日・ドナーへのAI・「発情予測をリセット」より前の記録は使わない
 // 妊鑑タスクの点検：最後の授精（AI/ET）のあとに妊鑑の結果も、未完了の妊鑑タスクもない牛には、妊鑑タスクを足し直す
 // （端末どうしの上書きや、あとから日付をさかのぼって入れたプログラム開始で消えてしまった分を戻す）
+// ★ 2026/11/17：ファームノートは移植（ET）も「種付」として記録するので、取り込むと同じ日に AI と ET が二重になる。
+//   同じ日に ET の記録がある牛は、ファームノートから取り込んだ AI（ストーリー・授精簿）を消し、妊鑑の予定を ET の日程に直す
+function fixFnEtDup() {
+  let changed = false;
+  cows.concat(typeof retiredCows !== 'undefined' ? retiredCows : []).forEach(c => {
+    const ev = c.events || [];
+    const etDates = new Set(ev.filter(e => e.type === 'et_done').map(e => e.date));
+    if (!etDates.size) return;
+    const dup = ev.filter(e => e.type === 'ai_done' && etDates.has(e.date) && /ファームノートから/.test(e.memo || ''));
+    const dupRows = (insemBookRecords || []).filter(r => r && r.t === c.id && etDates.has(r.d) && /^ファームノートから/.test(r.m || '') && !isEmbryoNo(r.s));
+    if (!dup.length && !dupRows.length) return;
+    const dates = new Set(dup.map(e => e.date).concat(dupRows.map(r => r.d)));
+    c.events = ev.filter(e => !dup.includes(e));
+    if (dupRows.length) ibRemoveWhere(r => dupRows.includes(r));
+    // AIの日程で作った、まだ済んでいない妊鑑予定は消して、ETの日程で作り直す（作り直しは repairMissingPregTasks）
+    tasks = tasks.filter(t => !(t.cowId === c.id && !t.done && /妊娠鑑定/.test(t.action || '') && [...dates].some(d => (t.detail || '').includes('AI日:' + d.replace(/-/g, '/')))));
+    changed = true;
+  });
+  if (changed) { try { repairMissingPregTasks(); } catch (e) {} }
+  return changed;
+}
+// ★ 2026/11/17：もう一度授精（移植）した牛は、その前の授精は受胎しなかったことになる。
+//   前の授精に妊鑑の結果がなければ「陰性（再授精のため）」を自動で入れ、前の授精の妊鑑予定を消す（設定 autoNegReinsem: true の農場だけ）
+function autoNegOnReinsem() {
+  const INS = ['ai_done', 'et_done', 'estrus_ai'];
+  const from = addDays(today(), -365);
+  let changed = false;
+  cows.forEach(c => {
+    const ev = c.events || [];
+    const dates = [...new Set(ev.filter(e => INS.includes(e.type) && !e.donorAI && e.date).map(e => e.date))].sort();
+    for (let i = 0; i < dates.length - 1; i++) {
+      const prev = dates[i], next = dates[i + 1];
+      if (next < from || diffDays(next, prev) < 14) continue;   // 同じ発情の2回目の授精などは別にしない
+      // 間に分娩・流産があれば、前の授精は受胎していた
+      if (ev.some(e => ['calving', 'abortion', 'miscarriage'].includes(e.type) && e.date > prev && e.date <= next)) continue;
+      // 前の授精に妊鑑の結果がもうある
+      if (ev.some(e => (e.type === 'preg_positive' || e.type === 'preg_negative') && (e.insemDate ? e.insemDate === prev : (e.date > prev && e.date <= next)))) continue;
+      if ((insemBookRecords || []).some(r => r && r.t === c.id && r.d === prev && r.pregResult)) continue;
+      ev.push({ type: 'preg_negative', date: next, insemDate: prev, memo: '再授精したので不受胎（自動）', auto: true });
+      try { setBookPregResult(c.id, prev, 'negative'); } catch (e) {}
+      const pd = prev.replace(/-/g, '/');
+      tasks = tasks.filter(t => !(t.cowId === c.id && !t.done && /妊娠鑑定|再発情/.test(t.action || '') &&
+        (t.insemDate === prev || (t.detail || '').includes('日:' + pd))));
+      changed = true;
+    }
+    c.events = ev;
+  });
+  if (changed) { try { repairMissingPregTasks(); } catch (e) {} }
+  return changed;
+}
 function repairMissingPregTasks() {
   let n = 0; const td = today();
   cows.forEach(c => {
@@ -32445,7 +32519,7 @@ function setSyncStatus(state) {
 //   base の指紋は端末に保存するので、電波がない間に入れた記録も、次に開いたときにまとめて送れる。
 const SYNC_KEYS = ['cows','tasks','calves','calvingRecords','retiredCows','semenInventory','embryoInventory',
   'collectionRecords','collectionRecordsNew','etRecords','fatteningRecords',
-  'insemBookRecords','insemBookEdits','staticDonorAIFlags','donorAIRecords','pendingEtList',
+  'insemBookDelLog','insemBookRecords','insemBookEdits','staticDonorAIFlags','donorAIRecords','pendingEtList',
   'pendingUseRecords','transferBook','lastCalfNatIdPrefix','miscarriageRecords','fattenDeaths','farmTargets','data_version','changeLog'];
 let _syncedStr = {};     // クラウドとそろっている値（文字列）。この端末が最後に送った／受け取った値
 let _syncBase = (() => { try { return JSON.parse(localStorage.getItem('_syncBase') || '{}') || {}; } catch (e) { return {}; } })();   // { key: 指紋 }
@@ -32475,6 +32549,7 @@ function syncMerge3(k, base, remoteStr, localStr) {
   if (remoteStr == null) return localStr;
   let R, L; try { R = JSON.parse(remoteStr); L = JSON.parse(localStr); } catch (e) { return localStr; }
   const H = x => _syncHash(JSON.stringify(x));
+  const TB = k === 'insemBookRecords' ? _ibTombLoad() : null;   // 授精簿：消した記録
   const pickBoth = (r, l) => {
     if (!(r && l && typeof r === 'object' && typeof l === 'object')) return l;
     if ((r._mt || 0) !== (l._mt || 0)) return (r._mt || 0) > (l._mt || 0) ? r : l;   // 後からチェック・取り消しした方
@@ -32499,14 +32574,20 @@ function syncMerge3(k, base, remoteStr, localStr) {
         else if (bh !== undefined && bh === rh) out.push(lx);        // クラウドは変えていない → 手元の方
         else out.push(pickBoth(rx, lx));                             // 両方で変えた
       } else {
-        if (bh !== undefined && bh === lh) return;                   // ほかの端末で消した（手元は変えていない）→ 消す
+        if (bh !== undefined && bh === lh) {                         // ほかの端末で消した（手元は変えていない）→ 消す
+          if (TB && !_ibTombOK(TB, lx, key)) { console.warn('同期：授精簿の行が無くなっていたが、消した記録が無いので残しました', lx.d, lx.t, lx.s); out.push(lx); }
+          return;
+        }
         out.push(lx);                                                // 手元で足した（または手元で直した）→ 残す
       }
     });
     R.forEach(rx => {
       const key = _syncItemKey(rx); if (seen.has(key)) return; seen.add(key);
       const bh = bm ? bm[key] : undefined;
-      if (bh !== undefined && bh === H(rx)) return;                  // この端末で消した（クラウドは変えていない）→ 消す
+      if (bh !== undefined && bh === H(rx)) {                        // この端末で消した（クラウドは変えていない）→ 消す
+        if (TB && !_ibTombOK(TB, rx, key)) { console.warn('同期：この端末で授精簿の行が無くなっていたが、消した記録が無いので残しました', rx.d, rx.t, rx.s); out.push(rx); }
+        return;
+      }
       if (!bm && key.startsWith('h:')) { out.push(rx); return; }
       out.push(rx);                                                  // ほかの端末で足した → 残す
     });
@@ -32579,7 +32660,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111604';
+const APP_BUILD = '2026111702';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
@@ -32627,7 +32708,7 @@ function initFirebaseSync() {
     if (_checkAppBuild(remote, dbRef) && document.getElementById('build-banner') == null) return;   // 古い版 → 開き直す
     let needPush = false;
     if (remote) {
-      Object.keys(remote).forEach(k => {
+      Object.keys(remote).sort((a, b) => (a === 'insemBookDelLog' ? -1 : b === 'insemBookDelLog' ? 1 : 0)).forEach(k => {
         const rv = typeof remote[k] === 'string' ? remote[k] : JSON.stringify(remote[k]);
         if (!SYNC_KEYS.includes(k)) { _store.setItem(k, rv); return; }   // _base など同期の対象外はそのまま
         const lv = _store.getItem(k);
@@ -32993,7 +33074,7 @@ function runDailyBackup(dbRef) {
   const backupData = {};
   ['cows','tasks','calves','calvingRecords','retiredCows','semenInventory','embryoInventory',
    'collectionRecords','collectionRecordsNew','etRecords','fatteningRecords',
-   'insemBookRecords','insemBookEdits','staticDonorAIFlags','donorAIRecords',
+   'insemBookRecords','insemBookEdits','insemBookDelLog','staticDonorAIFlags','donorAIRecords',
    'pendingEtList','pendingUseRecords','transferBook','miscarriageRecords','fattenDeaths','farmTargets',
    'lastCalfNatIdPrefix','otherFarms','externalUseRecords','data_version','_base'].forEach(k => {
     const v = _store.getItem(k);

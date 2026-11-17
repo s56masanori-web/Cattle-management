@@ -55,6 +55,7 @@ window.FARM_CONFIG = {
   hide: ['collection', 'breedHistory', 'vetTab', 'etCol', 'syncCol'],
   // 産室は使わない：「🏠 産室移動」のタスクを出さない
   sanshitsuTask: false,
+  autoNegReinsem: true,   // もう一度授精したら、前の授精を自動で「不受胎」にする
   // 色の見分けがつきにくい人向け：授精簿のAI・ETを色ではなく「AI」「ET」の札で見分ける
   colorSafe: true,
   // タスク画面の上のお知らせと、ホームの「要注意の牛」を、たたんで見出しと頭数だけにする
