@@ -6041,6 +6041,65 @@ function printCalvingSchedule(){
     setTimeout(doPrint, 800);   // onloadが発火しない環境の保険
   }
 }
+// ★ 2026/11/17：妊鑑の結果を入れたあとの処理を1つにまとめたもの（妊鑑タブ・タスク・授精簿のどこから入れても同じになる）
+//   陽性：妊娠中にする・分娩予定日（AI 285日／ETは移植日から278日、双子は10日早く、後の授精で受胎していればそちら）
+//         ・未完了の分娩予定と産室移動を作り直す（双子は分娩予定日の20日前、ふつうは10日前）
+//   陰性：その授精のあとに新しいプログラムが始まっていれば「プログラム中」、なければ空胎・分娩予定日を消す・未完了の分娩予定と産室移動を消す
+//   妊鑑の予定：この授精の未完了の妊鑑を「済み」にして結果を付ける（なければ済みの妊鑑を1つ足す）。陰性なら、この授精の残りの妊鑑予定も済みにする
+function _pregApplyResult(cow, insemDate, isPositive, isTwin, pregDate, result, taskId) {
+  const cowId = cow.id;
+  const res = result === 'twin' ? 'positive' : (result || (isPositive ? 'positive' : 'negative'));
+  delete cow.dueManual;
+  if (isPositive) {
+    cow.status = 'pregnant';
+    cow.twin = !!isTwin;
+    let dueDate;
+    if (insemDate) {
+      const recs = [...(typeof INSEM_BOOK_DATA !== 'undefined' ? INSEM_BOOK_DATA : []), ...insemBookRecords];
+      const rec = recs.find(r => r.t === cowId && r.d === insemDate);
+      const isEtEv = (cow.events || []).some(e => ['et_done', 'estrus_et'].includes(e.type) && e.date === insemDate);
+      const isEt = rec ? (rec.insemType === 'et' || !!rec.isET || isEtEv) : isEtEv;
+      dueDate = addDays(insemDate, isEt ? 278 : 285);
+      dueDate = laterConceptionDue(cowId, insemDate) || dueDate;
+    } else {
+      const sorted = [...(cow.events || [])].sort((a, b) => b.date.localeCompare(a.date));
+      const lastEt = sorted.find(e => e.type === 'et_done');
+      const lastAi = sorted.find(e => ['ai_done', 'estrus_ai'].includes(e.type) && !e.donorAI);
+      dueDate = lastEt && (!lastAi || lastEt.date >= lastAi.date) ? addDays(lastEt.date, 278) : lastAi ? addDays(lastAi.date, 285) : addDays(pregDate, 240);
+    }
+    if (isTwin) dueDate = addDays(dueDate, -10);
+    cow.dueDate = dueDate;
+    tasks = tasks.filter(t => !(t.cowId === cowId && !t.done && (t.action === '分娩予定' || t.action === '🏠 産室移動')));
+    tasks.push({ id: Math.random().toString(36).slice(2), cowId, date: addDays(dueDate, isTwin ? -20 : -10), action: '🏠 産室移動',
+      detail: isTwin ? `👯 双子：分娩予定日（${fmtDate(dueDate)}）の20日前` : `分娩予定日（${fmtDate(dueDate)}）の10日前`, color: isTwin ? '#c084fc' : '#a78bfa', priority: 'high', done: false, timeOfDay: '' });
+    tasks.push({ id: Math.random().toString(36).slice(2), cowId, date: dueDate, action: '分娩予定', detail: `分娩予定日（${fmtDate(dueDate)}）`, color: '#a78bfa', priority: 'high', done: false });
+  } else {
+    const progAfter = (cow.events || []).some(e => e.date > (insemDate || pregDate) &&
+      ['et_recipient', 'cidr_ai_start', 'donor_et_start', 'donor_et_pretreat_start', 'donor_et_takahashi_start', 'estrus_et', 'estrus_ai'].includes(e.type));
+    cow.status = progAfter ? 'program' : 'open';
+    cow.dueDate = null;
+    cow.twin = false;
+    tasks = tasks.filter(t => !(t.cowId === cowId && !t.done && (t.action === '分娩予定' || t.action === '🏠 産室移動')));
+  }
+  // 妊鑑の予定に結果を付ける
+  const pd = insemDate ? insemDate.replace(/-/g, '/') : '';
+  const isThisInsem = t => /妊娠鑑定/.test(t.action || '') && (!insemDate || t.insemDate === insemDate || (pd && String(t.detail || '').includes(pd)));
+  const mark = t => { t.pregResult = res; t.pregResultDate = pregDate; t.done = true; t.doneAt = t.doneAt || new Date().toISOString(); };
+  let marked = 0;
+  const main = taskId ? tasks.find(t => t.id === taskId) : null;
+  if (main) { mark(main); marked++; }
+  tasks.forEach(t => { if (t.cowId === cowId && !t.done && isThisInsem(t) && (!isPositive || !marked)) { mark(t); marked++; } });
+  if (!marked) {
+    const any = tasks.find(t => t.cowId === cowId && !t.done && /妊娠鑑定/.test(t.action || ''));
+    if (any) { mark(any); marked++; }
+  }
+  if (!marked) tasks.push({ id: Math.random().toString(36).slice(2), cowId, action: '妊娠鑑定', detail: res === 'positive' ? '✓ 陽性' : '✗ 陰性',
+    color: res === 'positive' ? '#4ade80' : '#ef4444', date: pregDate, priority: 'high', done: true, doneAt: new Date().toISOString(), pregResult: res, pregResultDate: pregDate, insemDate: insemDate || undefined });
+  // 済みにした妊鑑予定の結果表示をそろえる（同じ授精の済みの妊鑑にも結果を付ける）
+  // 同じ日に押し直したときは付け直す（前の段階の妊鑑の結果＝30日で陽性 などは、そのまま残す）
+  if (insemDate) tasks.forEach(t => { if (t.cowId === cowId && t.done && isThisInsem(t) && (!t.pregResult || t.pregResultDate === pregDate)) { t.pregResult = res; t.pregResultDate = pregDate; } });
+  return cow.dueDate;
+}
 function recordPreg(cowId, taskId, result) {
   const cow = cows.find(c=>c.id===cowId);
   if (!cow) return;
@@ -6061,10 +6120,7 @@ function recordPreg(cowId, taskId, result) {
   ));
   // 2. 産室移動タスクを削除
   tasks = tasks.filter(t=>!(t.cowId===cowId && t.action==='🏠 産室移動'));
-  // 3. 全妊鑑タスクのpregResultをリセット
-  tasks.filter(t=>t.cowId===cowId&&t.action.includes('妊娠鑑定')).forEach(t=>{
-    delete t.pregResult; delete t.pregResultDate;
-  });
+  // 3. （★ 2026/11/17：前の授精の妊鑑の結果まで消していたのをやめた。この授精の妊鑑の結果は _pregApplyResult で付け直す）
 
   // ── 新しい結果を適用 ──
   const task = tasks.find(t=>t.id===taskId);
@@ -6077,62 +6133,9 @@ function recordPreg(cowId, taskId, result) {
   // 授精簿（固定データ・手入力どちらも）の妊鑑結果を更新：授精簿が正本
   if (insemDateFromTask) setBookPregResult(cowId, insemDateFromTask, isPositive ? 'positive' : 'negative');
 
-  if (isPositive) {
-    cow.status = 'pregnant';
-    if (isTwin) cow.twin = true;
-    // 分娩予定日を計算 — 今回の妊鑑が対応する授精日（insemDateFromTask）を優先使用
-    // insemBookRecordsで当該レコードのinsemTypeを確認
-    let dueDate;
-    if (insemDateFromTask) {
-      const allInsemRecs1 = [...(typeof INSEM_BOOK_DATA!=='undefined'?INSEM_BOOK_DATA:[]), ...insemBookRecords];
-      const insemRec = allInsemRecs1.find(r => r.t === cowId && r.d === insemDateFromTask);
-      const isEtByEvent = !insemRec && cow.events.some(e => e.type === 'et_done' && e.date === insemDateFromTask);
-      const isEt = insemRec ? (insemRec.insemType === 'et' || !!insemRec.isET) : isEtByEvent;
-      dueDate = addDays(insemDateFromTask, isEt ? 278 : 285);
-      dueDate = laterConceptionDue(cowId, insemDateFromTask) || dueDate;
-    } else {
-      // fallback: eventsから陽性対応のAI/ETを探す（旧ロジック）
-      const lastEt = [...cow.events].sort((a,b)=>b.date.localeCompare(a.date)).find(e=>e.type==='et_done');
-      const lastAi = [...cow.events].sort((a,b)=>b.date.localeCompare(a.date)).find(e=>['ai_done','estrus_ai','estrus'].includes(e.type));
-      if (lastEt && (!lastAi || lastEt.date > lastAi.date)) {
-        dueDate = addDays(lastEt.date, 278);
-      } else if (lastAi) {
-        dueDate = addDays(lastAi.date, 285);
-      } else {
-        dueDate = addDays(pregDate, 240);
-      }
-    }
-    if (isTwin) dueDate = addDays(dueDate, -10);
-    cow.dueDate = dueDate;
-    // 産室移動タスクを生成
-    const moveDays = isTwin ? -20 : -10;
-    const moveDate = addDays(dueDate, moveDays);
-    tasks.push({
-      id: Math.random().toString(36).slice(2), cowId, date: moveDate,
-      action: '🏠 産室移動',
-      detail: isTwin ? `👯 双子：分娩予定日（${fmtDate(dueDate)}）の20日前` : `分娩予定日（${fmtDate(dueDate)}）の10日前`,
-      color: isTwin?'#c084fc':'#a78bfa', priority:'high', done:false, timeOfDay:'',
-    });
-    // 分娩予定タスクを生成
-    tasks = tasks.filter(t=>!(t.cowId===cowId&&!t.done&&t.action==='分娩予定'));
-    tasks.push({
-      id: Math.random().toString(36).slice(2), cowId, date: dueDate,
-      action: '分娩予定', detail: '分娩予定日',
-      color: '#a78bfa', priority: 'high', done: false,
-    });
-  } else {
-    cow.status = 'open';
-    cow.dueDate = null;
-    cow.twin = false;
-  }
-
-  // pregResultフラグを全妊鑑タスクに設定
-  tasks.filter(t=>t.cowId===cowId&&t.action.includes('妊娠鑑定')).forEach(t=>{
-    t.pregResult = result;
-    t.pregResultDate = pregDate;
-    t.done = true;
-    t.doneAt = new Date().toISOString();
-  });
+  // ★ 2026/11/17：陽性・陰性のあとの処理（状態・分娩予定日・分娩予定／産室移動の予定・妊鑑の予定の済み）は、
+  //   授精簿から入れたときと同じ1つの処理（_pregApplyResult）を通す
+  _pregApplyResult(cow, insemDateFromTask, isPositive, isTwin, pregDate, result, taskId);
 
   // etRecordを更新
   const targetTask = tasks.find(t=>t.id===taskId);
@@ -8884,14 +8887,31 @@ function bookResult(ins) {
   if (ins.isEt && typeof isEtRecExcluded === 'function' && isEtRecExcluded({ ...r, d: r.d || ins.date })) return null;
   return (r.pregResult === 'positive' || r.m === '+') ? 'pos' : 'neg';
 }
+// ★ 2026/11/17：年間まとめ・アドバイスの受胎／不受胎も、繁殖成績の「🎯 受胎率（記録ベース）」と同じ判定（_insemOutcomes）を使う。
+//   ins はストーリーの授精（ins.date・ins.isEt）、cowId はその牛。判定できないもの（まだ妊鑑日が来ていない等）は null
+let _ocCache = null;
+function outcomeOf(cowId, ins) {
+  if (!_ocCache || _ocCache.t !== Math.floor(Date.now() / 3000)) {
+    const m = new Map();
+    try { _insemOutcomes('0000-01-01', '9999-12-31').forEach(o => { if (!o.excluded) m.set(o.cowId + '|' + (o.rec.date || o.rec.d) + '|' + (o.isET ? 1 : 0), o.pos ? 'pos' : 'neg'); }); } catch (e) { console.error('outcomes', e); }
+    _ocCache = { t: Math.floor(Date.now() / 3000), m };
+  }
+  if (!ins || !ins.date) return null;
+  // ストーリーの授精日と授精簿の日付が1日ずれていることがある（連注・記録の入れ方の違い）。同じ授精のまとまり（連注）の日と前後1日も見る
+  const k = ins.isEt ? 1 : 0, M = _ocCache.m;
+  const days = [ins.date, ...((ins.renchu || []).map(r => r && r.date).filter(Boolean))];
+  for (const d of days) { const v = M.get(cowId + '|' + d + '|' + k); if (v) return v; }
+  for (const d of [addDays(ins.date, 1), addDays(ins.date, -1)]) { const v = M.get(cowId + '|' + d + '|' + k); if (v) return v; }
+  return null;
+}
 // 受胎率の数え方を「繁殖成績」と完全に同じにするための関数（経営指標・アドバイスで使う）
-function concCountsRange(statsDateFrom, statsDateTo) {
+// ★ 2026/11/17：授精・移植1回ごとの「受胎した／しなかった」を決める、ただ1つの計算（🎯 受胎率（記録ベース）の数え方）。
+//   成績の受胎率カード・詳細成績分析・精液のカード・年間まとめは、すべてこれを使う（画面ごとに数字が食い違わないように）
+//   授精簿が元・同じ牛の同じ日は1回・ドナーAIは除く・連注の2日目は数えない・妊鑑日がまだ来ていないものは除く
+//   結果：授精簿の結果 → その授精から次の授精までの最後の妊鑑 → 次の授精がある＝不受胎 → その後に分娩＝受胎 → 妊娠中で分娩予定日が合う＝受胎
+function _insemOutcomes(statsDateFrom, statsDateTo) {
   const todayStr = today();
-  let aiTotal=0, aiPos=0, etTotal=0, etPos=0;
-  let etFrozenTotal=0, etFrozenPos=0, etFreshTotal=0, etFreshPos=0;
-  let etExcluded=0;
-  const etDecidedMain = [];   // 受胎率カードと同じ判定結果を移植胚分析でも使う
-
+  const out = [];
   // 授精簿の全記録（固定＋動的）を取得
   const allInsemRecs = [
     ...INSEM_BOOK_DATA.map((r,i) => ({...r, _src:'static', _idx:i}))
@@ -8969,26 +8989,18 @@ function concCountsRange(statsDateFrom, statsDateTo) {
       // 妊鑑予定日（45日後）がまだ来ていない場合は集計から除外
       if (addDays(rec.date, rec.isET ? 38 : 45) > todayStr && !rec.pregResult) return;
 
-      if (rec.isET) {
-        // 融解方法の誤りにより受胎率が異常低下した期間はET受胎率の集計から除外
-        if (isEtRecExcluded(rec)) { etExcluded++; return; }
-        // 授精簿のs欄（胚番号）から凍結/新鮮を判定
-        const isFrozen = isEmbryoFrozen(rec.s, rec.m);
-        etDecidedMain.push({ pos: result === 'pos', frozen: isFrozen, s: rec.s || '', m: rec.m || '' });
-        if (result === 'pos') {
-          etPos++;
-          if (isFrozen) etFrozenPos++; else etFreshPos++;
-        } else {
-          etTotal++;
-          if (isFrozen) etFrozenTotal++; else etFreshTotal++;
-        }
-      } else {
-        if (result === 'pos') aiPos++; else aiTotal++;
-      }
+      const excluded = !!(rec.isET && isEtRecExcluded(rec));
+      out.push({ cowId, rec, isET: !!rec.isET, pos: result === 'pos', excluded, frozen: rec.isET ? isEmbryoFrozen(rec.s, rec.m) : false });
     });
   });
-
-  aiTotal += aiPos; etTotal += etPos;
+  return out;
+}
+function concCountsRange(statsDateFrom, statsDateTo) {
+  let aiTotal = 0, aiPos = 0, etTotal = 0, etPos = 0;
+  _insemOutcomes(statsDateFrom, statsDateTo).forEach(o => {
+    if (o.excluded) return;
+    if (o.isET) { etTotal++; if (o.pos) etPos++; } else { aiTotal++; if (o.pos) aiPos++; }
+  });
   return { aiPos, aiTotal, etPos, etTotal };
 }
 function kpiYear(Y) {
@@ -9028,14 +9040,14 @@ function kpiYear(Y) {
       }
       // 初回授精の受胎
       const fi = x.insems.find(o => o.date > d && (!cv[i + 1] || o.date < cv[i + 1]));
-      const fr = fi ? bookResult(fi) : null;
+      const fr = fi ? outcomeOf(x.c.id, fi) : null;
       if (fr) { first[1]++; if (fr === 'pos') first[0]++; }
     });
     x.insems.forEach((ins, k) => {
       if (!inY(ins.date)) return;
       // 未経産かどうかは、記録された分娩だけでなく産次（牛の登録）でも判断する（分娩の記録がない経産牛を未経産と間違えない）
       const heifer = _parityAt(x, ins.date) === 0;
-      const brs = bookResult(ins);
+      const brs = outcomeOf(x.c.id, ins);
       if (brs) {
         explicitN++;
         const p = brs === 'pos' ? 1 : 0;
@@ -9048,7 +9060,7 @@ function kpiYear(Y) {
         // どれも記録がないときは、牛に登録された分娩日か、受胎の1年前までにする（何年も前の授精まで数えない）
         const bounds = [
           cv.filter(d => d < ins.date).pop(),
-          x.insems.filter(o => o.date < ins.date && bookResult(o) === 'pos').map(o => o.date).pop(),
+          x.insems.filter(o => o.date < ins.date && outcomeOf(x.c.id, o) === 'pos').map(o => o.date).pop(),
           (() => { try { const r = abortionRisk(x.c.id); return r ? r.list.filter(a => !a.eed && a.date < ins.date).map(a => a.date).pop() : null; } catch (e) { return null; } })(),
           (x.c.calvingDate && x.c.calvingDate < ins.date) ? x.c.calvingDate : null,
           addDays(ins.date, -365),
@@ -9551,18 +9563,18 @@ function _advHerdNow() {
 }
 // 授精した人・種雄牛ごとの受胎率（その年）
 function _advConcBy(Y) {
+  // ★ 2026/11/17：繁殖成績の「🎯 受胎率（記録ベース）」と同じ判定（_insemOutcomes）で、術者・種雄牛・月ごとに数える（AIだけ）
   const by = { op: {}, sire: {}, month: {} };
-  _rptStories().forEach(x => x.insems.forEach(i => {
-    const br = bookResult(i);
-    if (!String(i.date).startsWith(String(Y)) || !br || i.isEt) return;
-    const p = br === 'pos' ? 1 : 0;
-    const op = String((i.rec && i.rec.op) || '').trim();
-    const sire = String((i.rec && i.rec.s) || '').trim();
-    const mo = +i.date.slice(5, 7);
+  _insemOutcomes(Y + '-01-01', Y + '-12-31').forEach(o => {
+    if (o.isET || o.excluded) return;
+    const p = o.pos ? 1 : 0, r = o.rec;
+    const op = String(r.op || '').replace(/在庫反映.*$/, '').trim();
+    const sire = String(r.s || '').trim();
+    const mo = +String(r.date || r.d).slice(5, 7);
     if (op) { (by.op[op] = by.op[op] || [0, 0]); by.op[op][0] += p; by.op[op][1]++; }
     if (sire) { (by.sire[sire] = by.sire[sire] || [0, 0]); by.sire[sire][0] += p; by.sire[sire][1]++; }
     (by.month[mo] = by.month[mo] || [0, 0]); by.month[mo][0] += p; by.month[mo][1]++;
-  }));
+  });
   return by;
 }
 function _advDFS(Y) {
@@ -15284,6 +15296,18 @@ function isExternalEmbryo(sire, memo){
 function isEtRecExcluded(rec){
   return isEtRateExcluded(rec.d || rec.date) || isOldEmbryo(rec.s, rec.m) || isExternalEmbryo(rec.s, rec.m);
 }
+// ★ 2026/11/17：種雄牛ごとのAI受胎率。成績の「📊 詳細成績分析 → 種雄牛別受胎率」とまったく同じ数え方
+//   （授精簿が元・同じ牛の同じ日は1回・ドナーAIは除く・連注の2日目は数えない・妊鑑日がまだのものは除く）
+function _aiConcBySire(from, to) {
+  const semenMap = {};
+  _insemOutcomes(from, to).forEach(o => {
+    if (o.isET || o.excluded) return;
+    const key = String(o.rec.s || '').slice(0, 12);
+    if (!semenMap[key]) semenMap[key] = { total: 0, pos: 0 };
+    semenMap[key].total++; if (o.pos) semenMap[key].pos++;
+  });
+  return semenMap;
+}
 function renderStats() {
   _embTypeCache = null;   // 新鮮/凍結の判定表を作り直す
   const todayStr = today();
@@ -15381,73 +15405,14 @@ function renderStats() {
     if (!alreadyExists) recsByCow[r.t].push({...r, date, donorAI, isET, s, m});
   });
 
-  Object.entries(recsByCow).forEach(([cowId, recs]) => {
-    const cow = cows.find(c => c.id === cowId);
-    recs.sort((a,b) => a.date.localeCompare(b.date));
-
-    recs.forEach((rec, i) => {
-      if (rec.donorAI) return; // ドナーAI除外
-
-      // 連注2日目スキップ
-      if (!rec.isET) {
-        const prevDay = addDays(rec.date, -1);
-        const is2nd = recs.some((r2, j) => j < i && !r2.donorAI && r2.date === prevDay && r2.s === rec.s);
-        if (is2nd) return;
-      }
-
-      // この授精より後の次の授精（授精簿上）
-      const nextInsem = recs.slice(i+1).find(r2 => !r2.donorAI);
-      // ドナーAI（PG未投与など）の後に出た妊鑑結果を、前のAI/ETの成績にしないための区切り
-      const nextAny = recs[i+1];
-
-      // cow.eventsからpreg結果を探す（この授精日以降、次の授精日より前）
-      const evts = cow ? (cow.events||[]).slice().sort((a,b)=>a.date.localeCompare(b.date)) : [];
-      const pregSearch = evts.filter(e => {
-        if (e.type !== 'preg_positive' && e.type !== 'preg_negative') return false;
-        if (e.date < rec.date) return false;
-        if (nextAny && e.date >= nextAny.date) return false;
-        return true;
-      });
-      const lastPreg = [...pregSearch].reverse()[0];
-
-      let result = null;
-      // 授精簿の結果（手入力の確定値）を最優先 → 期間内の最後の妊鑑
-      if (rec.pregResult === 'positive') result = 'pos';
-      else if (rec.pregResult === 'negative') result = 'neg';
-      else if (lastPreg) {
-        result = lastPreg.type === 'preg_positive' ? 'pos' : 'neg';
-      } else if (nextInsem) {
-        result = 'neg'; // 再授精あり→前の授精は陰性
-      } else if (cow && cow.calvingDate && cow.calvingDate >= rec.date) {
-        result = 'pos'; // 分娩済み→陽性
-      } else if (cow && cow.status === 'pregnant' && cow.dueDate) {
-        // 妊娠中→分娩予定日から逆算して±7日以内なら陽性
-        const days = rec.isET ? 278 : 285;
-        const expected = addDays(cow.dueDate, -days);
-        if (Math.abs(diffDays(rec.date, expected)) <= 7) result = 'pos';
-      }
-
-      if (result === null) return;
-      // 妊鑑予定日（45日後）がまだ来ていない場合は集計から除外
-      if (addDays(rec.date, rec.isET ? 38 : 45) > todayStr && !rec.pregResult) return;
-
-      if (rec.isET) {
-        // 融解方法の誤りにより受胎率が異常低下した期間はET受胎率の集計から除外
-        if (isEtRecExcluded(rec)) { etExcluded++; return; }
-        // 授精簿のs欄（胚番号）から凍結/新鮮を判定
-        const isFrozen = isEmbryoFrozen(rec.s, rec.m);
-        etDecidedMain.push({ pos: result === 'pos', frozen: isFrozen, s: rec.s || '', m: rec.m || '' });
-        if (result === 'pos') {
-          etPos++;
-          if (isFrozen) etFrozenPos++; else etFreshPos++;
-        } else {
-          etTotal++;
-          if (isFrozen) etFrozenTotal++; else etFreshTotal++;
-        }
-      } else {
-        if (result === 'pos') aiPos++; else aiTotal++;
-      }
-    });
+  // ★ 2026/11/17：受胎・不受胎の判定は _insemOutcomes（ただ1つの計算）を使う
+  _insemOutcomes(statsDateFrom, statsDateTo).forEach(o => {
+    if (o.excluded) { etExcluded++; return; }
+    if (o.isET) {
+      etDecidedMain.push({ pos: o.pos, frozen: o.frozen, s: o.rec.s || '', m: o.rec.m || '' });
+      if (o.pos) { etPos++; if (o.frozen) etFrozenPos++; else etFreshPos++; }
+      else { etTotal++; if (o.frozen) etFrozenTotal++; else etFreshTotal++; }
+    } else { if (o.pos) aiPos++; else aiTotal++; }
   });
 
   aiTotal += aiPos; etTotal += etPos;
@@ -15713,54 +15678,12 @@ function renderStats() {
       const monthMap = {};
       monthNames.forEach(m => { monthMap[m] = {ai:{total:0,pos:0}, et:{total:0,pos:0}, etFresh:{total:0,pos:0}, etFrozen:{total:0,pos:0}}; });
 
-      // 授精簿ベースで集計（基本受胎率と同じrecsByCowを使用）
-      Object.entries(recsByCow).forEach(([cowId, recs]) => {
-        const cow = cows.find(c => c.id === cowId);
-        recs.sort((a,b) => a.date.localeCompare(b.date));
-
-        recs.forEach((rec, i) => {
-          if (rec.donorAI) return;
-
-          // 連注2日目スキップ
-          if (!rec.isET) {
-            const prevDay = addDays(rec.date, -1);
-            const is2nd = recs.some((r2, j) => j < i && !r2.donorAI && r2.date === prevDay && r2.s === rec.s);
-            if (is2nd) return;
-          }
-
-          const nextInsem = recs.slice(i+1).find(r2 => !r2.donorAI);
-          const nextAny = recs[i+1];   // ドナーAIも妊鑑結果の区切りにする
-          const evts = cow ? (cow.events||[]).slice().sort((a,b)=>a.date.localeCompare(b.date)) : [];
-          const pregSearch = evts.filter(e => {
-            if (e.type !== 'preg_positive' && e.type !== 'preg_negative') return false;
-            if (e.date < rec.date) return false;
-            if (nextAny && e.date >= nextAny.date) return false;
-            return true;
-          });
-          const lastPreg = [...pregSearch].reverse()[0];
-
-          let result = null;
-          // 全体集計と同じ優先順位（授精簿の結果 → 期間内の最後の妊鑑）
-          if (rec.pregResult === 'positive') result = 'pos';
-          else if (rec.pregResult === 'negative') result = 'neg';
-          else if (lastPreg) {
-            result = lastPreg.type === 'preg_positive' ? 'pos' : 'neg';
-          } else if (nextInsem) {
-            result = 'neg';
-          } else if (cow && cow.calvingDate && cow.calvingDate >= rec.date) {
-            result = 'pos';
-          } else if (cow && cow.status === 'pregnant' && cow.dueDate) {
-            const days = rec.isET ? 278 : 285;
-            const expected = addDays(cow.dueDate, -days);
-            if (Math.abs(diffDays(rec.date, expected)) <= 7) result = 'pos';
-          }
-          if (result === null) return;
-          // 妊鑑予定日（45日後）がまだ来ていない場合は集計から除外
-          const pregCheckDate = addDays(rec.date, rec.isET ? 38 : 45);
-          if (pregCheckDate > todayStr && !rec.pregResult) return;
-          // 融解方法の誤りによる除外期間のETは月別集計にも入れない
-          if (rec.isET && isEtRecExcluded(rec)) return;
-
+      // ★ 2026/11/17：受胎率カードと同じ判定（_insemOutcomes）をそのまま使う
+      _insemOutcomes(statsDateFrom, statsDateTo).forEach(o => {
+        if (o.excluded) return;
+        const cowId = o.cowId, rec = o.rec, cow = cows.find(c => c.id === cowId);
+        const result = o.pos ? 'pos' : 'neg';
+        {
           const isPos = result === 'pos';
           const month = parseInt(rec.date.slice(5,7));
           if (month) {
@@ -15808,7 +15731,7 @@ function renderStats() {
               if (isPos) stageMap[stage].pos++;
             }
           }
-        });
+        }
       });
 
       const rateBar = (pos, total) => {
@@ -17816,6 +17739,7 @@ async function recheckPreg(cowId, insemDate) {
 function recordPregFromInsemBook(cowId, date, result, triggerEl, aiDate) {
   const cow = cows.find(c => c.id === cowId);
   if (!cow) return;
+  if (result === 'positive' && typeof checkInsemBeforePreg === 'function' && !checkInsemBeforePreg(cowId)) return;
   const eventType = result === 'positive' ? 'preg_positive' : 'preg_negative';
   cow.events = cow.events || [];
   // 同じ授精に対する既存の妊鑑結果を削除して上書きする
@@ -17831,68 +17755,8 @@ function recordPregFromInsemBook(cowId, date, result, triggerEl, aiDate) {
   delete cow.dueManual;
   // 授精簿（固定データ・手入力どちらも）の妊鑑結果を更新：授精簿が正本
   setBookPregResult(cowId, aiDate || date, result);
-  // 対応する妊鑑タスクのpregResultを更新、なければ完了済みとして追加
-  const existingPregTask = tasks.find(t => t.cowId === cowId && t.action.includes('妊娠鑑定') && !t.done);
-  if (existingPregTask) {
-    existingPregTask.pregResult = result;
-    existingPregTask.pregResultDate = date;
-    existingPregTask.done = true;
-    existingPregTask.doneAt = new Date().toISOString();
-  } else {
-    // タスクがない場合は完了済みタスクを追加
-    tasks.push({
-      id: Math.random().toString(36).slice(2),
-      cowId,
-      action: '妊娠鑑定',
-      detail: result === 'positive' ? '✓ 陽性' : '✗ 陰性',
-      color: result === 'positive' ? '#4ade80' : '#ef4444',
-      date: date,
-      priority: 'high',
-      done: true,
-      doneAt: new Date().toISOString(),
-      pregResult: result,
-      pregResultDate: date
-    });
-  }
-  if (result === 'positive') {
-    cow.status = 'pregnant';
-    // 分娩予定日: aiDate（今回の妊鑑対象授精日）から計算
-    let dueDate;
-    if (aiDate) {
-      const allInsemRecs2 = [...(typeof INSEM_BOOK_DATA!=='undefined'?INSEM_BOOK_DATA:[]), ...insemBookRecords];
-      const insemRec = allInsemRecs2.find(r => r.t === cowId && r.d === aiDate);
-      // insemRecが見つからない場合はeventsのet_doneで判定
-      const isEtByEvent = !insemRec && (cow.events||[]).some(e => e.type === 'et_done' && e.date === aiDate);
-      const isEt = insemRec ? (insemRec.insemType === 'et' || !!insemRec.isET) : isEtByEvent;
-      dueDate = addDays(aiDate, isEt ? 278 : 285);
-      dueDate = laterConceptionDue(cowId, aiDate) || dueDate;
-    } else {
-      // fallback: eventsから最新AI/ETを探す
-      const lastEt = [...(cow.events||[])].sort((a,b)=>b.date.localeCompare(a.date)).find(e=>e.type==='et_done');
-      const lastAi = [...(cow.events||[])].sort((a,b)=>b.date.localeCompare(a.date)).find(e=>e.type==='ai_done'&&!e.donorAI);
-      if (lastEt && (!lastAi || lastEt.date >= lastAi.date)) {
-        dueDate = addDays(lastEt.date, 278);
-      } else if (lastAi) {
-        dueDate = addDays(lastAi.date, 285);
-      } else {
-        dueDate = addDays(date, 278);
-      }
-    }
-    cow.dueDate = dueDate;
-    tasks = tasks.filter(t => !(t.cowId === cowId && !t.done && (t.action.includes('妊娠鑑定') || t.action.includes('再発情'))));
-    tasks = tasks.filter(t => !(t.cowId === cowId && t.action === '🏠 産室移動'));
-    // 押し直しで分娩予定が重複しないよう、未完了の分娩予定は作り直す
-    tasks = tasks.filter(t => !(t.cowId === cowId && !t.done && t.action === '分娩予定'));
-    tasks.push({ cowId, action: '分娩予定', detail: `分娩予定日: ${fmtDate(dueDate)}`, color: '#a855f7', date: dueDate, priority: 'high', id: Math.random().toString(36).slice(2), done: false });
-    tasks.push({ id: Math.random().toString(36).slice(2), cowId, date: addDays(dueDate, -10), action: '🏠 産室移動', detail: `分娩予定日（${fmtDate(dueDate)}）の10日前`, color: '#a78bfa', priority: 'high', done: false, timeOfDay: '' });
-  } else {
-    // 陰性の授精より後に新しいプログラム（自然発情→ET など）が始まっていれば「プログラム中」のまま
-    const progAfter = (cow.events||[]).some(e => e.date > (aiDate || date) &&
-      ['et_recipient','cidr_ai_start','donor_et_start','donor_et_pretreat_start','donor_et_takahashi_start','estrus_et','estrus_ai'].includes(e.type));
-    cow.status = progAfter ? 'program' : 'open';
-    cow.dueDate = null;
-    tasks = tasks.filter(t => !(t.cowId === cowId && !t.done && (t.action.includes('妊娠鑑定') || t.action === '🏠 産室移動' || t.action === '分娩予定')));
-  }
+  // ★ 2026/11/17：妊鑑タブ・タスクから入れたときと同じ処理を通す
+  _pregApplyResult(cow, aiDate || date, result === 'positive', false, date, result, null);
   save();
   // ボタンが属するセルを直接更新
   const cell = triggerEl?.closest('.insembook-preg-col');
@@ -28704,18 +28568,11 @@ function renderSemen() {
   const renderCard = s => {
     const isLow = !s.noAlert && s.stock <= (s.alertThreshold || 3);
     const totalUsed = (s.history||[]).filter(h=>h.type==='use').reduce((a,b)=>a+b.count,0);
-    // 受胎率：cow.eventsからai_doneで精液名が一致するものを集計
-    const aiEvents = [];
-    cows.forEach(cow => {
-      (cow.events||[]).forEach((ev,i) => {
-        if (ev.type !== 'ai_done' || !_statsOK(ev.date, false)) return;
-        const memo = ev.memo || '';
-        if (!memo.includes(s.name) && !memo.includes(s.lot||'___NOMATCH___')) return;
-        // 次のpreg結果を探す
-        const nextPreg = (cow.events||[]).slice(i+1).find(e=>e.type==='preg_positive'||e.type==='preg_negative');
-        if (nextPreg) aiEvents.push(nextPreg.type === 'preg_positive');
-      });
-    });
+    // ★ 2026/11/17：受胎率は成績の「種雄牛別受胎率」と同じ数え方・同じ期間（今年 1〜12月）にそろえる
+    const _yr = today().slice(0, 4);
+    if (!window._sireConcCache || window._sireConcCache.t !== Date.now() >> 12) window._sireConcCache = { t: Date.now() >> 12, m: _aiConcBySire(_yr + '-01-01', _yr + '-12-31') };
+    const _sc = window._sireConcCache.m[(s.name || '').slice(0, 12)] || { total: 0, pos: 0 };
+    const aiEvents = Array.from({ length: _sc.total }, (_, k) => k < _sc.pos);
     const rateHtml = aiEvents.length
       ? (() => {
           const pos = aiEvents.filter(Boolean).length;
@@ -28760,7 +28617,7 @@ function renderSemen() {
           </div>
           <div style="background:var(--bg3);border-radius:8px;padding:8px;text-align:center;">
             <div style="font-size:13px;font-weight:700;">${rateHtml}</div>
-            <div style="font-size:10px;color:var(--muted);">受胎率</div>
+            <div style="font-size:10px;color:var(--muted);">受胎率（${today().slice(0, 4)}年）</div>
           </div>
           <div style="background:var(--bg3);border-radius:8px;padding:8px;text-align:center;">
             <div style="font-size:${s.noAlert?'11':'15'}px;font-weight:700;color:${s.noAlert?'var(--muted)':'var(--warn)'};">${s.noAlert ? '通知なし' : (s.alertThreshold||3)}</div>
@@ -33172,7 +33029,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111725';
+const APP_BUILD = '2026111728';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
