@@ -774,6 +774,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
       <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:4px;">📥 クラウドのバックアップから、消えた授精簿の行を戻す</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">毎日クラウドに取っているバックアップ（8日分）と今の授精簿を比べ、今は無い行だけを戻します。今ある行はそのままです。</div>
       <button onclick="closeModal('modal-settings');openIbRestore()" style="background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">☁ バックアップを調べる</button>
+      <button onclick="closeModal('modal-settings');openInvMissing()" style="margin-top:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">📦 在庫に入っていない授精・移植を調べる</button>
     </div>
     <div style="background:#0a1a2a;border:1px solid var(--info);border-radius:10px;padding:12px 14px;margin-bottom:10px;">
       <div style="font-size:13px;font-weight:700;color:var(--info);margin-bottom:4px;">🧹 重複したタスクを整理</div>
@@ -3574,6 +3575,22 @@ function ensureInsemIds() {
 }
 // 上の不具合で増えてしまった同じ授精の行（2026/11以降）を1行にまとめる。
 // まとめるのは「同じ日・同じ牛・同じ種雄牛」の行が、その牛のその日の授精・移植の記録の数より多いときだけ（ドナーの複数回授精は対象外）
+// その牛のその日の授精が、採卵のための授精（ドナーAI）かどうか
+function _isDonorInsemDay(cowId, d) {
+  const cow = cows.find(c => c.id === cowId) || (retiredCows || []).find(c => c.id === cowId);
+  const ev = (cow && cow.events) || [];
+  if (ev.some(e => e.date === d && e.donorAI)) return true;
+  if ((insemBookRecords || []).some(r => r && r.t === cowId && r.d === d && r.donorAI)) return true;
+  // 採卵プログラムを始めてから30日以内
+  if (ev.some(e => /^donor_/.test(e.type || '') && e.date <= d && e.date >= addDays(d, -30))) return true;
+  // その日（前後1日）に「ドナー」の処置予定がある
+  if ((tasks || []).some(t => t.cowId === cowId && /^ドナー/.test(t.action || '') && Math.abs(diffDays(t.date, d)) <= 1)) return true;
+  // その授精の0〜10日後に採卵記録がある
+  const cols = (typeof collectionRecordsNew !== 'undefined' ? collectionRecordsNew : []).concat(typeof collectionRecords !== 'undefined' ? collectionRecords : []);
+  if (cols.some(r => r && r.donorId === cowId && r.date >= d && r.date <= addDays(d, 10))) return true;
+  try { if (cow && cowDisplayStatus(cow).key === 'donor') return true; } catch (e) {}
+  return false;
+}
 function dedupeInsemDupRows() {
   const groups = new Map();
   (insemBookRecords || []).forEach(r => {
@@ -3587,6 +3604,8 @@ function dedupeInsemDupRows() {
     if (list.length < 2) return;
     const r0 = list[0];
     if ((collectionRecordsNew || []).some(cr => cr.donorId === r0.t && (cr.aiDates || []).some(a => a.date === r0.d && (a.count || 1) > 1))) return;
+    // ★ 2026/11/17：ドナーの授精は1本ごとに授精証明書を出すので、同じ日に何回あってもまとめない
+    if (_isDonorInsemDay(r0.t, r0.d)) return;
     const cow = cows.find(c => c.id === r0.t) || (retiredCows || []).find(c => c.id === r0.t);
     const evN = ((cow && cow.events) || []).filter(e => e.date === r0.d && ['ai_done', 'et_done', 'estrus_ai'].includes(e.type)).length;
     const keepN = Math.max(1, evN);
@@ -3928,7 +3947,7 @@ function save() {
   try { if (window.FARM_CFG && FARM_CFG.sanshitsuTask === false) tasks = tasks.filter(t => t.done || t.action !== '🏠 産室移動'); } catch (e) {}
   try { repairSemenOpening(); } catch (e) { console.error('repairSemenOpening', e); }
   try { fixFnEtDup(); } catch (e) { console.error('fixFnEtDup', e); }
-  try { if (window.FARM_CFG && FARM_CFG.autoNegReinsem) autoNegOnReinsem(); } catch (e) { console.error('autoNegOnReinsem', e); }
+  try { if (!(window.FARM_CFG && FARM_CFG.autoNegReinsem === false)) autoNegOnReinsem(); } catch (e) { console.error('autoNegOnReinsem', e); }
   try { if (typeof _undoCheckOnSave === 'function') _undoCheckOnSave(); } catch (e) {}
   try { if (typeof _histOnSave === 'function') _histOnSave(); } catch (e) { console.error('history', e); }
   try { stampChangedCows(); } catch (e) { console.error('stampChangedCows', e); }
@@ -4204,7 +4223,7 @@ function initApp() {
   try { cows.forEach(normalizePregEvents); if (syncPregStages()) save(); } catch (e) { console.error('pregStages', e); }
   // 開いたときにも、同期で重なった授精簿の行をまとめ、行の番号を付ける（記録を保存しなくても直るように）
   try { const d1 = dedupeInsemDupRows(), d2 = ensureInsemIds(); if (d1 || d2) save(); } catch (e) { console.error('insemDup', e); }
-  try { const a1 = fixFnEtDup(), a2 = (window.FARM_CFG && FARM_CFG.autoNegReinsem) ? autoNegOnReinsem() : false; if (a1 || a2) save(); } catch (e) { console.error('autoNeg', e); }
+  try { const a1 = fixFnEtDup(), a2 = !(window.FARM_CFG && FARM_CFG.autoNegReinsem === false) ? autoNegOnReinsem() : false; if (a1 || a2) save(); } catch (e) { console.error('autoNeg', e); }
   try { if (initNosePrintFlags()) save(); } catch (e) { console.error('nosePrint', e); }
   try { if (syncCalfMovedByBarn()) save(); } catch (e) { console.error('calfMoved', e); }
   try { if (window.FARM_CFG && FARM_CFG.sanshitsuTask === false && tasks.some(t => !t.done && t.action === '🏠 産室移動')) save(); } catch (e) {}
@@ -12288,7 +12307,7 @@ async function openIbRestore() {
   const db = window._fbDb;
   if (!db || !window._DATA_PATH) { appAlert('ログインして、電波のある所で使ってください'); return; }
   const key = String(window._DATA_PATH).split('/').pop();
-  const cur = new Set(insemBookRecords.map(_ibIdent));
+  const curN = new Map(); insemBookRecords.forEach(r => { const k = _ibIdent(r); curN.set(k, (curN.get(k) || 0) + 1); });
   appAlert('バックアップを調べています…');
   const days = []; for (let i = 0; i <= 9; i++) days.push(addDays(today(), -i));
   const res = [];
@@ -12298,7 +12317,9 @@ async function openIbRestore() {
       let v = snap.val(); if (!v) continue;
       const L = typeof v === 'string' ? JSON.parse(v) : v;
       if (!Array.isArray(L)) continue;
-      const miss = L.filter(r => r && r.d && !cur.has(_ibIdent(r)));
+      // 同じ日・同じ牛・同じ精液の行が今より多ければ、多い分も「今は無い行」にする（ドナーの同じ日の2回授精など）
+      const seenN = new Map();
+      const miss = L.filter(r => { if (!r || !r.d) return false; const k = _ibIdent(r); const n = (seenN.get(k) || 0) + 1; seenN.set(k, n); return n > (curN.get(k) || 0); });
       res.push({ d, n: L.length, miss });
     } catch (e) { console.warn('backup', d, e); }
   }
@@ -12332,14 +12353,70 @@ function runIbRestore() {
   const d = document.getElementById('ibr-date').value, r = (_ibRestoreData || []).find(x => x.d === d); if (!r) return;
   const pick = [...document.querySelectorAll('#ibr-list .ibr')].filter(c => c.checked).map(c => r.miss[+c.dataset.i]).filter(Boolean);
   if (!pick.length) { appAlert('戻す行を選んでください'); return; }
-  const cur = new Set(insemBookRecords.map(_ibIdent));
   armUndo(`授精簿の行を${pick.length}行戻しました`);
   let n = 0;
-  pick.forEach(x => { if (cur.has(_ibIdent(x))) return; const c = JSON.parse(JSON.stringify(x)); delete c.id; c._mt = Date.now(); insemBookRecords.push(c); cur.add(_ibIdent(c)); n++; });
+  let inv = 0;
+  pick.forEach(x => { const c = JSON.parse(JSON.stringify(x)); delete c.id; c._mt = Date.now(); insemBookRecords.push(c); n++;
+    // 戻した行の精液・受精卵を在庫にも反映（もう在庫の記録があるものは二重にしない）
+    try { if (!/在庫反映なし/.test(c.op || '') && !_invHasUse(c) && syncInsemInventoryForRecord(c)) inv++; } catch (e) {} });
   try { ensureInsemIds(); resetInsemSnap(); } catch (e) {}
   save(); try { renderAll(); } catch (e) {}
   document.getElementById('ibr-modal')?.remove();
-  appAlert(`授精簿に${n}行戻しました`);
+  appAlert(`授精簿に${n}行戻しました` + (inv ? `（在庫にも${inv}本反映）` : ''));
+}
+// ★ 2026/11/17：授精簿の行に対応する在庫の使用記録があるか（syncInsemInventoryForRecord と同じ見方）
+function _invHasUse(rec) {
+  const s = rec.s || '', d = rec.d || '', cowId = rec.t || '';
+  const isET = rec.insemType === 'et' || isEmbryoNo(s) || new RegExp('^' + ANY_LIC_RE).test(s) || s.includes('×');
+  const arr = isET ? embryoInventory : semenInventory;
+  return arr.some(item => (item.history || []).some(h => {
+    if (h.date !== d || !['use', 'transfer'].includes(h.type)) return false;
+    if (isET) {
+      const he = (h.memo || '').match(/胚番号:([\w\-]+)/)?.[1] || '';
+      if (he && he !== s) return false;
+      if (!he && item.lot !== s.replace(/-\d+$/, '')) return false;
+    } else if (item.name !== s) return false;
+    return h.cowId === cowId || !h.cowId;
+  }));
+}
+// 在庫に入っていない授精・移植（直近60日）。在庫に同じ精液・胚がある行だけ
+function _invMissingRows() {
+  const from = addDays(today(), -60);
+  return (insemBookRecords || []).map((r, i) => ({ r, i })).filter(({ r, i }) => {
+    const ed = (insemBookEdits || {})['dynamic_' + i] || {};
+    if (!r || ed._deleted || !r.d || r.d < from || r.d > today() || !r.s || !r.t) return false;
+    if (/在庫反映なし/.test((r.op || '') + (ed.op || ''))) return false;
+    const s = r.s, isET = r.insemType === 'et' || isEmbryoNo(s) || new RegExp('^' + ANY_LIC_RE).test(s) || s.includes('×');
+    const has = isET ? embryoInventory.some(e => e.lot === s.replace(/-\d+$/, '') || (e.embryoDetails || []).some(d => d.no === s)) : semenInventory.some(x => x.name === s);
+    return has && !_invHasUse(r);
+  });
+}
+function openInvMissing() {
+  const L = _invMissingRows();
+  document.getElementById('invm-modal')?.remove();
+  const w = document.createElement('div'); w.id = 'invm-modal';
+  w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9300;display:flex;align-items:center;justify-content:center;padding:12px;';
+  w.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;width:100%;max-width:520px;max-height:92vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>📦 在庫に入っていない授精・移植</b><button class="modal-close" onclick="document.getElementById('invm-modal').remove()">✕</button></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">直近60日の授精簿で、在庫の使用記録が無い行です。チェックした行を在庫から1本（1個）ずつ引きます。</div>
+    ${L.length ? `<div style="max-height:55vh;overflow:auto;">${L.map(({ r }, k) => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;padding:5px 0;border-top:1px solid var(--border);">
+      <input type="checkbox" class="invm" data-k="${k}" checked> <span style="font-family:'JetBrains Mono',monospace;">${_stEsc(fmtDate(r.d))}</span> <b>${_stEsc(r.t)}</b> ${_stEsc(r.s)}</label>`).join('')}</div>
+      <button class="btn btn-primary" style="width:100%;margin-top:10px;" onclick="runInvMissing()">チェックした行を在庫に反映</button>`
+      : '<div style="font-size:13px;color:var(--accent);">✓ 在庫に入っていない行はありません</div>'}
+  </div>`;
+  window._invmList = L;
+  document.body.appendChild(w);
+}
+function runInvMissing() {
+  const L = window._invmList || [];
+  const pick = [...document.querySelectorAll('#invm-modal .invm')].filter(c => c.checked).map(c => L[+c.dataset.k]).filter(Boolean);
+  if (!pick.length) { appAlert('反映する行を選んでください'); return; }
+  armUndo(`在庫に${pick.length}行反映しました`);
+  let n = 0;
+  pick.forEach(({ r }) => { try { if (!_invHasUse(r) && syncInsemInventoryForRecord(r)) n++; } catch (e) {} });
+  save(); try { renderAll(); } catch (e) {}
+  document.getElementById('invm-modal')?.remove();
+  appAlert(`在庫に${n}本（個）反映しました`);
 }
 // ===== バックアップから消えた予定（タスク）だけを戻す =====
 function _parseBackupData(text) {
@@ -13262,19 +13339,38 @@ function fixFnEtDup() {
   return changed;
 }
 // ★ 2026/11/17：もう一度授精（移植）した牛は、その前の授精は受胎しなかったことになる。
-//   前の授精に妊鑑の結果がなければ「陰性（再授精のため）」を自動で入れ、前の授精の妊鑑予定を消す（設定 autoNegReinsem: true の農場だけ）
+//   前の授精に妊鑑の結果がなければ「陰性（再授精のため）」を自動で入れ、前の授精の妊鑑予定を消す（設定 autoNegReinsem: false の農場では動かさない）
 function autoNegOnReinsem() {
   const INS = ['ai_done', 'et_done', 'estrus_ai'];
   const from = addDays(today(), -365);
   let changed = false;
   cows.forEach(c => {
     const ev = c.events || [];
-    const dates = [...new Set(ev.filter(e => INS.includes(e.type) && !e.donorAI && e.date).map(e => e.date))].sort();
+    // 採卵のための授精（ドナーAI）は妊娠をねらった授精ではないので数えない
+    const dAI = new Set(ev.filter(e => e.donorAI && e.date).map(e => e.date));
+    try {
+      (typeof INSEM_BOOK_DATA !== 'undefined' ? INSEM_BOOK_DATA : []).forEach((r, i) => {
+        const ed = (insemBookEdits || {})['static_' + i] || {};
+        if ((ed.t || r.t) === c.id && staticDonorAIFlags['static_' + i]) dAI.add(ed.d || r.d);
+      });
+      (insemBookRecords || []).forEach((r, i) => {
+        const ed = (insemBookEdits || {})['dynamic_' + i] || {};
+        if ((ed.t || r.t) === c.id && (ed.donorAI !== undefined ? ed.donorAI : r.donorAI)) dAI.add(ed.d || r.d);
+      });
+    } catch (e) {}
+    const cols = (typeof collectionRecordsNew !== 'undefined' ? collectionRecordsNew : []).concat(typeof collectionRecords !== 'undefined' ? collectionRecords : []);
+    const isDonorDate = d => dAI.has(d) || cols.some(r => r && r.donorId === c.id && r.date >= d && r.date <= addDays(d, 10));
+    const dates = [...new Set(ev.filter(e => INS.includes(e.type) && !e.donorAI && e.date).map(e => e.date))].filter(d => !isDonorDate(d)).sort();
     for (let i = 0; i < dates.length - 1; i++) {
       const prev = dates[i], next = dates[i + 1];
       if (next < from || diffDays(next, prev) < 14) continue;   // 同じ発情の2回目の授精などは別にしない
+      // 前の授精のあと、次の授精までにドナー（採卵）に回っていたら、前の授精は妊鑑していないだけ → さわらない
+      if (ev.some(e => e.donorAI && e.date > prev && e.date < next) || cols.some(r => r && r.donorId === c.id && r.date > prev && r.date < next)) continue;
       // 間に分娩・流産があれば、前の授精は受胎していた
       if (ev.some(e => ['calving', 'abortion', 'miscarriage'].includes(e.type) && e.date > prev && e.date <= next)) continue;
+      if ((typeof calvingRecords !== 'undefined' ? calvingRecords : []).some(r => r && (r.cowId === c.id || r.damId === c.id) && (r.date || r.calvingDate) > prev && (r.date || r.calvingDate) <= next)) continue;
+      if ((typeof miscarriageRecords !== 'undefined' ? miscarriageRecords : []).some(r => r && r.cowId === c.id && r.date > prev && r.date <= next)) continue;
+      if (diffDays(next, prev) > 150) continue;   // 間があきすぎている（記録の抜けがあるかもしれない）ときは決めつけない
       // 前の授精に妊鑑の結果がもうある
       if (ev.some(e => (e.type === 'preg_positive' || e.type === 'preg_negative') && (e.insemDate ? e.insemDate === prev : (e.date > prev && e.date <= next)))) continue;
       if ((insemBookRecords || []).some(r => r && r.t === c.id && r.d === prev && r.pregResult)) continue;
@@ -32660,7 +32756,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111702';
+const APP_BUILD = '2026111704';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
