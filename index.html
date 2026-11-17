@@ -3591,6 +3591,47 @@ function _isDonorInsemDay(cowId, d) {
   try { if (cow && cowDisplayStatus(cow).key === 'donor') return true; } catch (e) {}
   return false;
 }
+// 授精簿：その牛・その日・その精液の行を n 行にそろえる（足りない分を2本目・3本目…として足す。証明書番号は空ける）
+function addStrawRows(cowId, date, n, sire) {
+  const ed = i => (insemBookEdits || {})['dynamic_' + i] || {};
+  const rows = insemBookRecords.filter((r, i) => r && r.t === cowId && r.d === date && !ed(i)._deleted && (!sire || r.s === sire) && !isEmbryoNo(r.s));
+  if (!rows.length) return false;
+  const base = rows.find(r => !r._seq) || rows[0];
+  const same = rows.filter(r => r.s === base.s);
+  let added = 0;
+  const used = new Set(same.map(r => r._seq || 1));
+  for (let k = 2; same.length + added < n; k++) {
+    if (used.has(k)) continue;
+    const c = JSON.parse(JSON.stringify(base));
+    delete c.id; delete c.pregResult; delete c.certOk;
+    c.n = ''; c._seq = k; c._mt = Date.now();
+    insemBookRecords.push(c); used.add(k); added++;
+  }
+  if (added) { try { ensureInsemIds(); } catch (e) {} }
+  return added > 0;
+}
+// 前に「2本」と入れて1行しかできなかった授精を、在庫の使用本数に合わせて行を足す（2026/10/01以降）
+function repairStrawRows() {
+  const need = new Map(), dar = new Map();
+  (semenInventory || []).forEach(item => (item.history || []).forEach(h => {
+    if (!h || !h.date || h.date < '2026-10-01' || !['use', 'transfer'].includes(h.type)) return;
+    // ドナーAIの記録は牛の番号がメモに入っている（「ドナーAI b55」「ドナーAI 術者:○○ b55」）
+    const cowId = h.cowId || ((String(h.memo || '').match(/ドナーAI\s+(?:術者:\S+\s+)?(\S+)\s*$/) || [])[1]);
+    if (!cowId) return;
+    const k = cowId + '|' + h.date + '|' + item.name;
+    need.set(k, (need.get(k) || 0) + (+h.count || 1));
+  }));
+  // ドナーAI記録（在庫を選ばずに入れた分も、本数が残っている）
+  (typeof donorAIRecords !== 'undefined' ? donorAIRecords : []).forEach(r => {
+    if (!r || !r.cowId || !r.date || r.date < '2026-10-01' || !r.semenName) return;
+    const k = r.cowId + '|' + r.date + '|' + r.semenName;
+    dar.set(k, (dar.get(k) || 0) + (+r.count || 1));
+  });
+  dar.forEach((n, k) => need.set(k, Math.max(n, need.get(k) || 0)));   // 同じ授精を在庫とドナーAI記録の両方で数えないよう、多い方
+  let changed = false;
+  need.forEach((n, k) => { if (n < 2) return; const [cowId, date, name] = k.split('|'); if (addStrawRows(cowId, date, n, name)) changed = true; });
+  return changed;
+}
 function dedupeInsemDupRows() {
   const groups = new Map();
   (insemBookRecords || []).forEach(r => {
@@ -4223,6 +4264,7 @@ function initApp() {
   try { cows.forEach(normalizePregEvents); if (syncPregStages()) save(); } catch (e) { console.error('pregStages', e); }
   // 開いたときにも、同期で重なった授精簿の行をまとめ、行の番号を付ける（記録を保存しなくても直るように）
   try { const d1 = dedupeInsemDupRows(), d2 = ensureInsemIds(); if (d1 || d2) save(); } catch (e) { console.error('insemDup', e); }
+  try { if (repairStrawRows()) save(); } catch (e) { console.error('repairStrawRows', e); }
   try { const a1 = fixFnEtDup(), a2 = !(window.FARM_CFG && FARM_CFG.autoNegReinsem === false) ? autoNegOnReinsem() : false; if (a1 || a2) save(); } catch (e) { console.error('autoNeg', e); }
   try { if (initNosePrintFlags()) save(); } catch (e) { console.error('nosePrint', e); }
   try { if (syncCalfMovedByBarn()) save(); } catch (e) { console.error('calfMoved', e); }
@@ -5629,11 +5671,22 @@ function renderPregList() {
     const nDue = c => c.twin ? 2 : 1;
     const thisM = todayStr.slice(0, 7);
     let totBorn = 0, totDue = 0;
+    // ★ 2026/11/17：前の年の月別（生まれた子牛＋その年の分娩予定）とくらべるグラフ
+    const prevYear = String(+pregYear - 1);
+    const prevBorn = (typeof calves !== 'undefined' ? calves : []).filter(c => (c.dob || '').startsWith(prevYear));
+    const prevDue = dueCows.filter(c => c.dueDate.startsWith(prevYear) && c.dueDate >= todayStr);
+    // 記録を始める前の月は「0頭」ではなく「記録なし」にする
+    const allCalves = typeof calves !== 'undefined' ? calves : [];
+    const firstRec = allCalves.map(c => c.dob || '').filter(Boolean).concat((typeof calvingRecords !== 'undefined' ? calvingRecords : []).map(r => r && r.date || '').filter(Boolean)).sort()[0] || '';
+    const prevM = Array.from({ length: 12 }, (_, i) => { const ym = `${prevYear}-${String(i + 1).padStart(2, '0')}`;
+      if (!firstRec || ym < firstRec.slice(0, 7)) return null;
+      return prevBorn.filter(c => c.dob.startsWith(ym)).length + prevDue.filter(c => c.dueDate.startsWith(ym)).reduce((t, c) => t + nDue(c), 0); });
+    const curB = [], curD = [];
     const cells = Array.from({ length: 12 }, (_, i) => {
       const ym = `${pregYear}-${String(i + 1).padStart(2, '0')}`;
       const b = born.filter(c => c.dob.startsWith(ym)).length;
       const d = due.filter(c => c.dueDate.startsWith(ym)).reduce((t, c) => t + nDue(c), 0);
-      totBorn += b; totDue += d;
+      totBorn += b; totDue += d; curB.push(b); curD.push(d);
       const past = ym < thisM, cur = ym === thisM;
       return `<div onclick="pregJumpMonth('${ym}',${b},${d})" style="cursor:pointer;background:${cur ? 'rgba(167,139,250,.15)' : 'var(--bg2)'};border:1px solid ${cur ? 'var(--purple)' : 'var(--border)'};border-radius:8px;padding:6px 4px;text-align:center;${past && !b && !d ? 'opacity:.5;' : ''}">
         <div style="font-size:10px;color:var(--muted);">${i + 1}月</div>
@@ -5653,6 +5706,7 @@ function renderPregList() {
       </div>
       <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;">${cells}</div>
       <div style="font-size:10px;color:var(--muted);margin-top:6px;">済＝生まれた子牛の頭数（死産含む）／予＝妊娠中の牛の分娩予定（双子は2頭）</div>
+      ${_calvCompareChart(pregYear, prevYear, curB, curD, prevM)}
     </div>`;
   })();
 
@@ -5695,6 +5749,43 @@ function renderPregList() {
   container.innerHTML = tabBar + (currentSub==='exam' ? renderExamHTML(pq) : currentSub==='waiting' ? waitingHTML : calvingHTML);
 }
 
+// 月別の分娩頭数を前の年とくらべる棒グラフ（色だけに頼らない：去年＝灰色の細い棒、今年＝緑の棒。予定は薄い緑＋点線の枠）
+function _calvCompareChart(y, py, B, D, P) {
+  const known = P.map((p, i) => p != null ? i + 1 : 0).filter(Boolean);
+  const partial = known.length && known.length < 12;
+  const totP = P.reduce((a, b) => a + (b || 0), 0), totC = B.reduce((a, b) => a + b, 0) + D.reduce((a, b) => a + b, 0);
+  const max = Math.max(1, ...P.map(p => p || 0), ...B.map((b, i) => b + D[i]));
+  const W = 360, H = 150, top = 14, bot = 20, h = H - top - bot, gw = W / 12;
+  const yy = v => top + h - (v / max) * h;
+  let bars = '';
+  for (let i = 0; i < 12; i++) {
+    const x = i * gw;
+    const p = P[i], b = B[i], d = D[i];
+    if (p) bars += `<rect x="${x + 4}" y="${yy(p)}" width="${gw * 0.3}" height="${top + h - yy(p)}" rx="1.5" style="fill:#9ca3af;opacity:.6"/>`;
+    else if (p == null && known.length) bars += `<line x1="${x + 4}" x2="${x + 4 + gw * 0.3}" y1="${top + h - 3}" y2="${top + h - 3}" style="stroke:#9ca3af;stroke-dasharray:1.5 1.5"/>`;
+    const cx = x + 4 + gw * 0.3 + 2, cw = gw * 0.42;
+    if (b) bars += `<rect x="${cx}" y="${yy(b)}" width="${cw}" height="${top + h - yy(b)}" rx="1.5" style="fill:var(--accent)"/>`;
+    if (d) bars += `<rect x="${cx + .5}" y="${yy(b + d) + .5}" width="${cw - 1}" height="${Math.max(0, yy(b) - yy(b + d) - 1)}" rx="1.5" style="fill:var(--accent);fill-opacity:.25;stroke:var(--accent);stroke-dasharray:2 2"/>`;
+    if (b + d) bars += `<text x="${cx + cw / 2}" y="${yy(b + d) - 3}" text-anchor="middle" style="font-size:9px;fill:var(--text);font-weight:700">${b + d}</text>`;
+    bars += `<text x="${x + gw / 2}" y="${H - 6}" text-anchor="middle" style="font-size:9px;fill:var(--muted)">${i + 1}</text>`;
+  }
+  const diff = totC - totP;
+  return `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px;flex-wrap:wrap;font-size:12px;">
+      <b>📊 ${py}年とくらべる</b>
+      <span style="color:var(--muted);">${!known.length ? `${py}年の記録はありません` : partial ? `${py}年は${known[0]}月からの記録（${totP}頭）` : `${py}年 ${totP}頭 → ${y}年 ${totC}頭（${diff >= 0 ? '+' : ''}${diff}頭）`}</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;margin-top:4px;" role="img" aria-label="${py}年と${y}年の月別分娩頭数">
+      <line x1="0" x2="${W}" y1="${top + h}" y2="${top + h}" style="stroke:var(--border)"/>${bars}
+    </svg>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--muted);">
+      <span><span style="display:inline-block;width:8px;height:10px;background:#9ca3af;opacity:.6;vertical-align:middle;"></span> ${py}年</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:var(--accent);vertical-align:middle;"></span> ${y}年 生まれた</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border:1px dashed var(--accent);background:rgba(74,222,128,.25);vertical-align:middle;box-sizing:border-box;"></span> ${y}年 予定</span>
+      <span>（数字は${y}年の頭数／下は月${partial ? `／${py}年の点線は記録なし` : ''}）</span>
+    </div>
+  </div>`;
+}
 // 🗓 年間の分娩頭数：月をタップ → その月の分娩予定へジャンプ（予定がない月は、その月に生まれた子牛を表示）
 function pregJumpMonth(ym, born, due) {
   const [y, m] = ym.split('-');
@@ -14185,6 +14276,8 @@ async function submitQuickReg() {
 
   clearDraft('reg-form');
   registerEvent(); // 先に登録処理を実行
+  // ★ 2026/11/17：授精証明書はストロー1本に1枚。2本以上使ったときは授精簿の行を本数分にする
+  try { if (['ai_done', 'estrus_ai'].includes(event) && semenCount > 1 && addStrawRows(cowId, date, semenCount)) save(); } catch (e) { console.error('addStrawRows', e); }
   // 登録後に胚番号セレクトをリセット（次回の誤選択防止）
   const noSelAfter = document.getElementById('qr-embryo-no-select');
   if (noSelAfter) { noSelAfter.value = ''; }
@@ -21733,6 +21826,8 @@ function saveDonorAIRecord() {
     cow.events.push({ type:'ai_done', date, memo: memoStr, donorAI: true, time, operator });
     // 授精簿に追記
     addInsemBookRecord(cowId, date, '精液:' + semenName + (operator?'／術者:'+operator:''), 'ai', true);
+    // ★ 2026/11/17：授精証明書はストロー1本に1枚。2本なら授精簿も2行
+    try { if (count > 1) addStrawRows(cowId, date, count, semenName); } catch (e) { console.error('addStrawRows', e); }
   }
 
   save();
@@ -32756,7 +32851,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111704';
+const APP_BUILD = '2026111707';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
