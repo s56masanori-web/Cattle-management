@@ -5682,6 +5682,9 @@ function renderPregList() {
       if (!firstRec || ym < firstRec.slice(0, 7)) return null;
       return prevBorn.filter(c => c.dob.startsWith(ym)).length + prevDue.filter(c => c.dueDate.startsWith(ym)).reduce((t, c) => t + nDue(c), 0); });
     const curB = [], curD = [];
+    const sexM = (list, ym) => { const L = list.filter(c => (c.dob || '').startsWith(ym)); return [L.filter(c => c.sex === '雄').length, L.filter(c => c.sex === '雌').length]; };
+    const sexCur = [], sexPrev = [];
+    for (let i = 0; i < 12; i++) { const mm = String(i + 1).padStart(2, '0'); sexCur.push(sexM(born, `${pregYear}-${mm}`)); sexPrev.push(prevM[i] == null ? null : sexM(prevBorn, `${prevYear}-${mm}`)); }
     const cells = Array.from({ length: 12 }, (_, i) => {
       const ym = `${pregYear}-${String(i + 1).padStart(2, '0')}`;
       const b = born.filter(c => c.dob.startsWith(ym)).length;
@@ -5706,7 +5709,7 @@ function renderPregList() {
       </div>
       <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;">${cells}</div>
       <div style="font-size:10px;color:var(--muted);margin-top:6px;">済＝生まれた子牛の頭数（死産含む）／予＝妊娠中の牛の分娩予定（双子は2頭）</div>
-      ${_calvCompareChart(pregYear, prevYear, curB, curD, prevM)}
+      ${_calvCompareChart(pregYear, prevYear, curB, curD, prevM, sexCur, sexPrev)}
     </div>`;
   })();
 
@@ -5749,44 +5752,106 @@ function renderPregList() {
   container.innerHTML = tabBar + (currentSub==='exam' ? renderExamHTML(pq) : currentSub==='waiting' ? waitingHTML : calvingHTML);
 }
 
-// 月別の分娩頭数を前の年とくらべる棒グラフ（色だけに頼らない：去年＝灰色の細い棒、今年＝緑の棒。予定は薄い緑＋点線の枠）
-function _calvCompareChart(y, py, B, D, P) {
+// 月別の分娩頭数を前の年とくらべる棒グラフ
+//   1か月に棒は1本（今年＝緑、分娩予定は点線の枠）。♂♀の頭数は月の下に、棒の列にそろえて出す（♂青・♀からし色の文字）
+//   前の年は棒の後ろの灰色の枠（影）で重ねる。枠の方が高ければ、前の年の方が多かった。
+//   色は色の見分けがつきにくい人でも分かれる青×からし色（検証ずみ）。月をタップすると下に内訳が出る
+function _calvCompareChart(y, py, B, D, P, SC, SP) {
+  const MALE = '#3987e5', FEM = '#c98500';
   const known = P.map((p, i) => p != null ? i + 1 : 0).filter(Boolean);
   const partial = known.length && known.length < 12;
   const totP = P.reduce((a, b) => a + (b || 0), 0), totC = B.reduce((a, b) => a + b, 0) + D.reduce((a, b) => a + b, 0);
-  const max = Math.max(1, ...P.map(p => p || 0), ...B.map((b, i) => b + D[i]));
-  const W = 360, H = 160, top = 16, bot = 20, h = H - top - bot, gw = W / 12;
+  const rawMax = Math.max(1, ...P.map(p => p || 0), ...B.map((b, i) => b + D[i]));
+  const step = rawMax <= 5 ? 1 : rawMax <= 10 ? 2 : rawMax <= 25 ? 5 : 10;
+  const max = Math.ceil(rawMax / step) * step;
+  const SEXROWS = Array.isArray(SC);
+  const W = 360, H = SEXROWS ? 236 : 200, L = 22, R = 4, top = 14, bot = SEXROWS ? 58 : 22, h = H - top - bot, gw = (W - L - R) / 12;
   const yy = v => top + h - (v / max) * h;
+  const SEXOK = Array.isArray(SC);
+  let g = '';
+  for (let v = step; v <= max; v += step) g += `<line x1="${L}" x2="${W - R}" y1="${yy(v)}" y2="${yy(v)}" style="stroke:var(--border);stroke-width:.6"/><text x="${L - 4}" y="${yy(v) + 3}" text-anchor="end" style="font-size:8px;fill:var(--muted)">${v}</text>`;
+  const thisM = +today().slice(5, 7), isThisYear = today().slice(0, 4) === y;
   let bars = '';
   for (let i = 0; i < 12; i++) {
-    const x = i * gw;
+    const x0 = L + i * gw, bw = gw * 0.56, bx = x0 + (gw - bw) / 2;
     const p = P[i], b = B[i], d = D[i];
-    const px = x + 2.5, pw = gw * 0.38;
-    if (p) bars += `<rect x="${px}" y="${yy(p)}" width="${pw}" height="${top + h - yy(p)}" rx="1.5" style="fill:#9ca3af;opacity:.6"/>`;
-    else if (p == null && known.length) bars += `<line x1="${px}" x2="${px + pw}" y1="${top + h - 3}" y2="${top + h - 3}" style="stroke:#9ca3af;stroke-dasharray:1.5 1.5"/>`;
-    if (p != null) bars += `<text x="${px + pw / 2}" y="${yy(p) - 3}" text-anchor="middle" style="font-size:8.5px;fill:#9ca3af">${p}</text>`;
-    const cx = px + pw + 1.5, cw = gw * 0.38;
-    if (b) bars += `<rect x="${cx}" y="${yy(b)}" width="${cw}" height="${top + h - yy(b)}" rx="1.5" style="fill:var(--accent)"/>`;
-    if (d) bars += `<rect x="${cx + .5}" y="${yy(b + d) + .5}" width="${cw - 1}" height="${Math.max(0, yy(b) - yy(b + d) - 1)}" rx="1.5" style="fill:var(--accent);fill-opacity:.25;stroke:var(--accent);stroke-dasharray:2 2"/>`;
-    if (b + d) bars += `<text x="${cx + cw / 2}" y="${yy(b + d) - 3}" text-anchor="middle" style="font-size:9px;fill:var(--text);font-weight:700">${b + d}</text>`;
-    bars += `<text x="${x + gw / 2}" y="${H - 6}" text-anchor="middle" style="font-size:9px;fill:var(--muted)">${i + 1}</text>`;
+    if (isThisYear && i + 1 === thisM) bars += `<rect x="${x0 + 1}" y="${top - 8}" width="${gw - 2}" height="${h + 8}" rx="3" style="fill:var(--text);fill-opacity:.05"/>`;
+    // 前の年（影の枠）
+    if (p) bars += `<rect x="${bx - 2.5}" y="${yy(p)}" width="${bw + 5}" height="${top + h - yy(p)}" rx="3" style="fill:none;stroke:#9ca3af;stroke-width:1.3;stroke-opacity:.8"/>`;
+    // 今年：♂（下）→ ♀ → 性別未入力 → 分娩予定（点線）。区切りは2pxのすき間
+    const parts = [];
+    parts.push([b, 'var(--accent)', 1]);
+    let acc = 0;
+    const segs = parts.filter(([n]) => n > 0);
+    segs.forEach(([n, col, op], k) => {
+      const lo = acc, hi = acc + n; acc = hi;
+      const y1 = yy(hi) + (k ? 0 : 0), y0 = yy(lo) - (k ? 1 : 0);
+      const last = k === segs.length - 1 && !d;
+      bars += `<path d="${last ? `M${bx},${y0} V${y1 + 3} Q${bx},${y1} ${bx + 3},${y1} H${bx + bw - 3} Q${bx + bw},${y1} ${bx + bw},${y1 + 3} V${y0} Z` : `M${bx},${y0} V${y1 + 1} H${bx + bw} V${y0} Z`}" style="fill:${col};fill-opacity:${op}"/>`;
+    });
+    if (d) { const y1 = yy(b + d), y0 = yy(b) - (b ? 1.5 : 0); bars += `<rect x="${bx + .6}" y="${y1 + .6}" width="${bw - 1.2}" height="${Math.max(0, y0 - y1 - 1.2)}" rx="3" style="fill:var(--text);fill-opacity:.05;stroke:var(--text);stroke-opacity:.75;stroke-width:1.2;stroke-dasharray:3 2"/>`; }
+    const tot = b + d;
+    if (tot) bars += `<text x="${bx + bw / 2}" y="${Math.min(yy(tot), p ? yy(p) : 1e9) - 4}" text-anchor="middle" style="font-size:9.5px;font-weight:700;fill:var(--text)">${tot}</text>`;
+    const ly = top + h + 13;
+    bars += `<text x="${x0 + gw / 2}" y="${ly}" text-anchor="middle" style="font-size:9px;fill:var(--muted)">${i + 1}月</text>`;
+    // ♂♀の内訳：月の下に、棒の列にそろえて
+    if (SEXROWS) {
+      const [m, f] = SC[i];
+      const t = (v, yv, col) => `<text x="${x0 + gw / 2}" y="${yv}" text-anchor="middle" style="font-size:10px;font-weight:700;fill:${v ? col : 'var(--muted)'};font-family:'JetBrains Mono',monospace">${b ? v : '·'}</text>`;
+      bars += t(m, ly + 16, MALE) + t(f, ly + 31, FEM);
+    }
+    bars += `<rect x="${x0}" y="0" width="${gw}" height="${H}" style="fill:transparent;cursor:pointer" onclick="_cvSel(${i})"/>`;
   }
+  window._cvData = { y, py, B, D, P, SC, SP };
+  const sm = (Lx, k) => (Lx || []).reduce((a, x) => a + (x ? x[k] : 0), 0);
+  const hp = (SP || []).some(Boolean);
+  const sw = (st) => `<span style="display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:3px;${st}"></span>`;
   const diff = totC - totP;
-  return `<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
-    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px;flex-wrap:wrap;font-size:12px;">
-      <b>📊 ${py}年とくらべる</b>
-      <span style="color:var(--muted);">${!known.length ? `${py}年の記録はありません` : partial ? `${py}年は${known[0]}月からの記録（${totP}頭）` : `${py}年 ${totP}頭 → ${y}年 ${totC}頭（${diff >= 0 ? '+' : ''}${diff}頭）`}</span>
+  return `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px;flex-wrap:wrap;">
+      <span style="font-size:13px;font-weight:700;">📊 月別（${py}年とくらべる）</span>
+      <span style="font-size:11px;color:var(--muted);">${!known.length ? `${py}年の記録なし` : partial ? `${py}年は${known[0]}月から記録（${totP}頭）` : `${py}年 ${totP}頭 → ${totC}頭（${diff >= 0 ? '+' : ''}${diff}）`}</span>
     </div>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;margin-top:4px;" role="img" aria-label="${py}年と${y}年の月別分娩頭数">
-      <line x1="0" x2="${W}" y1="${top + h}" y2="${top + h}" style="stroke:var(--border)"/>${bars}
+    <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--text);margin:8px 0 2px;">
+      <span>${sw('background:var(--accent)')}生まれた ${B.reduce((a, b) => a + b, 0)}${SEXOK ? `（<span style="color:${MALE};font-weight:700;">♂${sm(SC, 0)}</span>・<span style="color:${FEM};font-weight:700;">♀${sm(SC, 1)}</span>）` : ''}</span>
+      <span>${sw('border:1.2px dashed var(--text);box-sizing:border-box')}予定 ${D.reduce((a, b) => a + b, 0)}</span>
+      ${known.length ? `<span style="color:var(--muted);">${sw('border:1.3px solid #9ca3af;box-sizing:border-box')}${py}年</span>` : ''}
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" role="img" aria-label="${y}年の月別分娩頭数（${py}年とくらべる）">
+      ${g}<line x1="${L}" x2="${W - R}" y1="${top + h}" y2="${top + h}" style="stroke:var(--muted);stroke-width:.8"/>${bars}
+      ${SEXROWS ? `<line x1="${L}" x2="${W - R}" y1="${top + h + 18}" y2="${top + h + 18}" style="stroke:var(--border);stroke-width:.6"/>
+      <text x="${L - 4}" y="${top + h + 13 + 16}" text-anchor="end" style="font-size:10px;font-weight:700;fill:${MALE}">♂</text>
+      <text x="${L - 4}" y="${top + h + 13 + 31}" text-anchor="end" style="font-size:10px;font-weight:700;fill:${FEM}">♀</text>` : ''}
     </svg>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--muted);">
-      <span><span style="display:inline-block;width:8px;height:10px;background:#9ca3af;opacity:.6;vertical-align:middle;"></span> ${py}年</span>
-      <span><span style="display:inline-block;width:10px;height:10px;background:var(--accent);vertical-align:middle;"></span> ${y}年 生まれた</span>
-      <span><span style="display:inline-block;width:10px;height:10px;border:1px dashed var(--accent);background:rgba(74,222,128,.25);vertical-align:middle;box-sizing:border-box;"></span> ${y}年 予定</span>
-      <span>（棒の上の数字は頭数／下は月${partial ? `／${py}年の点線は記録なし` : ''}）</span>
-    </div>
+    <div id="cv-info" style="font-size:12px;background:var(--bg2);border-radius:8px;padding:7px 10px;margin-top:4px;min-height:18px;">${_cvInfo(isThisYear ? thisM - 1 : 0)}</div>
+    <div style="font-size:10px;color:var(--muted);margin-top:4px;">月をタップすると、その月の内訳が出ます。♂は去勢を含みます${hp ? '' : ''}。</div>
   </div>`;
+}
+function _cvInfo(i) {
+  const c = window._cvData; if (!c) return '';
+  const b = c.B[i], d = c.D[i], p = c.P[i], sx = c.SC && c.SC[i], spx = c.SP && c.SP[i];
+  const u = sx ? Math.max(0, b - sx[0] - sx[1]) : 0;
+  const cur = `<b>${i + 1}月</b>　${c.y}年 <b>${b + d}頭</b>` + (b ? `（生まれた ${b}${sx ? `：<span style="color:#3987e5;font-weight:700;">♂${sx[0]}</span>・<span style="color:#c98500;font-weight:700;">♀${sx[1]}</span>${u ? `・性別未入力${u}` : ''}` : ''}）` : '') + (d ? `　予定 ${d}` : '');
+  const prev = p == null ? `${c.py}年 記録なし` : `${c.py}年 ${p}頭` + (spx ? `（♂${spx[0]}・♀${spx[1]}）` : '');
+  return cur + `<br><span style="color:var(--muted);">${prev}</span>`;
+}
+function _cvSel(i) { const el = document.getElementById('cv-info'); if (el) el.innerHTML = _cvInfo(i); }
+// 生まれた子牛の ♂♀（月ごと・前の年とくらべる）。予定の牛は性別がまだ分からないので入れない
+function _calvSexTable(y, py, SC, SP) {
+  const sum = (L, k) => L.reduce((a, x) => a + (x ? x[k] : 0), 0);
+  const hasP = SP.some(x => x);
+  const cell = (v, gray) => `<td style="text-align:center;padding:2px 0;${gray ? 'color:#9ca3af;' : 'color:var(--text);font-weight:700;'}">${v == null ? '<span style="color:var(--muted);font-weight:400;">·</span>' : v || '<span style="color:var(--muted);font-weight:400;">0</span>'}</td>`;
+  const row = (label, L, k, gray) => `<tr><th style="text-align:left;font-weight:${gray ? 400 : 700};white-space:nowrap;padding-right:4px;color:${gray ? '#9ca3af' : 'var(--text)'};">${label}</th>${L.map(x => cell(x == null ? null : x[k], gray)).join('')}<td style="text-align:right;padding-left:4px;white-space:nowrap;${gray ? 'color:#9ca3af;' : 'font-weight:700;'}">${hasP || !gray ? sum(L, k) : ''}</td></tr>`;
+  return `<details style="margin-top:8px;">
+    <summary style="cursor:pointer;font-size:12px;font-weight:700;list-style:none;">♂♀ 生まれた子牛の内訳 <span style="font-weight:400;color:var(--muted);font-size:11px;">${y}年 ♂${sum(SC, 0)}・♀${sum(SC, 1)}${hasP ? `（${py}年 ♂${sum(SP, 0)}・♀${sum(SP, 1)}）` : ''} ▼</span></summary>
+    <div style="overflow-x:auto;margin-top:6px;">
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:10.5px;font-family:'JetBrains Mono',monospace;">
+      <colgroup><col style="width:52px">${'<col>'.repeat(12)}<col style="width:26px"></colgroup>
+      <tr><th></th>${Array.from({ length: 12 }, (_, i) => `<th style="color:var(--muted);font-weight:400;">${i + 1}</th>`).join('')}<th style="color:var(--muted);font-weight:400;text-align:right;">計</th></tr>
+      ${row('♂ ' + y, SC, 0)}${row('♀ ' + y, SC, 1)}${hasP ? row('♂ ' + py, SP, 0, true) + row('♀ ' + py, SP, 1, true) : ''}
+    </table></div>
+    <div style="font-size:10px;color:var(--muted);margin-top:4px;">♂は去勢も含みます。分娩予定の分は性別が分からないので入っていません。${hasP ? `「·」は${py}年の記録なし` : ''}</div>
+  </details>`;
 }
 // 🗓 年間の分娩頭数：月をタップ → その月の分娩予定へジャンプ（予定がない月は、その月に生まれた子牛を表示）
 function pregJumpMonth(ym, born, due) {
@@ -13358,7 +13423,7 @@ function renderDataCheck() {
     </div>`).join('') : '<div style="color:var(--accent);font-size:13px;padding:8px 0;">✓ 食い違いは見つかりませんでした</div>';
   if (!window._watchRows) { try { renderTodayWatch(); } catch (e) {} }
   const wr = window._watchRows || [];
-  const _cmp = window.FARM_CFG && FARM_CFG.compactAlerts;   // 長島さん：項目ごとにたたんで、見出しと頭数だけ出す
+  const _cmp = !(window.FARM_CFG && FARM_CFG.compactAlerts === false);   // 長島さん：項目ごとにたたんで、見出しと頭数だけ出す
   const watchHTML = wr.length ? wr.map(([h, body]) => _cmp
     ? `<details class="tw-row"><summary class="tw-h" style="cursor:pointer;list-style:none;">${h}<span style="color:var(--muted);font-weight:500;margin-left:6px;font-size:11px;">▼ 開く</span></summary><div>${body}</div></details>`
     : `<div class="tw-row"><div class="tw-h">${h}</div><div>${body}</div></div>`).join('') : '<div style="color:var(--accent);font-size:13px;padding:6px 0;">✓ 今、注意が必要な牛はいません</div>';
@@ -16606,7 +16671,7 @@ function applyFixPreg(result) {
 
 // タスク画面の上のお知らせを、たたんで1行にする（設定 compactAlerts: true）。開いた・閉じたは端末に覚えておく
 function _foldBanner(container, key, title) {
-  if (!container || !(window.FARM_CFG && FARM_CFG.compactAlerts)) return;
+  if (!container || (window.FARM_CFG && FARM_CFG.compactAlerts === false)) return;
   const html = container.innerHTML; if (!html.trim() || html.includes('data-fold=')) return;
   const n = (html.match(/showCowDetail\(/g) || []).length;
   let open = false; try { open = localStorage.getItem('fold_' + key) === '1'; } catch (e) {}
@@ -25559,6 +25624,8 @@ function renderCalves() {
   // 今年（1〜12月）の受精卵産仔集計
   const thisYear = new Date().getFullYear().toString();
   const etCalvesThisYear = calves.filter(c => c.dob && c.dob.startsWith(thisYear) && c.embryoNo);
+  // ★ 2026/11/17：AI（ET以外）の産仔も同じように内訳を出す。ふだんはたたんで1行
+  const aiCalvesThisYear = calves.filter(c => c.dob && c.dob.startsWith(thisYear) && !c.embryoNo && c.insemType !== 'et' && !c.donor);
   const etSummaryEl = document.getElementById('et-calves-summary');
   if (etSummaryEl) {
     const total = etCalvesThisYear.length;
@@ -25569,7 +25636,7 @@ function renderCalves() {
       const m = parseInt(c.dob.slice(5,7)) + '月';
       byMonth[m] = (byMonth[m]||0)+1;
     });
-    if (total > 0) {
+    if (total > 0 || aiCalvesThisYear.length) {
       // 品種：子牛の品種欄 → 空なら父牛（精液在庫）の品種から推定
       const breedOf = c => {
         const b = String(c.breed || '');
@@ -25589,8 +25656,8 @@ function renderCalves() {
         return Object.entries(bm).sort((a,b)=>a[0]-b[0]).map(([m,n])=>
           '<span style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);">'+m+'月 <strong style="color:var(--purple);">'+n+'頭</strong></span>').join('');
       };
-      const breedBlocks = BR.map(([key,label,col]) => {
-        const list = etCalvesThisYear.filter(c => breedOf(c) === key);
+      const blocksFor = (all, numCol) => BR.map(([key,label,col]) => {
+        const list = all.filter(c => breedOf(c) === key);
         if (!list.length) return '';
         const m = list.filter(c => c.sex === '雄').length, f = list.filter(c => c.sex === '雌').length;
         return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:8px;">'+
@@ -25599,9 +25666,12 @@ function renderCalves() {
             '<span><strong style="color:var(--text);font-size:15px;">'+list.length+'頭</strong></span>'+
             '<span style="color:var(--muted);">♂ '+m+'頭　♀ '+f+'頭'+(list.length-m-f ? '　性別未設定 '+(list.length-m-f)+'頭' : '')+'</span>'+
           '</div>'+
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+monthChips(list)+'</div>'+
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+monthChips(list).split('color:var(--purple)').join('color:'+numCol)+'</div>'+
         '</div>';
       }).join('');
+      const breedBlocks = blocksFor(etCalvesThisYear, 'var(--purple)');
+      const aiTotal = aiCalvesThisYear.length;
+      const aiM = aiCalvesThisYear.filter(c => c.sex === '雄').length, aiF = aiCalvesThisYear.filter(c => c.sex === '雌').length;
       // タップで「どの胚から生まれたか」の内訳を開く
       const esc = _stEsc;
       const detailOpen = !!window._etDetailOpen;
@@ -25630,16 +25700,29 @@ function renderCalves() {
           }).join('');
       }).join('');
       etSummaryEl.style.display = '';
-      etSummaryEl.style.cursor = 'pointer';
-      etSummaryEl.onclick = () => { window._etDetailOpen = !window._etDetailOpen; renderCalves(); };
-      etSummaryEl.innerHTML =
+      etSummaryEl.style.cursor = '';
+      etSummaryEl.onclick = null;
+      etSummaryEl.style.borderColor = 'var(--border)'; etSummaryEl.style.background = 'var(--bg3)'; etSummaryEl.style.padding = '10px 12px';
+      let sumOpen = false; try { sumOpen = localStorage.getItem('_calfSumOpen') === '1'; } catch (e) {}
+      const head = '<div onclick="(function(){try{localStorage.setItem(\'_calfSumOpen\',localStorage.getItem(\'_calfSumOpen\')===\'1\'?\'0\':\'1\')}catch(e){};renderCalves();})()" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
+        '<span style="font-size:12px;font-weight:700;color:var(--text);">📊 '+thisYear+'年 産仔の内訳</span>'+
+        '<span style="font-size:11px;color:var(--muted);">'+(total ? 'ET '+total+'頭' : '')+(total && aiTotal ? '・' : '')+(aiTotal ? 'AI '+aiTotal+'頭' : '')+'　'+(sumOpen ? '▲ 閉じる' : '▼ 開く')+'</span></div>';
+      const aiHTML = !aiTotal ? '' : '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">'+
+        '<div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:6px;">💉 '+thisYear+'年 人工授精（AI）産仔</div>'+
+        '<div style="display:flex;gap:16px;font-size:13px;">'+
+          '<span>合計: <strong style="color:var(--text);font-size:16px;">'+aiTotal+'頭</strong></span>'+
+          '<span>♂ '+aiM+'頭</span>'+
+          '<span>♀ '+aiF+'頭</span>'+
+        '</div>'+ blocksFor(aiCalvesThisYear, 'var(--accent)') + '</div>';
+      const etHTML = !total ? '' : '<div style="margin-top:10px;cursor:pointer;" onclick="window._etDetailOpen=!window._etDetailOpen;renderCalves();">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:12px;font-weight:700;color:var(--purple);">🧬 '+thisYear+'年 受精卵産仔</span><span style="font-size:11px;color:var(--muted);">'+(detailOpen ? '▲ 閉じる' : '▼ タップで胚の内訳')+'</span></div>'+
         '<div style="display:flex;gap:16px;font-size:13px;">'+
           '<span>合計: <strong style="color:var(--text);font-size:16px;">'+total+'頭</strong></span>'+
           '<span>♂ '+male+'頭</span>'+
           '<span>♀ '+female+'頭</span>'+
         '</div>'+
-        breedBlocks + detailHTML;
+        breedBlocks + detailHTML + '</div>';
+      etSummaryEl.innerHTML = sumOpen ? head + etHTML + aiHTML : head;
     } else {
       etSummaryEl.style.display = 'none';
     }
@@ -32853,7 +32936,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111708';
+const APP_BUILD = '2026111713';
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
