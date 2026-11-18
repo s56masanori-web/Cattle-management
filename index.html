@@ -3092,6 +3092,14 @@ function applyBaseData(json) {
 }
    // 中身は Firebase の _base から読み込む（applyBaseData）
 
+// 自分の牧場の肥育成績か（生産者名で判定）。小原は今までどおり「小原」を含むもの、ほかの牧場は設定の飼養者名で
+function _ownFarmer(f) {
+  f = String(f || '');
+  const fid = (window.FARM_CFG && window.FARM_CFG.farmId) || 'obara';
+  if (fid === 'obara') return f.includes('小原');
+  const o = String((window.FARM && FARM.owner) || '').replace(/[\s　]/g, '');
+  return !!o && f.replace(/[\s　]/g, '').includes(o);
+}
 function getMasterCow(id) {
   if (!id) return null;
   return MASTER_COWS.find(c => c.id.toLowerCase() === String(id).toLowerCase()) || null;
@@ -3114,7 +3122,7 @@ function openKoubaiForCow(cowId){
       const rDam = String(r.dam||'').trim();
       if (!dam || rDam !== dam) return false;
       const f=(r.farmer||'').trim();
-      if (f && !f.includes('小原')) return false;
+      if (f && !_ownFarmer(f)) return false;
       if (myMSire) { const rms = normalizeSireName((r.grandsire||'').trim()); if (rms && rms !== myMSire) return false; }
       return true;
     });
@@ -7036,7 +7044,7 @@ function cowOffspringHTML(cow, name, compact){
     if(!cowName || dam!==cowName) return false;
     // 農家：小原（自分）の産子のみ。farmer空も自分の分として許容
     const f=(r.farmer||'').trim();
-    if(f && !f.includes('小原')) return false;
+    if(f && !_ownFarmer(f)) return false;
     // 母の父が分かっている場合は一致必須（同名別牛の切り分け）
     if(myMSire){
       const recMSire=normalizeSireName((r.grandsire||'').trim());
@@ -8170,7 +8178,7 @@ function annualItems(year) {
   it.retire = RC.filter(r => !_annIsCowDeath(r) && !r.retireDateUnknown && inY(r.retireDate)).map(r => ({ breed: _annBreed(r.breed), date: r.retireDate, label: `${r.id} ${r.name || ''}`, rid: r.id, sub: [r.reason, EXIT[r.retireExit] || '', r.retireMemo].filter(Boolean).join('　') }));
   it._retUnknown = RC.filter(r => r.retireDateUnknown && inY(r.retireDate));
   it.kept = born.filter(c => c.status === 'kept' || c.isBreedingCandidate).map(c => ({ breed: _annCalfBreed(c), date: c.dob, sex: c.sex, label: calfLabel(c), sub: [sexT(c.sex), calfTag(c)].filter(Boolean).join(' ') }));
-  const FR = (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).filter(r => String(r.farmer || '').includes('小原') && inY(_normYMD(r.slaughterDate)));
+  const FR = (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).filter(r => _ownFarmer(r.farmer) && inY(_normYMD(r.slaughterDate)));
   it.ship = FR.map(r => ({ breed: _annBreed(r.breed), date: _normYMD(r.slaughterDate), sex: r.sex, amount: Number(r.amount) || 0, label: `${r.sex || ''} ${r.sire || ''}`.trim() || '肥育牛',
     sub: [r.meatGrade, r.bms ? 'BMS' + r.bms : '', r.weight ? r.weight + 'kg' : '', r.amount ? Math.round(r.amount / 10000) + '万円' : ''].filter(Boolean).join('　') }));
   it.retShip = RC.filter(r => r.shipDate && inY(r.shipDate)).map(r => ({ breed: _annBreed(r.breed), date: r.shipDate, label: `${r.id} ${r.name || ''}`, sub: '廃用牛の出荷' }));
@@ -8208,7 +8216,7 @@ function renderAnnual() {
   if (!_annYear) _annYear = thisY;
   const years = new Set([thisY, thisY - 1, thisY - 2]);
   (typeof calves !== 'undefined' ? calves : []).forEach(c => c.dob && years.add(+c.dob.slice(0, 4)));
-  (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).forEach(r => String(r.farmer || '').includes('小原') && r.slaughterDate && years.add(+_normYMD(r.slaughterDate).slice(0, 4)));
+  (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).forEach(r => _ownFarmer(r.farmer) && r.slaughterDate && years.add(+_normYMD(r.slaughterDate).slice(0, 4)));
   const yrs = [...years].filter(y => y >= thisY - 5 && y <= thisY).sort((a, b) => b - a);
   box.innerHTML = `${annTabsHTML(_annTab)}
     <div class="ann-years" style="${_annTab === 'first' ? 'display:none;' : ''}">${yrs.map(y => `<button class="${y === _annYear ? 'on' : ''}" onclick="_annYear=${y};_annOpenKey=null;_prState.sel=null;_disState.open=null;renderAnnual()">${y}年</button>`).join('')}</div>
@@ -8242,7 +8250,7 @@ function _renderAnnualSummary(el) {
   const years = new Set([thisY]);
   (typeof calves !== 'undefined' ? calves : []).forEach(c => c.dob && years.add(+c.dob.slice(0, 4)));
   (typeof retiredCows !== 'undefined' ? retiredCows : []).forEach(r => r.retireDate && years.add(+r.retireDate.slice(0, 4)));
-  (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).forEach(r => String(r.farmer || '').includes('小原') && r.slaughterDate && years.add(+r.slaughterDate.slice(0, 4)));
+  (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).forEach(r => _ownFarmer(r.farmer) && r.slaughterDate && years.add(+r.slaughterDate.slice(0, 4)));
   const yrs = [...years].filter(y => y >= thisY - 4 && y <= thisY).sort((a, b) => b - a);
 
   const rowHTML = ([k, label, note]) => {
@@ -9143,7 +9151,7 @@ function kpiYear(Y) {
   const pct = (a, b) => b ? a / b * 100 : null;
   const R = {};
   // --- 出荷（肥育成績） ---
-  const FR = (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).filter(r => String(r.farmer || '').includes('小原') && inY(r.slaughterDate))
+  const FR = (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).filter(r => _ownFarmer(r.farmer) && inY(r.slaughterDate))
     .filter(r => _kpiSex === 'all' || _fatSex(r.sex) === _kpiSex);
   ['褐毛', '黒毛', 'all'].forEach(b => {
     const L = b === 'all' ? FR : FR.filter(r => _annBreed(r.breed) === b);
@@ -9891,7 +9899,7 @@ function buildAdvice(tab, Y) {
   }
   if (tab === 'kpi') {
     // 肥育：種雄牛ごとの成績
-    const FR = (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).filter(r => String(r.farmer || '').includes('小原') && _normYMD(r.slaughterDate) >= `${Y - 2}-01-01` && _normYMD(r.slaughterDate) <= `${Y}-12-31`);
+    const FR = (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).filter(r => _ownFarmer(r.farmer) && _normYMD(r.slaughterDate) >= `${Y - 2}-01-01` && _normYMD(r.slaughterDate) <= `${Y}-12-31`);
     ['褐毛', '黒毛'].forEach(b => {
       const by = {};
       FR.filter(r => _annBreed(r.breed) === b && r.sire).forEach(r => { (by[r.sire] = by[r.sire] || []).push(r); });
@@ -29779,7 +29787,7 @@ function computeRoleSuggestions() {
   // 自分（小原）の産子のみ対象：農家名に小原を含む、または farmer 空
   const recs = fatteningRecords.filter(r => {
     const f = (r.farmer||'').trim();
-    return !f || f.includes('小原');
+    return !f || _ownFarmer(f);
   });
   // 母牛名でグループ化（同名別牛の分離はここでは簡易に名前のみ。うちの牛が対象なので実用上は十分）
   const map = {};
@@ -33479,7 +33487,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111815';
+const APP_BUILD = '2026111816';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -34559,7 +34567,10 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     appAlert(`🚚 ${n}頭を ${fmtDate(d)} の出荷として記録しました\n\n「その他 → 🚚 出荷した牛」で一覧を見られます。枝肉成績もそこから入れられます。`);
   };
 
-  // ---------- 🚚 出荷した牛（肥育牛／廃用肥育を分けて） ----------
+  // ---------- 🚚 出荷した牛（肥育牛／廃用肥育を分けて）→ 枝肉成績 → 成績タブ ----------
+  //   ・出荷日ごとにまとめる（格付明細は出荷日ごとに届くので、その日の牛を続けて入れられる）
+  //   ・「成績まだ」の牛がひと目でわかる。その他のタイルにも数を出す
+  //   ・入れた成績は fatteningRecords（CSVと同じ形）に入り、肥育成績・繁殖成績（経営指標）に反映される
   let SL = null;
   const nidOf = o => String(o.nationalId || (typeof getMasterCow === 'function' && o.id ? (getMasterCow(o.id) || {}).nationalId : '') || '').replace(/\D/g, '');
   const nid5 = n => n && n.length >= 5 ? n.slice(-5, -1) + '-' + n.slice(-1) : '';
@@ -34570,143 +34581,213 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       const mv = (c.moves || []).filter(m => m.to === '出荷').slice(-1)[0];
       const d = c.shipDate || (mv && mv.date); if (!d) return;
       const n = nidOf(c);
-      fat.push({ kind: 'calf', id: c.id, d, tag: c.earTagId || '', nid: n, name: c.name || '', sex: c.sex === '雄' ? (c.castrated === false ? '♂' : '去勢') : c.sex === '雌' ? '♀' : '', sexKey: c.sex,
-        age: c.dob ? (diffDays(d, c.dob) / 30.4).toFixed(1) : '', memo: c.shipMemo || (mv && String(mv.memo || '').replace(/^出荷：?/, '')) || '', dam: c.damId || '', rec: fatRecOf(n), src: c });
+      fat.push({ kind: 'calf', id: c.id, d, tag: c.earTagId || '', nid: n, name: c.name || '', sex: c.sex === '雄' ? (c.castrated === false ? '♂' : '去勢') : c.sex === '雌' ? '♀' : '',
+        age: c.dob ? (diffDays(d, c.dob) / 30.4).toFixed(1) : '', memo: c.shipMemo || (mv && String(mv.memo || '').replace(/^出荷：?/, '')) || '', rec: fatRecOf(n), src: c });
     });
     (typeof retiredCows !== 'undefined' ? retiredCows : []).forEach(c => {
       if (c.retireExit !== 'fatten' || !c.shipDate) return;
       const n = nidOf(c);
-      ret.push({ kind: 'ret', id: c.id, d: c.shipDate, tag: c.id, nid: n, name: c.name || nm(c.id) || '', sex: '経産', days: c.retireDate ? diffDays(c.shipDate, c.retireDate) : null, retireDate: c.retireDate || '', memo: c.shipMemo || '', rec: fatRecOf(n), src: c });
+      ret.push({ kind: 'ret', id: c.id, d: c.shipDate, tag: c.id, nid: n, name: c.name || nm(c.id) || '', sex: '経産', days: c.retireDate ? diffDays(c.shipDate, c.retireDate) : null, memo: c.shipMemo || '', rec: fatRecOf(n), src: c });
     });
-    const by = (a, b) => b.d.localeCompare(a.d);
+    const by = (a, b) => b.d.localeCompare(a.d) || String(a.tag).localeCompare(String(b.tag));
     return { fat: fat.sort(by), ret: ret.sort(by) };
   }
-  window.nuiShipList = function () { if (!SL) SL = { tab: 'fat', y: today().slice(0, 4), m: 0 }; vShipList(); };
+  window.nuiShipTodo = function () { try { const I = shippedItems(); return I.fat.filter(o => !o.rec).length + I.ret.filter(o => !o.rec).length; } catch (e) { return 0; } };
+  const gradeOf = r => { const g = String(r.meatGrade || ''); return /^[ABC][1-5]$/.test(g) ? g : (r.yieldGrade || '') + (g.match(/[1-5]$/) || [''])[0]; };
+  const avg = (L, f) => { const v = L.map(f).filter(x => x != null && x !== '' && !isNaN(x)).map(Number); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  window.nuiShipList = function () { if (!SL) SL = { tab: 'fat', y: today().slice(0, 4), m: 0, f: 'all' }; vShipList(); };
   window.nuiSL = function (k, v) { SL[k] = v; if (k === 'y') SL.m = 0; vShipList(); };
   function vShipList() {
     const I = shippedItems();
     const inP = o => (SL.y === 'all' || o.d.startsWith(SL.y)) && (!SL.m || +o.d.slice(5, 7) === SL.m);
     const years = [...new Set([...I.fat, ...I.ret].map(o => o.d.slice(0, 4)))].sort().reverse();
     if (SL.y !== 'all' && !years.includes(SL.y)) years.unshift(SL.y);
-    const cur = (SL.tab === 'fat' ? I.fat : I.ret);
+    const cur = SL.tab === 'fat' ? I.fat : I.ret;
     const inY = cur.filter(o => SL.y === 'all' || o.d.startsWith(SL.y));
-    const L = cur.filter(inP);
+    const P = cur.filter(inP);                       // この期間の牛
+    const todoN = P.filter(o => !o.rec).length;
+    const L = P.filter(o => SL.f === 'todo' ? !o.rec : SL.f === 'done' ? !!o.rec : true);
+    const R = P.filter(o => o.rec).map(o => o.rec);
     const nF = I.fat.filter(inP).length, nR = I.ret.filter(inP).length;
-    const recN = L.filter(o => o.rec).length;
-    const sexSum = SL.tab === 'fat' ? ['去勢', '♂', '♀'].map(x => { const n = L.filter(o => o.sex === x).length; return n ? `${x} ${n}頭` : ''; }).filter(Boolean).join('・') : '';
-    const recTxt = r => [r.meatGrade || (r.yieldGrade || ''), r.bms != null ? 'BMS' + r.bms : '', r.weight != null ? '枝重' + r.weight + 'kg' : '', r.amount ? Math.round(r.amount / 10000) + '万円' : ''].filter(Boolean).join('・');
-    const row = o => `<div style="padding:10px 2px;border-bottom:1px solid rgba(255,255,255,.06);">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <div class="nui-a" style="flex:1;min-width:0;" onclick="${o.kind === 'ret' || cowOf(o.tag) ? `showCowDetail('${jsq(o.tag)}')` : `showCalfStory('${jsq(o.id)}')`}">
-            <span class="nui-mono" style="font-weight:700;font-size:15px;">${esc(o.tag || '耳標なし')}</span>${o.nid ? ` <span class="nui-nid">${esc(nid5(o.nid))}</span>` : ''} <span style="color:#4ade80;font-weight:700;">${esc(o.name)}</span>
-            <div style="font-size:12px;color:#94a3b8;">🚚 ${esc(fmtDate(o.d))}${o.sex ? '・' + esc(o.sex) : ''}${o.age ? '・' + o.age + 'か月' : ''}${o.days != null ? '・廃用から' + o.days + '日' : ''}${o.memo ? '・' + esc(o.memo) : ''}</div>
-          </div>
-          <button class="nui-chip" style="flex-shrink:0;font-size:11px;padding:4px 8px;" onclick="nuiShipUndo('${o.kind}','${jsq(o.id)}')">↩ 戻す</button>
-        </div>
-        <div style="margin-top:6px;">${o.rec
-          ? `<button class="nui-chip" style="font-size:12px;border-color:#f59e0b;color:#fbbf24;" onclick="nuiFatForm('${o.kind}','${jsq(o.id)}')">🥩 ${esc(recTxt(o.rec) || '成績あり')} ✏</button>`
-          : `<button class="nui-chip" style="font-size:12px;" onclick="nuiFatForm('${o.kind}','${jsq(o.id)}')">＋ 枝肉成績を入れる</button>`}</div>
-      </div>`;
+    const tF = I.fat.filter(inP).filter(o => !o.rec).length, tR = I.ret.filter(inP).filter(o => !o.rec).length;
+    const sexSum = SL.tab === 'fat' ? ['去勢', '♂', '♀'].map(x => { const n = P.filter(o => o.sex === x).length; return n ? `${x} ${n}` : ''; }).filter(Boolean).join('・') : '';
+    // 成績のまとめ（入れた分だけで計算）
+    const gr = {}; R.forEach(r => { const g = gradeOf(r); if (g) gr[g] = (gr[g] || 0) + 1; });
+    const graded = R.filter(r => /[1-5]$/.test(gradeOf(r)));
+    const upper = graded.length ? Math.round(graded.filter(r => +gradeOf(r).slice(-1) >= 4).length / graded.length * 100) : null;
+    const aW = avg(R, r => r.weight), aB = avg(R, r => r.bms), aA = avg(R, r => r.amount), aU = avg(R, r => r.unitPrice);
+    const aAge = avg(P, o => o.age === '' ? null : +o.age);
+    const kv = (l, v, u) => `<div style="background:#171b26;border-radius:8px;padding:7px 4px;text-align:center;"><div class="nui-mono" style="font-size:17px;font-weight:900;color:${v == null ? '#475569' : '#e2e8f0'};">${v == null ? '—' : v}<span style="font-size:11px;font-weight:700;color:#94a3b8;">${v == null ? '' : u}</span></div><div style="font-size:10.5px;color:#94a3b8;">${l}</div></div>`;
+    const recTxt = r => [gradeOf(r), r.bms != null ? 'BMS' + r.bms : '', r.weight != null ? r.weight + 'kg' : '', r.amount ? Math.round(r.amount / 1000) / 10 + '万円' : ''].filter(Boolean).join('・');
+    const row = o => `<div class="nui-a" onclick="nuiFatForm('${o.kind}','${jsq(o.id)}')" style="display:flex;align-items:center;gap:8px;padding:10px 2px;border-bottom:1px solid rgba(255,255,255,.06);">
+        <div style="flex:1;min-width:0;">
+          <span class="nui-mono" style="font-weight:700;font-size:15px;">${esc(o.tag || '耳標なし')}</span>${o.nid ? ` <span class="nui-nid">${esc(nid5(o.nid))}</span>` : ''} <span style="color:#4ade80;font-weight:700;">${esc(o.name)}</span>
+          <div style="font-size:12px;color:#94a3b8;">${[o.sex, o.age ? o.age + 'か月' : '', o.days != null ? '廃用から' + o.days + '日' : '', o.memo].filter(Boolean).map(esc).join('・')}</div>
+          <div style="margin-top:4px;font-size:12.5px;font-weight:700;">${o.rec ? `<span style="color:#fbbf24;">🥩 ${esc(recTxt(o.rec) || '成績あり')}</span>` : '<span style="color:#f59e0b;border:1px dashed #b45309;border-radius:6px;padding:1px 7px;">成績まだ</span>'}</div>
+        </div><span style="color:#64748b;font-size:18px;">›</span></div>`;
+    // 出荷日ごとにまとめる
+    const groups = []; L.forEach(o => { const g = groups[groups.length - 1]; if (g && g.d === o.d) g.L.push(o); else groups.push({ d: o.d, L: [o] }); });
     const pill = (on, l, js) => `<button class="nui-chip${on ? ' on' : ''}" onclick="${js}">${l}</button>`;
     scrShow(`${backBtn('nuiClose()', '閉じる')}<span style="font-size:17px;font-weight:900;">🚚 出荷した牛</span>`,
       `<div style="padding:12px 14px 30px;">
         <div class="nui-seg" style="margin-bottom:10px;">
-          <button class="${SL.tab === 'fat' ? 'on' : ''}" onclick="nuiSL('tab','fat')">🥩 肥育牛 ${nF}頭</button>
-          <button class="${SL.tab === 'ret' ? 'on' : ''}" onclick="nuiSL('tab','ret')">🐄 廃用肥育 ${nR}頭</button></div>
+          <button class="${SL.tab === 'fat' ? 'on' : ''}" onclick="nuiSL('tab','fat')">🥩 肥育牛 ${nF}頭${tF ? `<span style="color:#f59e0b;font-size:11px;"> 成績まだ${tF}</span>` : ''}</button>
+          <button class="${SL.tab === 'ret' ? 'on' : ''}" onclick="nuiSL('tab','ret')">🐄 廃用肥育 ${nR}頭${tR ? `<span style="color:#f59e0b;font-size:11px;"> 成績まだ${tR}</span>` : ''}</button></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">${years.map(y => pill(SL.y === y, y + '年', `nuiSL('y','${y}')`)).join('')}${pill(SL.y === 'all', '全部', "nuiSL('y','all')")}</div>
         <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px;">${pill(!SL.m, '全月', "nuiSL('m',0)")}${Array.from({ length: 12 }, (_, i) => { const n = inY.filter(o => +o.d.slice(5, 7) === i + 1).length; return n || SL.m === i + 1 ? pill(SL.m === i + 1, `${i + 1}月<span style="opacity:.7;"> ${n}</span>`, `nuiSL('m',${i + 1})`) : ''; }).join('')}</div>
-        <div class="nui-card" style="padding:10px 14px;margin-bottom:10px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
-          <span style="font-size:13px;color:#94a3b8;">${SL.y === 'all' ? '全期間' : SL.y + '年'}${SL.m ? SL.m + '月' : ''}</span>
-          <span class="nui-mono" style="font-size:26px;font-weight:900;">${L.length}<span style="font-size:14px;">頭</span></span>
-          ${sexSum ? `<span style="font-size:12px;color:#94a3b8;">${sexSum}</span>` : ''}
-          <span style="font-size:12px;color:#94a3b8;">枝肉成績 入力済 ${recN}／${L.length}</span></div>
-        ${L.length ? `<div class="nui-card" style="padding:0 12px;">${L.map(row).join('')}</div>` : `<div style="text-align:center;color:#94a3b8;padding:30px 0;">この期間に出荷した${SL.tab === 'fat' ? '肥育牛' : '廃用肥育の牛'}はいません</div>`}
-        <div style="font-size:11px;color:#64748b;margin-top:12px;">「↩ 戻す」は出荷の記録だけを取り消します（入れた枝肉成績は残ります）。枝肉成績は「肥育成績」にも入り、CSVで取り込んだ分と同じように成績に使われます。</div>
+        <div class="nui-card" style="padding:12px 14px;margin-bottom:10px;">
+          <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
+            <span style="font-size:13px;color:#94a3b8;">${SL.y === 'all' ? '全期間' : SL.y + '年'}${SL.m ? SL.m + '月' : ''}の出荷</span>
+            <span class="nui-mono" style="font-size:26px;font-weight:900;">${P.length}<span style="font-size:14px;">頭</span></span>
+            ${sexSum ? `<span style="font-size:12px;color:#94a3b8;">${sexSum}</span>` : ''}</div>
+          <div style="font-size:12px;color:#94a3b8;margin:2px 0 8px;">枝肉成績 入力済 <b style="color:#e2e8f0;">${R.length}</b>／${P.length}頭（下の数字は入れた分の平均）</div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;">
+            ${kv('平均枝重', aW == null ? null : aW.toFixed(1), 'kg')}${kv('平均BMS', aB == null ? null : aB.toFixed(1), '')}${kv('上物率（4・5）', upper, '%')}
+            ${kv('平均金額', aA == null ? null : (aA / 10000).toFixed(1), '万円')}${kv('平均単価', aU == null ? null : Math.round(aU).toLocaleString(), '円')}${kv('出荷月齢', aAge == null ? null : aAge.toFixed(1), 'か月')}</div>
+          ${Object.keys(gr).length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">${Object.keys(gr).sort((a, b) => b.slice(-1) - a.slice(-1) || a.localeCompare(b)).map(g => `<span style="font-size:12px;border:1px solid #2a3050;border-radius:999px;padding:2px 9px;"><b>${esc(g)}</b> ${gr[g]}頭</span>`).join('')}</div>` : ''}
+          ${todoN ? `<button onclick="nuiFatBatch('')" style="width:100%;margin-top:10px;height:46px;border-radius:10px;border:1.5px solid #f59e0b;background:#1a0f00;color:#fbbf24;font-size:15px;font-weight:900;cursor:pointer;">✏ 成績まだの ${todoN}頭を続けて入れる</button>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:8px;">${pill(SL.f === 'all', 'すべて', "nuiSL('f','all')")}${pill(SL.f === 'todo', '成績まだ ' + todoN, "nuiSL('f','todo')")}${pill(SL.f === 'done', '入力済 ' + R.length, "nuiSL('f','done')")}</div>
+        ${groups.length ? groups.map(g => { const t = g.L.filter(o => !o.rec).length; return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:12px 2px 6px;">
+            <span style="font-size:13px;font-weight:700;">🚚 ${esc(fmtDate(g.d))} 出荷　${g.L.length}頭</span>
+            ${t ? `<button class="nui-chip" style="border-color:#b45309;color:#fbbf24;" onclick="nuiFatBatch('${g.d}')">この日の ${t}頭を入れる</button>` : '<span style="font-size:11px;color:#4ade80;">✓ 成績そろった</span>'}</div>
+          <div class="nui-card" style="padding:0 12px;">${g.L.map(row).join('')}</div>`; }).join('')
+        : `<div style="text-align:center;color:#94a3b8;padding:30px 0;">${SL.f === 'todo' ? '成績まだの牛はいません 👍' : `この期間に出荷した${SL.tab === 'fat' ? '肥育牛' : '廃用肥育の牛'}はいません`}</div>`}
+        <div class="nui-card nui-a" onclick="nuiClose();_annTab='kpi';${SL.y !== 'all' ? `_annYear=${+SL.y};` : ''}switchTab('annual')" style="margin-top:14px;padding:12px 14px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:20px;">📊</span><span style="flex:1;font-size:13px;"><b>繁殖成績（経営指標）で見る</b><br><span style="color:#94a3b8;font-size:12px;">出荷頭数・出荷金額・出荷月齢を前の年とくらべる</span></span><span style="color:#64748b;">›</span></div>
+        <div style="font-size:11px;color:#64748b;margin-top:10px;">入れた枝肉成績は「肥育成績」にも入り、CSVで取り込んだ分と同じように使われます（同じ個体識別番号・同じと畜日は二重になりません）。出荷の取り消しは、牛をタップした画面のいちばん下にあります。</div>
       </div>`);
   }
   window.nuiShipUndo = async function (kind, id) {
     const src = kind === 'calf' ? calves.find(x => x.id === id) : retiredCows.find(x => x.id === id); if (!src) return;
     const tag = kind === 'calf' ? (src.earTagId || '') : src.id;
-    if (!await appConfirm(`${tag} ${src.name || ''} の出荷（${fmtDate(src.shipDate || '')}）を取り消して、出荷前に戻しますか？`)) return;
+    if (!await appConfirm(`${tag} ${src.name || ''} の出荷（${fmtDate(src.shipDate || '')}）を取り消して、出荷前に戻しますか？\n（入れた枝肉成績は残ります）`)) return;
     if (kind === 'calf') { src.moves = (src.moves || []).filter(m => m.to !== '出荷'); delete src.shipDate; delete src.shipMemo; }
     else { delete src.shipDate; delete src.shipMemo; }
-    save(); try { renderAll(); } catch (e) {} vShipList();
+    FQ = null; save(); try { renderAll(); } catch (e) {} vShipList();
   };
   // 枝肉成績を手で入れる（CSVで取り込んだものと同じ形で fatteningRecords に入れる）
-  const FF = [['carcassNo', '枝肉番号', 'text', ''], ['weight', '枝肉重量', 'num', 'kg'], ['bms', 'BMS', 'int', 'No.'], ['loin', 'ロース芯', 'num', 'cm²'], ['baraThick', 'ばら厚', 'num', 'cm'], ['fatThick', '皮下脂肪厚', 'num', 'cm'], ['yieldRate', '歩留基準値', 'num', '%'], ['liveWeight', '生体重', 'num', 'kg'], ['unitPrice', '単価', 'int', '円/kg'], ['amount', '金額', 'int', '円']];
-  let FS = null;
+  const FMAIN = [['weight', '枝肉重量', 'num', 'kg'], ['bms', 'BMS', 'int', 'No.'], ['unitPrice', '単価', 'int', '円/kg'], ['amount', '金額', 'int', '円']];
+  const FMORE = [['carcassNo', '枝肉番号', 'text', ''], ['loin', 'ロース芯', 'num', 'cm²'], ['baraThick', 'ばら厚', 'num', 'cm'], ['fatThick', '皮下脂肪厚', 'num', 'cm'], ['yieldRate', '歩留基準値', 'num', '%'], ['liveWeight', '生体重', 'num', 'kg']];
+  const FF = FMAIN.concat(FMORE);
+  let FS = null, FQ = null;   // FQ：続けて入れる牛の列（[{kind,id}]）
+  window.nuiFatBatch = function (d) {
+    const I = shippedItems(); const cur = SL.tab === 'fat' ? I.fat : I.ret;
+    const inP = o => (SL.y === 'all' || o.d.startsWith(SL.y)) && (!SL.m || +o.d.slice(5, 7) === SL.m);
+    FQ = cur.filter(o => !o.rec && (d ? o.d === d : inP(o))).map(o => ({ kind: o.kind, id: o.id }));
+    if (FQ.length) nuiFatForm(FQ[0].kind, FQ[0].id);
+  };
+  const srcOf = (kind, id) => kind === 'calf' ? calves.find(x => x.id === id) : retiredCows.find(x => x.id === id);
   window.nuiFatForm = function (kind, id) {
-    const src = kind === 'calf' ? calves.find(x => x.id === id) : retiredCows.find(x => x.id === id); if (!src) return;
+    const src = srcOf(kind, id); if (!src) return;
+    if (FQ && !FQ.some(q => q.kind === kind && q.id === id)) FQ = null;   // 一覧から1頭だけ開いたとき
     const n = nidOf(src), rec = fatRecOf(n);
     const sd = src.shipDate || ((src.moves || []).filter(m => m.to === '出荷').slice(-1)[0] || {}).date || today();
-    const ymd = d => { const x = _normYMD ? _normYMD(d) : d; return /^\d{4}-\d{2}-\d{2}$/.test(x || '') ? x : ''; };
+    const ymd = d => { const x = _normYMD(d); return /^\d{4}-\d{2}-\d{2}$/.test(x || '') ? x : ''; };
     const mg = rec ? String(rec.meatGrade || '') : '';
-    FS = { kind, id, recId: rec ? rec.id : null, nid: n, date: rec ? (ymd(rec.slaughterDate) || sd) : sd,
+    FS = { kind, id, recId: rec ? rec.id : null, date: rec ? (ymd(rec.slaughterDate) || sd) : sd,
       yg: rec ? (rec.yieldGrade || (mg.match(/^[ABC]/) || [''])[0]) : '', qg: rec ? ((mg.match(/[1-5]$/) || [''])[0]) : '' };
     const v = k => rec && rec[k] != null && rec[k] !== '' ? rec[k] : '';
     const tag = kind === 'calf' ? (src.earTagId || '') : src.id;
-    const gb = (k, val) => `<button class="nui-ch${FS[k] === val ? ' on' : ''}" data-g="${k}" data-v="${val}" onclick="nuiFatG('${k}','${val}',this)" style="min-width:44px;">${val}</button>`;
-    scrShow(`${backBtn('nuiShipList()')}<span style="font-size:17px;font-weight:900;">🥩 枝肉成績</span><span style="font-size:15px;"><span class="nui-mono" style="font-weight:700;">${esc(tag)}</span> ${esc(src.name || nm(tag) || '')}</span>`,
+    const qi = FQ ? FQ.findIndex(q => q.kind === kind && q.id === id) : -1, left = FQ ? FQ.length - qi - 1 : 0;
+    const gb = (k, val) => `<button type="button" class="nui-ch${FS[k] === val ? ' on' : ''}" data-g="${k}" data-v="${val}" onclick="nuiFatG('${k}','${val}')">${val}</button>`;
+    const info = kind === 'calf'
+      ? [['父', src.sire || '—'], ['母', ((src.damId || '') + ' ' + (cowDisplayName(src.damId) || '')).trim() || '—'], ['生まれ', src.dob ? fmtDate(src.dob) : '—'], ['出荷', fmtDate(sd) + (src.dob ? `（${(diffDays(sd, src.dob) / 30.4).toFixed(1)}か月）` : '')], ['性別', src.sex === '雄' ? '去勢' : src.sex === '雌' ? '♀' : '—']]
+      : [['廃用', src.retireDate ? fmtDate(src.retireDate) : '—'], ['出荷', fmtDate(sd) + (src.retireDate ? `（廃用から${diffDays(sd, src.retireDate)}日）` : '')], ['品種', src.breed || '—']];
+    const field = ([k, l, t, u]) => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);">
+        <label for="ff-${k}" style="width:92px;flex-shrink:0;font-size:14px;font-weight:700;color:#e2e8f0;margin:0;">${l}</label>
+        <input id="ff-${k}" ${t === 'text' ? '' : 'inputmode="decimal"'} enterkeyhint="next" value="${esc(String(v(k)))}" oninput="nuiFatCalc()" style="flex:1;min-width:0;height:44px;font-size:17px;margin:0;text-align:right;">
+        <span style="width:42px;flex-shrink:0;font-size:12px;color:#94a3b8;">${u}</span></div>`;
+    const moreOpen = FMORE.some(f => v(f[0]) !== '');
+    scrShow(`${backBtn('nuiFatQuit()')}<span style="font-size:17px;font-weight:900;">🥩 枝肉成績</span>${FQ ? `<span style="font-size:13px;color:#fbbf24;font-weight:700;">${qi + 1}／${FQ.length}頭目</span>` : ''}`,
       `<div style="padding:12px 14px 30px;">
-        <div style="font-size:12px;color:#94a3b8;margin-bottom:10px;">わかる項目だけ入れれば大丈夫です。あとから直せます。</div>
-        <div class="nui-card" style="padding:12px 14px;">
-          <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;">個体識別番号</label>
-          <input id="ff-nid" inputmode="numeric" value="${esc(n)}" placeholder="10けた" style="width:100%;box-sizing:border-box;height:44px;font-size:16px;margin:0 0 10px;">
-          <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;">と畜日</label>
-          <input id="ff-date" type="date" value="${FS.date}" style="height:44px;font-size:16px;margin:0 0 10px;">
-          <div style="font-size:12px;color:#94a3b8;margin-bottom:4px;">格付（歩留・肉質）</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">${['A', 'B', 'C'].map(x => gb('yg', x)).join('')}</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">${['1', '2', '3', '4', '5'].map(x => gb('qg', x)).join('')}</div>
+        <div class="nui-card" style="padding:10px 14px;">
+          <div><span class="nui-mono" style="font-weight:900;font-size:20px;color:#4ade80;">${esc(tag)}</span>${n ? ` <span class="nui-nid">${esc(nid5(n))}</span>` : ''} <span style="font-size:16px;font-weight:700;">${esc(src.name || nm(tag) || '')}</span></div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:12.5px;margin-top:4px;">${info.map(([a, b]) => `<span style="color:#94a3b8;">${a}</span><span>${esc(b)}</span>`).join('')}</div>
+          <div style="font-size:11px;color:#64748b;margin-top:4px;">格付明細と見くらべて、ちがう牛でないか確かめてください</div>
         </div>
-        <div class="nui-card" style="padding:4px 14px;margin-top:10px;">
-          ${FF.map(([k, l, t, u]) => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);">
-            <label for="ff-${k}" style="width:92px;flex-shrink:0;font-size:13px;">${l}</label>
-            <input id="ff-${k}" ${t === 'text' ? '' : 'inputmode="decimal"'} value="${esc(String(v(k)))}" style="flex:1;min-width:0;height:40px;font-size:16px;margin:0;text-align:right;">
-            <span style="width:40px;flex-shrink:0;font-size:12px;color:#94a3b8;">${u}</span></div>`).join('')}
+        <div class="nui-card" style="padding:12px 14px;margin-top:10px;">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:150px;"><label for="ff-nid" style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;">個体識別番号</label>
+              <input id="ff-nid" inputmode="numeric" value="${esc(n)}" placeholder="10けた" style="width:100%;box-sizing:border-box;height:44px;font-size:16px;margin:0;"></div>
+            <div style="flex:1;min-width:150px;"><label for="ff-date" style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;">と畜日（明細の日付）</label>
+              <input id="ff-date" type="date" value="${FS.date}" style="width:100%;box-sizing:border-box;height:44px;font-size:16px;margin:0;"></div></div>
+          <div style="font-size:12px;color:#94a3b8;margin:12px 0 4px;">格付（歩留 → 肉質）</div>
+          <div style="display:flex;gap:6px;margin-bottom:6px;">${['A', 'B', 'C'].map(x => gb('yg', x)).join('')}</div>
+          <div style="display:flex;gap:6px;">${['1', '2', '3', '4', '5'].map(x => gb('qg', x)).join('')}</div>
         </div>
-        ${rec ? `<div style="text-align:center;margin-top:14px;"><button class="nui-chip" style="color:#f87171;border-color:#7f1d1d;" onclick="nuiFatDel()">この成績を消す</button></div>` : ''}
+        <div class="nui-card" style="padding:4px 14px;margin-top:10px;">${FMAIN.map(field).join('')}
+          <div id="ff-calc" style="font-size:12px;color:#94a3b8;padding:6px 0;"></div></div>
+        <details class="nui-card" style="padding:4px 14px;margin-top:10px;" ${moreOpen ? 'open' : ''}>
+          <summary style="cursor:pointer;font-size:13px;font-weight:700;color:#94a3b8;padding:8px 0;">そのほかの項目（枝肉番号・ロース芯・ばら厚など）</summary>
+          ${FMORE.map(field).join('')}</details>
+        <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:18px;">
+          ${rec ? `<button class="nui-chip" style="color:#f87171;border-color:#7f1d1d;" onclick="nuiFatDel()">この成績を消す</button>` : ''}
+          <button class="nui-chip" onclick="nuiShipUndo('${kind}','${jsq(id)}')">↩ 出荷を取り消す</button></div>
       </div>`,
-      `<button onclick="nuiFatSave()" style="width:100%;height:54px;border-radius:12px;border:none;background:#22c55e;color:#000;font-size:17px;font-weight:900;">💾 保存する</button>`);
+      `<div style="display:flex;gap:8px;">${FQ && left > 0
+        ? `<button onclick="nuiFatSave(0)" style="flex:0 0 34%;height:54px;border-radius:12px;border:1px solid #3a3f5c;background:#1e2130;color:#cbd5e1;font-size:14px;font-weight:700;">保存して一覧へ</button>
+           <button onclick="nuiFatSave(1)" style="flex:1;height:54px;border-radius:12px;border:none;background:#22c55e;color:#000;font-size:16px;font-weight:900;">💾 保存して次へ（あと${left}頭）</button>`
+        : `<button onclick="nuiFatSave(0)" style="flex:1;height:54px;border-radius:12px;border:none;background:#22c55e;color:#000;font-size:17px;font-weight:900;">💾 保存する</button>`}</div>`);
+    nuiFatCalc();
   };
-  window.nuiFatG = function (k, val, btn) {
+  window.nuiFatQuit = function () { FQ = null; FS = null; vShipList(); };
+  window.nuiFatG = function (k, val) {
     FS[k] = FS[k] === val ? '' : val;
     document.querySelectorAll(`#nui-scr [data-g="${k}"]`).forEach(b => b.classList.toggle('on', b.dataset.v === FS[k]));
   };
-  window.nuiFatSave = function () {
+  const fnum = (x, int) => { x = String(x || '').replace(/[０-９．]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[,，\s円kg]/g, ''); if (x === '') return null; const v = int ? parseInt(x) : parseFloat(x); return isNaN(v) ? null : v; };
+  // 単価×枝重＝金額 の目安を出す（金額が空なら保存のときに入れる）
+  window.nuiFatCalc = function () {
+    const el = $('ff-calc'); if (!el) return;
+    const w = fnum(($('ff-weight') || {}).value), u = fnum(($('ff-unitPrice') || {}).value, 1), a = fnum(($('ff-amount') || {}).value, 1);
+    if (w && u) { const c = Math.round(w * u); el.innerHTML = `単価×枝重＝<b style="color:#e2e8f0;">${c.toLocaleString()}円</b>${a == null ? '（金額が空なら、これを入れます）' : Math.abs(a - c) > c * 0.15 ? '　<span style="color:#f59e0b;">⚠ 金額と大きくちがいます（税込・消費税の差なら大丈夫）</span>' : ''}`; }
+    else el.textContent = '';
+    const b = fnum(($('ff-bms') || {}).value, 1);
+    if (b != null && (b < 1 || b > 12)) el.innerHTML += '<div style="color:#f59e0b;">⚠ BMSは1〜12です</div>';
+  };
+  window.nuiFatSave = function (next) {
     if (!FS) return;
-    const src = FS.kind === 'calf' ? calves.find(x => x.id === FS.id) : retiredCows.find(x => x.id === FS.id); if (!src) return;
+    const src = srcOf(FS.kind, FS.id); if (!src) return;
     const g = id => (document.getElementById(id) || {}).value || '';
     const nid = g('ff-nid').replace(/\D/g, '');
-    if (!nid) { appAlert('個体識別番号を入れてください（成績を牛とつなぐのに使います）'); return; }
-    const d = g('ff-date') || FS.date;
-    const num = (x, int) => { x = String(x).replace(/[,，\s]/g, '').replace(/[０-９．]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)); if (x === '') return null; const v = int ? parseInt(x) : parseFloat(x); return isNaN(v) ? null : v; };
+    const vals = {}; FF.forEach(([k, l, t]) => { vals[k] = t === 'text' ? g('ff-' + k).trim() : fnum(g('ff-' + k), t === 'int'); });
+    if (vals.amount == null && vals.weight && vals.unitPrice) vals.amount = Math.round(vals.weight * vals.unitPrice);
+    const empty = !FS.yg && !FS.qg && FF.every(([k]) => vals[k] == null || vals[k] === '');
     let rec = FS.recId ? fatteningRecords.find(r => r.id === FS.recId) : null;
-    const isNew = !rec;
-    if (!rec) {
-      const tag = FS.kind === 'calf' ? (src.earTagId || '') : src.id;
-      const dam = FS.kind === 'calf' ? (cowDisplayName(src.damId) || src.damName || '') : '';
-      const sexS = FS.kind === 'calf' ? (src.sex === '雄' ? '去勢' : src.sex === '雌' ? '未経' : '') : '経産';
-      const brd = FS.kind === 'calf' ? _annCalfBreed(src) : _annBreed(src.breed);
-      rec = { id: Math.random().toString(36).slice(2), breed: brd === '不明' ? '' : brd, farmer: ((fatteningRecords.find(r => String(r.farmer || '').replace(/[\s　]/g, '') === String(OWN_FARMER || '').replace(/[\s　]/g, '')) || {}).farmer) || OWN_FARMER || FARM.name || '', sire: FS.kind === 'calf' ? normalizeSireName(src.sire || '') : '', dam, grandsire: '', greatgrandsire: '', sex: sexS,
-        dob: src.dob ? src.dob.replace(/-0?/g, '/') : '', manual: true, tag };
+    if (!(empty && !rec)) {
+      if (!nid) { appAlert('個体識別番号を入れてください（成績を牛とつなぐのに使います）'); return; }
+      const d = g('ff-date') || FS.date;
+      const isNew = !rec;
+      if (!rec) {
+        const tag = FS.kind === 'calf' ? (src.earTagId || '') : src.id;
+        const brd = FS.kind === 'calf' ? _annCalfBreed(src) : _annBreed(src.breed);
+        rec = { id: Math.random().toString(36).slice(2), breed: brd === '不明' ? '' : brd,
+          farmer: ((fatteningRecords.find(r => String(r.farmer || '').replace(/[\s　]/g, '') === String(OWN_FARMER || '').replace(/[\s　]/g, '')) || {}).farmer) || OWN_FARMER || FARM.name || '',
+          sire: FS.kind === 'calf' ? normalizeSireName(src.sire || '') : '', dam: FS.kind === 'calf' ? (cowDisplayName(src.damId) || src.damName || '') : '', grandsire: '', greatgrandsire: '',
+          sex: FS.kind === 'calf' ? (src.sex === '雄' ? '去勢' : src.sex === '雌' ? '未経' : '') : '経産', dob: src.dob ? src.dob.replace(/-0?/g, '/') : '', manual: true, tag };
+      }
+      rec.nationalId = nid;
+      rec.slaughterDate = d ? d.replace(/-0?/g, '/') : '';
+      rec.year = d ? d.slice(0, 4) : '';
+      if (src.dob && d) rec.age = Math.round(diffDays(d, src.dob) / 30.4 * 10) / 10;
+      rec.yieldGrade = FS.yg || '';
+      rec.meatGrade = /^[AB]$/.test(FS.yg) && FS.qg ? FS.yg + FS.qg : FS.qg || '';
+      FF.forEach(([k]) => { rec[k] = vals[k]; });
+      rec.marbling = rec.bms;
+      if (isNew) fatteningRecords.push(rec);
+      if (!src.nationalId) src.nationalId = nid;
+      saveFattening();
     }
-    rec.nationalId = nid;
-    rec.slaughterDate = d ? d.replace(/-0?/g, '/') : '';
-    rec.year = d ? d.slice(0, 4) : '';
-    if (src.dob && d) rec.age = Math.round(diffDays(d, src.dob) / 30.4 * 10) / 10;
-    rec.yieldGrade = FS.yg || '';
-    rec.meatGrade = /^[AB]$/.test(FS.yg) && FS.qg ? FS.yg + FS.qg : FS.qg || '';
-    FF.forEach(([k, l, t]) => { rec[k] = t === 'text' ? g('ff-' + k).trim() : num(g('ff-' + k), t === 'int'); });
-    if (rec.bms != null) rec.marbling = rec.bms;
-    if (isNew) fatteningRecords.push(rec);
-    if (!src.nationalId) src.nationalId = nid;
-    saveFattening(); FS = null; vShipList();
+    const cur = FS; FS = null;
+    if (next && FQ) { const i = FQ.findIndex(q => q.kind === cur.kind && q.id === cur.id); const nx = FQ[i + 1]; if (nx) return nuiFatForm(nx.kind, nx.id); }
+    FQ = null; vShipList();
   };
   window.nuiFatDel = async function () {
     if (!FS || !FS.recId) return;
     if (!await appConfirm('この牛の枝肉成績を消しますか？（出荷の記録は残ります）')) return;
     fatteningRecords = fatteningRecords.filter(r => r.id !== FS.recId);
-    saveFattening(); FS = null; vShipList();
+    saveFattening(); FS = null; FQ = null; vShipList();
   };
 
   function vCow() {
@@ -35176,7 +35257,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       <div class="sec">📅 予定</div><div class="g3">
         ${tile('nui-p', '🍼', 'お産予定', "switchTab('preg')")}${tile('nui-y', '🗓', 'カレンダー', "switchTab('calendar')")}${tile('nui-o', '🔔', '要確認', "switchTab('check')", chk, '#f59e0b')}</div>
       <div class="sec">📊 成績</div><div class="g3">
-        ${tile('nui-o', '📊', '繁殖成績', "_annTab='sum';switchTab('annual')")}${tile('nui-o', '🥩', '肥育成績', "switchTab('fattening')")}${tile('nui-r', '🚫', '廃用・死亡', "switchTab('retired')")}${tile('nui-y', '🚚', '出荷した牛', 'nuiShipList()')}</div>
+        ${tile('nui-o', '📊', '繁殖成績', "_annTab='sum';switchTab('annual')")}${tile('nui-o', '🥩', '肥育成績', "switchTab('fattening')")}${tile('nui-r', '🚫', '廃用・死亡', "switchTab('retired')")}${tile('nui-y', '🚚', '出荷した牛', 'nuiShipList()', (window.nuiShipTodo && nuiShipTodo()) ? '成績まだ' + nuiShipTodo() : '', '#f59e0b')}</div>
       <div class="sec">📚 記録簿・在庫</div><div class="g3">
         ${tile('nui-y', '📋', '授精簿', "switchTab('insembook')")}${tile('nui-p', '🌱', '採卵記録', "switchTab('collection')", '', '', 'collection')}${tile('nui-o', '🥚', '種・胚在庫', "switchTab('semen')", sem, '#ef4444')}${tile('nui-b', '💊', '薬品・治療簿', "switchTab('vet')")}</div>
       <div class="sec">🖨 書類・印刷</div><div class="lst">
