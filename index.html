@@ -781,6 +781,8 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
     <div style="background:#0a2a1a;border:1px solid var(--accent2);border-radius:10px;padding:12px 14px;margin-bottom:10px;">
       <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:4px;">📥 クラウドのバックアップから、消えた授精簿の行を戻す</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">毎日クラウドに取っているバックアップ（8日分）と今の授精簿を比べ、今は無い行だけを戻します。今ある行はそのままです。</div>
+      <button onclick="closeModal('modal-settings');openSyncDiag()" style="margin-bottom:6px;background:#0a1a2a;border:1px solid var(--info);color:var(--info);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">🔎 同期のようすを調べる（版・保存場所）</button>
+      <button onclick="closeModal('modal-settings');openLostRecover()" style="margin-bottom:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">🩹 消えた移動・タグ・チェックを取り戻す</button>
       <button onclick="closeModal('modal-settings');openIbRestore()" style="background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">☁ バックアップを調べる</button>
       <button onclick="closeModal('modal-settings');openInvRestore()" style="margin-top:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">☁ 消えた在庫の記録（使用・入荷など）を戻す</button>
       <button onclick="closeModal('modal-settings');openInvMissing()" style="margin-top:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">📦 在庫に入っていない授精・移植を調べる</button>
@@ -3246,10 +3248,24 @@ const _store = (() => {
     d.innerHTML = '⚠ この端末の保存場所がいっぱいで、いま入れた内容が保存できていません。電波のある所でページを開き直してください。直らないときは千佳さんに連絡してください。 <button onclick="this.parentNode.remove()" style="margin-left:6px;background:#fff;color:#7f1d1d;border:none;border-radius:6px;padding:2px 8px;font-weight:700;">閉じる</button>';
     (document.body || document.documentElement).appendChild(d);
   }
+  const watchLost = (k, oldS, newS) => {
+    try {
+      if (!oldS || oldS === newS) return;
+      const O = JSON.parse(oldS), N = JSON.parse(newS); if (!Array.isArray(O) || !Array.isArray(N)) return;
+      const nm = new Map(N.map(x => [x && x.id, x])); const lost = [];
+      if (k === 'tasks') O.forEach(o => { if (o && o.done) { const x = nm.get(o.id); if (x && !x.done && !x._undoneAt) lost.push(o.id); } });
+      if (k === 'cows') O.forEach(o => { const x = nm.get(o && o.id); if (!x) return; const mv = e => e && e.type === 'move' ? e.date + '>' + e.to : null; const xs = new Set((x.events || []).map(mv).filter(Boolean)); const g = (o.events || []).map(mv).filter(z => z && !xs.has(z)).length + (o.tags || []).filter(t => !(x.tags || []).includes(t)).length; if (g) lost.push(o.id); });
+      if (lost.length) {
+        const stk = String((new Error()).stack || '').split('\n').slice(2, 9).map(l => l.replace(/https?:\/\/[^\s)]*/g, '').trim()).join(' / ');
+        const L = JSON.parse(ls.getItem('syncLostLog') || '[]'); L.push({ t: new Date().toISOString(), k, step: 'local', n: lost.length, ids: lost.slice(0, 6), stk }); ls.setItem('syncLostLog', JSON.stringify(L.slice(-40)));
+      }
+    } catch (e) {}
+  };
   const st = {
     getItem: k => ls.getItem(k),
     removeItem: k => ls.removeItem(k),
     setItem(k, v) {
+      if (k === 'tasks' || k === 'cows') watchLost(k, ls.getItem(k), v);
       if (k === 'changeLog') v = _histCapStr(v);
       try { ls.setItem(k, v); return; } catch (e) { if (!isQuota(e)) throw e; }
       free(k);
@@ -5423,6 +5439,7 @@ function toggleTask(id) {
   if (!task) return;
   task.done = !task.done;
   task._mt = Date.now();   // ほかの端末とまとめるとき、後からチェックした方を使う
+  if (!task.done) task._undoneAt = task._mt; else delete task._undoneAt;   // 自分で外したときだけ、外したことをほかの端末にも伝える
   // 除角・去勢の予定 → その子牛に印を付ける（外したら印も戻す）
   if (task.calfFlag && _CALF_FLAG[task.calfFlag]) {
     const cf = calves.find(c => c.id === task.calfId), f = _CALF_FLAG[task.calfFlag];
@@ -6253,6 +6270,8 @@ function onTwinCheckChange(cowId, baseDueDate) {
 // 品種フィルター
 let cowBreedFilter = 'all';
 let cowStatusFilter = 'all';
+let cowFreshSub = 'all';   // 新鮮分娩の中：all / wait（授精可能待ち）/ ok（授精できる）
+function _freshWaiting(c) { try { return c.status === 'fresh' && c.calvingDate && diffDays(addDays(c.calvingDate, FRESH_AVAIL_DAYS), today()) > 0; } catch (e) { return false; } }
 let cowAgeFilter = false; // true: 24ヶ月齢未満のみ表示
 function toggleCowAgeFilter() {
   cowAgeFilter = !cowAgeFilter;
@@ -6409,20 +6428,29 @@ function renderCowList() {
     });
     const neverCalvedCount = cows.filter(c => (c.lactation||0) === 0).length;
     const statusDef = [
+      // ★ 2026/11/18：分娩 → 授精 → 妊鑑 → 妊娠 の流れの順に並べる
+      // ★ 2026/11/18：「授精可能待ち」は新鮮分娩の中で分ける（分娩後まだ授精できない牛）。月齢の足りない未経産牛は「未経産」から見る
       {key:'all', label:'全て', icon:'', count: cows.length},
+      {key:'fresh', label:'新鮮分娩', icon:'🍼', count: statusCount['fresh']||0},
+      {key:'open', label:'空胎', icon:'⭕', count: statusCount['open']||0},
+      {key:'program', label:'プログラム中', icon:'📋', count: statusCount['program']||0},
       {key:'preg_waiting', label:'妊鑑待ち', icon:'🔬', count: pregWaitingCount},
       {key:'pregnant', label:'妊娠中', icon:'🤰', count: statusCount['pregnant']||0},
-      {key:'open', label:'空胎', icon:'⭕', count: statusCount['open']||0},
-      {key:'not_yet_eligible', label:'授精可能待ち', icon:'⏳', count: notYetEligibleCount},
-      {key:'program', label:'プログラム中', icon:'📋', count: statusCount['program']||0},
-      {key:'donor', label:'採卵ドナー', icon:'🥚', count: statusCount['donor']||0},
-      {key:'fresh', label:'新鮮分娩', icon:'🍼', count: statusCount['fresh']||0},
       {key:'never_calved', label:'未経産', icon:'🐮', count: neverCalvedCount},
+      {key:'donor', label:'採卵ドナー', icon:'🥚', count: statusCount['donor']||0},
     ].filter(s => s.key==='all' || s.count > 0);
+    if (cowStatusFilter === 'not_yet_eligible') cowStatusFilter = 'all';
+    window._freshSubHTML = '';
+    if (cowStatusFilter === 'fresh') {
+      const fr = cows.filter(c => c.status === 'fresh'), wait = fr.filter(_freshWaiting).length;
+      const sb = (k, l, n) => `<button onclick="cowFreshSub='${k}';renderCowList()" style="background:${cowFreshSub === k ? '#14532d' : 'var(--bg3)'};color:${cowFreshSub === k ? 'var(--accent)' : 'var(--muted)'};border:1px solid ${cowFreshSub === k ? 'var(--accent2)' : 'var(--border)'};border-radius:999px;font-size:12px;font-weight:700;padding:5px 11px;cursor:pointer;font-family:inherit;">${l} ${n}頭</button>`;
+      window._freshSubHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;margin-top:2px;">${sb('all', 'ぜんぶ', fr.length)}${sb('wait', '⏳ 授精可能待ち', wait)}${sb('ok', '✅ 授精できる', fr.length - wait)}</div>`;
+    }
     statusSummaryEl.innerHTML = statusDef.map(s => {
       const active = cowStatusFilter === s.key;
       return `<button class="status-filter-btn" data-status="${s.key}" style="background:${active?'var(--info)':'var(--bg3)'};color:${active?'#fff':'var(--muted)'};border:${active?'none':'1px solid var(--border)'};font-size:12px;font-weight:700;padding:5px 12px;border-radius:20px;cursor:pointer;">${s.icon} ${s.label} ${s.key!=='all'?s.count+'頭':''}</button>`;
     }).join('');
+    { let fs = document.getElementById('fresh-sub'); if (!fs) { fs = document.createElement('div'); fs.id = 'fresh-sub'; statusSummaryEl.parentNode.insertBefore(fs, statusSummaryEl.nextSibling); } fs.innerHTML = window._freshSubHTML || ''; fs.style.display = window._freshSubHTML ? '' : 'none'; fs.style.margin = '0 0 10px'; }
   }
 
   // ステータスフィルター適用
@@ -6447,6 +6475,7 @@ function renderCowList() {
       if (cowStatusFilter === 'preg_waiting') return isPregWaiting;
       if (cowStatusFilter === 'not_yet_eligible') return isNotYetEligibleF;
       if (cowStatusFilter === 'open') return !isNotYetEligibleF && _dsF.key === 'open';
+      if (cowStatusFilter === 'fresh' && cowFreshSub !== 'all' && _dsF.key === 'fresh') return cowFreshSub === 'wait' ? _freshWaiting(c) : !_freshWaiting(c);
       return _dsF.key === cowStatusFilter;
     });
   }
@@ -7531,6 +7560,7 @@ function buildCowStory(cowId) {
   const _estProgDates = new Set(events.filter(e => e.type === 'estrus_et' || e.type === 'estrus_ai').map(e => e.date));
   events.forEach(e => {
     if (e.type === 'move') {
+      if (e.init) return;   // 所在の設定だけ（実際の移動ではない）
       items.push({ date: e.date, cat: 'move', color: '#38bdf8', title: `🏠 ${_stEsc(e.to)}へ移動`, badge: null, desc: '', kv: [], memo: e.memo,
         acts: isRetired ? [] : [`<button class="st-act" onclick="openMoveDialog('cow','${_stEsc(cowId)}',null,${e._idx})">✏ 修正</button>`, `<button class="st-act del" onclick="deleteStoryEvent('${_stEsc(cowId)}',${e._idx})">🗑 削除</button>`] });
     } else if (e.type === 'retained_placenta') {
@@ -11647,20 +11677,22 @@ function barnBulkMove() {
   if (!to) { appAlert('移動先の牛舎を選んでください'); return; }
   if (!_barnSel.size) return;
   armUndo(`${_barnSel.size}頭の移動を記録しました`);
+  const toStory = !!(document.getElementById('barn-mv-story') || { checked: true }).checked;
+  const extra = toStory ? {} : { init: true };   // init：所在の設定だけ（ストーリーには出さない）
   let n = 0;
   _barnSel.forEach(k => {
     const [kind, id] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)];
     if (kind === 'cow') {
       const c = cows.find(x => x.id === id); if (!c || to === '出荷' || cowLocation(c) === to) return;   // 親牛の出荷は廃用の画面から
-      c.events = c.events || []; c.events.push({ type: 'move', date, to, memo: '牛舎別からまとめて移動' }); n++;
+      c.events = c.events || []; c.events.push(Object.assign({ type: 'move', date, to, memo: toStory ? '牛舎別からまとめて移動' : '所在の設定' }, extra)); n++;
     } else {
       const c = calves.find(x => x.id === id); if (!c || calfLocation(c) === to) return;
-      c.moves = c.moves || []; c.moves.push({ date, to, memo: '牛舎別からまとめて移動' }); if (to === '出荷') c.shipDate = date; n++;
+      c.moves = c.moves || []; c.moves.push(Object.assign({ date, to, memo: toStory ? '牛舎別からまとめて移動' : '所在の設定' }, extra)); if (to === '出荷') c.shipDate = date; n++;
     }
   });
   _barnSel.clear(); _barnOpen = to;
   save(); try { renderAll(); } catch (e) {} renderBarnBoard();
-  appAlert(`${n}頭を「${to}」へ移しました（${fmtDate(date)}）`);
+  appAlert(toStory ? `${n}頭を「${to}」へ移しました（${fmtDate(date)}）` : `${n}頭の所在を「${to}」にしました（ストーリーには残しません）`);
 }
 function _barnMembers() {
   const m = {};
@@ -11730,9 +11762,9 @@ function renderBarnBoard() {
   const row = x => {
     const ck = (k) => `<input type="checkbox" ${_barnSel.has(k) ? 'checked' : ''} onclick="event.stopPropagation()" onchange="_barnToggle('${E(k)}',this.checked)" style="width:20px;height:20px;flex-shrink:0;margin:0;">`;
     if (x.kind === 'cow') { const c = x.c; let st = ''; try { st = cowDisplayStatus(c).label; } catch (e) {}
-      return `<div onclick="showCowDetail('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('cow:' + c.id)}<b style="min-width:60px;">${E(c.id)}</b><span style="flex:1;">${E(c.name || '')}</span><span style="color:var(--muted);font-size:11px;">${E(st)}${c.dueDate && c.status === 'pregnant' ? ' 予定' + fmtDateShort(c.dueDate) : ''}</span></div>`; }
+      return `<div onclick="showCowDetail('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('cow:' + c.id)}<b style="min-width:60px;">${E(c.id)}</b>${(() => { let d = ''; try { const mc = getMasterCow(c.id); d = String((mc && mc.nationalId) || c.nationalId || '').replace(/\D/g, ''); } catch (e) {} return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;">${E(c.name || '')}</span><span style="color:var(--muted);font-size:11px;">${E(st)}${c.dueDate && c.status === 'pregnant' ? ' 予定' + fmtDateShort(c.dueDate) : ''}</span></div>`; }
     const c = x.c, mo = c.dob ? Math.floor(diffDays(td, c.dob) / 30.4) : null;
-    return `<div onclick="openEditCalfModal('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('calf:' + c.id)}<b style="min-width:60px;">${E(c.earTagId || '')}</b><span style="flex:1;display:flex;gap:5px;flex-wrap:wrap;">${calfFlagChips(c, true)}</span><span style="color:var(--muted);font-size:11px;">${mo !== null ? mo + 'か月' : ''}</span></div>`;
+    return `<div onclick="openEditCalfModal('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('calf:' + c.id)}<b style="min-width:60px;">${E(c.earTagId || '')}</b>${(() => { const d = String(c.nationalId || '').replace(/\D/g, ''); return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;display:flex;gap:5px;flex-wrap:wrap;">${calfFlagChips(c, true)}</span><span style="color:var(--muted);font-size:11px;">${mo !== null ? mo + 'か月' : ''}</span></div>`;
   };
   box.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden;">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;background:var(--bg3);gap:8px;"><b style="font-size:13px;">🏠 牛群リスト</b><span style="font-size:12px;color:var(--muted);flex:1;">在籍 ${total}頭</span><button onclick="openBarnEditor()" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;">⚙ 牛舎を編集</button></div>
@@ -11742,6 +11774,8 @@ function renderBarnBoard() {
         <select id="barn-mv-to" style="flex:1;min-width:120px;margin:0;"><option value="">牛舎を選ぶ</option>${[...getBarns(), '出荷'].map(b => `<option value="${E(b)}">${E(b)}</option>`).join('')}</select>
         <input type="date" id="barn-mv-date" value="${td}" style="width:140px;margin:0;">
       </div>
+      ${(() => { const allNone = [..._barnSel].every(k => { const kind = k.slice(0, k.indexOf(':')), id = k.slice(k.indexOf(':') + 1); const c = kind === 'cow' ? cows.find(x => x.id === id) : calves.find(x => x.id === id); return c && !(kind === 'cow' ? cowLocation(c) : calfLocation(c)); });
+        return `<label style="display:flex;gap:8px;align-items:center;justify-content:flex-start;margin-top:8px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text);"><input type="checkbox" id="barn-mv-story" ${allNone ? '' : 'checked'} style="width:18px;height:18px;flex:none;margin:0;"><span>ストーリーに「移動」として残す<br><span style="color:var(--muted);font-size:11px;">外す＝今いる牛舎を設定するだけ（最初の所在の登録など）</span></span></label>`; })()}
       <div style="display:flex;gap:6px;margin-top:8px;"><button class="btn btn-primary" style="flex:1;font-size:13px;padding:8px;" onclick="barnBulkMove()">移動を記録する</button><button class="btn" style="font-size:12px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);color:var(--muted);" onclick="_barnSel.clear();renderBarnBoard()">選ぶのをやめる</button></div>
     </div>` : `<div style="padding:6px 12px;font-size:11px;color:var(--muted);">牛舎を開いて□にチェック → まとめて別の牛舎へ移せます</div>`}
     ${names.map(b => { const l = m[b] || [], open = _barnOpen === b;
@@ -12314,11 +12348,14 @@ function _normQ(q) { return String(q == null ? '' : q).normalize('NFKC').toLower
 function cowQueryMatch(q, o) {
   q = _normQ(q);
   if (!q) return true;
-  const sid = _normQ(o.id), nm = _normQ(o.name), nat = String(o.nationalId || '').replace(/\D/g, '');
+  let natSrc = o.nationalId;
+  if (!natSrc && o.id != null) { try { const mc = typeof getMasterCow === 'function' ? getMasterCow(o.id) : null; natSrc = (mc && mc.nationalId) || ((typeof cows !== 'undefined' && cows.find(c => c.id === o.id)) || {}).nationalId || ''; } catch (e) {} }
+  const sid = _normQ(o.id), nm = _normQ(o.name), nat = String(natSrc || '').replace(/\D/g, '');
   if (/^\d+$/.test(q)) {
     if (/^\d+$/.test(sid)) { if (sid === q || (q.length >= 4 && sid.endsWith(q))) return true; }
     else { const m = sid.match(/(\d+)$/); if (m && Number(m[1]) === Number(q)) return true; }
     if (q.length >= 4 && nat && nat.endsWith(q)) return true;
+    if (q.length >= 4 && nat && nat.slice(0, -1).endsWith(q)) return true;   // ★ 4331-0 の牛を「4331」で（最後のチェック数字なし）
     if (q.length >= 6 && nat.includes(q)) return true;
     return false;
   }
@@ -12642,8 +12679,8 @@ function _ibrList() {
   const box = document.getElementById('ibr-list'); if (!r) { box.innerHTML = ''; return; }
   if (!r.miss.length) { box.innerHTML = '<div style="font-size:13px;color:var(--accent);">✓ このバックアップにあって今は無い行はありません</div>'; return; }
   box.innerHTML = `<div style="display:flex;gap:6px;margin-bottom:6px;"><button class="st-act" onclick="document.querySelectorAll('#ibr-list .ibr').forEach(c=>c.checked=true)">すべて選ぶ</button><button class="st-act" onclick="document.querySelectorAll('#ibr-list .ibr').forEach(c=>c.checked=false)">すべて外す</button></div>
-    <div style="max-height:50vh;overflow:auto;">${r.miss.slice().sort((a, b) => String(b.d).localeCompare(String(a.d))).map(x => `<label style="display:flex;gap:6px;align-items:center;font-size:12px;padding:4px 2px;border-bottom:1px solid var(--border);text-transform:none;letter-spacing:0;font-weight:400;color:var(--text);">
-      <input type="checkbox" class="ibr" data-i="${r.miss.indexOf(x)}" checked> <span style="font-family:'JetBrains Mono',monospace;">${_stEsc(fmtDate(x.d))}</span> <b>${_stEsc(x.t)}</b> ${_stEsc(x.s || '')} <span style="color:var(--muted);">${_stEsc([x.n && 'No.' + x.n, x.m].filter(Boolean).join(' '))}</span></label>`).join('')}</div>`;
+    <div style="max-height:50vh;overflow:auto;">${r.miss.slice().sort((a, b) => String(b.d).localeCompare(String(a.d))).map(x => `<label style="display:flex;gap:8px;align-items:flex-start;justify-content:flex-start;font-size:13px;padding:8px 2px;border-bottom:1px solid var(--border);text-transform:none;letter-spacing:0;font-weight:400;color:var(--text);">
+      <input type="checkbox" class="ibr" data-i="${r.miss.indexOf(x)}" style="width:18px;height:18px;flex:none;margin:2px 0 0;"> <span style="flex:1;min-width:0;text-align:left;"><span style="font-family:'JetBrains Mono',monospace;white-space:nowrap;">${_stEsc(fmtDate(x.d))}</span> <b style="white-space:nowrap;">${_stEsc(x.t)}</b> <span style="white-space:nowrap;">${_stEsc(x.s || '')}</span><br><span style="font-size:11px;color:var(--muted);">${_stEsc([x.n && 'No.' + x.n, x.m].filter(Boolean).join(' '))}</span></span></label>`).join('')}</div>`;
 }
 // ★ 2026/11/17：精液・受精卵の在庫の記録（使用・譲渡・入荷など）を、毎日のクラウドのバックアップから戻す。
 //   今は無い記録だけを一覧にして、チェックした記録を戻す（在庫の本数も、その記録の分だけ合わせる）
@@ -12795,6 +12832,117 @@ async function runIbRestore() {
   document.getElementById('ibr-modal')?.remove();
   const more = [evN ? `ストーリーの記録 ${evN}件` : '', stN ? `妊娠中・分娩予定 ${stN}頭` : '', tkN ? `予定 ${tkN}件` : '', inv ? `在庫 ${inv}本` : '', etN ? `移植の記録 ${etN}件` : ''].filter(Boolean);
   appAlert(`授精簿に${n}行戻しました` + (more.length ? `\nいっしょに戻したもの：${more.join('・')}` : ''));
+}
+// ★ 2026/11/18：同期のようすを調べる（この端末の版・保存場所・手元とクラウドが同じか）。結果はコピーして送れる
+async function openSyncDiag() {
+  const L = [];
+  const ua = navigator.userAgent || '';
+  L.push('端末: ' + (/iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : '?') + (window.matchMedia && matchMedia('(display-mode: standalone)').matches ? '（ホーム画面のアプリ）' : '（ブラウザ）'));
+  let cb = '?'; try { const db = window._fbDb, p = window._DATA_PATH; if (db && p) { cb = (await db.ref(p + '/_appBuild').once('value')).val() || '-'; } } catch (e) {}
+  let total = 0, n = 0; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); total += (localStorage.getItem(k) || '').length + k.length; n++; } } catch (e) {}
+  let free = '?'; try { const big = 'x'.repeat(500000); localStorage.setItem('_diag_probe', big); localStorage.removeItem('_diag_probe'); free = 'あと50万字以上入る'; } catch (e) { try { localStorage.removeItem('_diag_probe'); } catch (_) {} free = '⚠ ほぼいっぱい'; }
+  L.push('この端末の版: ' + window.APP_BUILD + ' ／ いちばん新しい版: ' + cb + (cb > window.APP_BUILD ? '　⚠ この端末は古い版です' : ''));
+  L.push('保存場所: ' + Math.round(total / 1000) + '千字（' + n + '項目）・' + free + (window._storeFull ? '・⚠ 保存できなかったことがある' : ''));
+  L.push('同期: ' + ((document.getElementById('sync-status') || {}).textContent || '?') + (window._fbOnline === false ? '（電波なし）' : ''));
+  try {
+    const db = window._fbDb, p = window._DATA_PATH;
+    for (const k of ['cows', 'tasks', 'calves', 'insemBookRecords']) {
+      let rv = null; try { const v = (await db.ref(p + '/' + k).once('value')).val(); rv = v == null ? null : (typeof v === 'string' ? v : JSON.stringify(v)); } catch (e) {}
+      const lv = _store.getItem(k);
+      let note = '';
+      try { const R = JSON.parse(rv || '[]'), Lc = JSON.parse(lv || '[]'); const ik = x => (x && x.id != null) ? 'i:' + x.id : JSON.stringify(x); const rm = new Map(R.map(x => [ik(x), JSON.stringify(x)])); let diff = 0; Lc.forEach(x => { if (rm.get(ik(x)) !== JSON.stringify(x)) diff++; }); note = `手元${Lc.length}件・クラウド${R.length}件・ちがう${diff}件`; } catch (e) { note = '?'; }
+      L.push(`${k}: ${rv === lv ? '✓ 同じ' : '× ちがう'}（${note}）・base ${(() => { const b = window._syncBaseOf ? window._syncBaseOf(k) : null; return b ? (b.f ? 'あり(欄ごと)' : 'あり') : 'なし'; })()}`);
+    }
+  } catch (e) { L.push('クラウドを読めませんでした'); }
+  try { const LL = JSON.parse(localStorage.getItem('syncLostLog') || '[]').slice(-12); L.push('--- 消えかけた記録 ' + LL.length + '件'); LL.forEach(e => L.push(`${String(e.t).slice(5, 19).replace('T', ' ')} ${e.k} ${e.step} ${e.n || e.kept || e.lost || ''} ${(e.ids || []).join(',')} ${e.stk || ''}${e.lvSame != null ? ' lvSame=' + e.lvSame : ''}`)); } catch (e) {}
+  try { closeModal('modal-confirm'); } catch (e) {}
+  document.getElementById('diag-modal')?.remove();
+  const w = document.createElement('div'); w.id = 'diag-modal';
+  w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9300;display:flex;align-items:center;justify-content:center;padding:12px;';
+  const txt = L.join('\n');
+  w.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;width:100%;max-width:520px;max-height:92vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>🔎 同期のようす</b><button class="modal-close" onclick="document.getElementById('diag-modal').remove()">✕</button></div>
+    <pre id="diag-txt" style="white-space:pre-wrap;font-size:12px;line-height:1.7;background:var(--bg3);border-radius:8px;padding:10px;margin:0 0 10px;">${_stEsc(txt)}</pre>
+    <button class="btn btn-primary" style="width:100%;" onclick="try{navigator.clipboard.writeText(document.getElementById('diag-txt').textContent);this.textContent='コピーしました';}catch(e){}">📋 コピー（チャットに貼って送ってください）</button>
+  </div>`;
+  document.body.appendChild(w);
+}
+// ★ 2026/11/18：同期で消えてしまった「牛舎の移動」「タグ」「タスクのチェック」を取り戻す。
+//   変更履歴（どの端末で何を変えたか・3日分）と、クラウドの毎日のバックアップ（3日分）にあって、今は無いものだけを一覧にする
+let _lostData = null;
+async function openLostRecover() {
+  const from = new Date(Date.now() - 3 * 86400000).toISOString();
+  const srcCows = [], srcCalves = [], srcTasks = [];
+  try { _histLoad().filter(e => e && e.t >= from && e.after).forEach(e => { if (e.k === 'cows') srcCows.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); if (e.k === 'calves') srcCalves.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); }); } catch (e) {}
+  const db = window._fbDb, key = String(window._DATA_PATH || '').split('/').pop();
+  if (db && key) {
+    appAlert('バックアップを調べています…');
+    for (let i = 0; i <= 3; i++) {
+      const d = addDays(today(), -i);
+      for (const k of ['cows', 'calves', 'tasks']) {
+        try {
+          const v = (await db.ref(`backups/${key}/${d}/${k}`).once('value')).val(); if (!v) continue;
+          const L = typeof v === 'string' ? JSON.parse(v) : v; if (!Array.isArray(L)) continue;
+          (k === 'cows' ? srcCows : k === 'calves' ? srcCalves : srcTasks).push(...L.map(o => ({ o, from: fmtDate(d) + 'のバックアップ' })));
+        } catch (e) {}
+      }
+    }
+    try { closeModal('modal-confirm'); } catch (e) {}
+  }
+  const items = [], seen = new Set();
+  const add = (kind, id, label, data, from) => { const u = kind + '|' + id + '|' + JSON.stringify(data); if (seen.has(u)) return; seen.add(u); items.push({ kind, id, label, data, from }); };
+  srcCows.forEach(({ o, from }) => {
+    const c = cows.find(x => x.id === o.id); if (!c) return;
+    (o.events || []).filter(e => e && e.type === 'move').forEach(e => { if (!(c.events || []).some(x => x.type === 'move' && x.date === e.date && x.to === e.to)) add('cowMove', c.id, `${c.id} ${cowDisplayName(c.id) || ''}　${fmtDate(e.date)} → ${e.to}`, e, from); });
+    (o.tags || []).forEach(t => { if (!(c.tags || []).includes(t)) add('tag', c.id, `${c.id} ${cowDisplayName(c.id) || ''}　🏷 ${t}`, t, from); });
+  });
+  srcCalves.forEach(({ o, from }) => {
+    const c = calves.find(x => x.id === o.id); if (!c) return;
+    (o.moves || []).forEach(m => { if (m && !(c.moves || []).some(x => x.date === m.date && x.to === m.to)) add('calfMove', c.id, `子牛 ${c.earTagId || c.id}　${fmtDate(m.date)} → ${m.to}`, m, from); });
+    (o.tags || []).forEach(t => { if (!(c.tags || []).includes(t)) add('calfTag', c.id, `子牛 ${c.earTagId || c.id}　🏷 ${t}`, t, from); });
+  });
+  srcTasks.forEach(({ o, from }) => {
+    if (!o || !o.done) return; const t = tasks.find(x => x.id === o.id); if (!t || t.done) return;
+    add('taskDone', t.id, `${fmtDate(t.date)} ${t.cowId}　${t.action}`, null, from);
+  });
+  _lostData = items;
+  document.getElementById('lost-modal')?.remove();
+  const G = [['cowMove', '🏠 牛舎の移動（親牛）'], ['calfMove', '🏠 牛舎の移動（子牛）'], ['tag', '🏷 タグ（親牛）'], ['calfTag', '🏷 タグ（子牛）'], ['taskDone', '✓ タスクのチェック']];
+  const w = document.createElement('div'); w.id = 'lost-modal';
+  w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9300;display:flex;align-items:center;justify-content:center;padding:12px;';
+  w.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;width:100%;max-width:560px;max-height:92vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>🩹 消えた移動・タグ・チェックを取り戻す</b><button class="modal-close" onclick="document.getElementById('lost-modal').remove()">✕</button></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6;">ここ3日の変更履歴とクラウドのバックアップにあって、今は無いものです。わざと消したものはチェックを外してください。</div>
+    ${items.length ? G.map(([k, l]) => { const L = items.map((x, i) => ({ x, i })).filter(o => o.x.kind === k); if (!L.length) return '';
+      return `<div style="font-size:13px;font-weight:700;margin:12px 0 4px;">${l}（${L.length}）　<button class="st-act" onclick="document.querySelectorAll('.lost-${k}').forEach(c=>c.checked=true)">全部</button> <button class="st-act" onclick="document.querySelectorAll('.lost-${k}').forEach(c=>c.checked=false)">外す</button></div>
+        <div style="max-height:30vh;overflow:auto;">${L.map(({ x, i }) => `<label style="display:flex;gap:8px;align-items:flex-start;justify-content:flex-start;font-size:13px;padding:6px 2px;border-bottom:1px solid var(--border);text-transform:none;letter-spacing:0;font-weight:400;color:var(--text);"><input type="checkbox" class="lost-${k} lost-c" data-i="${i}" checked style="width:18px;height:18px;flex:none;margin:2px 0 0;"><span style="text-align:left;">${_stEsc(x.label)}<br><span style="font-size:11px;color:var(--muted);">${_stEsc(x.from)}</span></span></label>`).join('')}</div>`; }).join('')
+      + `<button class="btn btn-primary" style="width:100%;margin-top:12px;" onclick="runLostRecover()">チェックしたものを戻す</button>`
+      : '<div style="font-size:13px;color:var(--accent);">✓ 消えているものは見つかりませんでした</div>'}
+  </div>`;
+  document.body.appendChild(w);
+}
+function runLostRecover() {
+  const L = _lostData || [];
+  const pick = [...document.querySelectorAll('#lost-modal .lost-c')].filter(c => c.checked).map(c => L[+c.dataset.i]).filter(Boolean);
+  if (!pick.length) { appAlert('戻すものを選んでください'); return; }
+  armUndo(`消えた記録を${pick.length}件戻しました`);
+  const now = Date.now();
+  pick.forEach(x => {
+    if (x.kind === 'cowMove' || x.kind === 'tag') {
+      const c = cows.find(o => o.id === x.id); if (!c) return;
+      if (x.kind === 'cowMove') { c.events = c.events || []; if (!c.events.some(e => e.type === 'move' && e.date === x.data.date && e.to === x.data.to)) { c.events.push(JSON.parse(JSON.stringify(x.data))); c.events.sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))); } }
+      else { c.tags = c.tags || []; if (!c.tags.includes(x.data)) c.tags.push(x.data); }
+    } else if (x.kind === 'calfMove' || x.kind === 'calfTag') {
+      const c = calves.find(o => o.id === x.id); if (!c) return;
+      if (x.kind === 'calfMove') { c.moves = c.moves || []; if (!c.moves.some(m => m.date === x.data.date && m.to === x.data.to)) c.moves.push(JSON.parse(JSON.stringify(x.data))); }
+      else { c.tags = c.tags || []; if (!c.tags.includes(x.data)) c.tags.push(x.data); }
+    } else if (x.kind === 'taskDone') {
+      const t = tasks.find(o => o.id === x.id); if (t && !t.done) { t.done = true; t._mt = now; }
+    }
+  });
+  save(); try { renderAll(); } catch (e) {}
+  document.getElementById('lost-modal')?.remove();
+  appAlert(`${pick.length}件戻しました`);
 }
 // ★ 2026/11/17：授精簿の行に対応する在庫の使用記録があるか（syncInsemInventoryForRecord と同じ見方）
 function _invHasUse(rec) {
@@ -26447,7 +26595,7 @@ function showCalfStory(calfId) {
     items.push({ date: /^\d{4}-\d{2}-\d{2}$/.test(sd) ? sd : (calf.dob || ''), color: '#facc15', title: '🚚 出荷（枝肉成績）', desc: '', kv: fkv, memo: '', acts: [] });
   }
   // 移動（体格つき）
-  calfMoves(calf).forEach(m => items.push({ date: m.date, color: m.to === '出荷' ? '#facc15' : '#38bdf8', title: m.to === '出荷' ? '🚚 出荷' : `🏠 ${m.to}へ移動`, desc: '',
+  calfMoves(calf).filter(m => !m.init).forEach(m => items.push({ date: m.date, color: m.to === '出荷' ? '#facc15' : '#38bdf8', title: m.to === '出荷' ? '🚚 出荷' : `🏠 ${m.to}へ移動`, desc: '',
     kv: m.score ? [[m.score + ' / 5', '体格']] : [], memo: m.memo || '',
     acts: [`<button class="st-act" onclick="openMoveDialog('calf','${esc(calf.id)}',null,${m._idx})">✏ 修正</button>`, `<button class="st-act del" onclick="deleteCalfMove('${esc(calf.id)}',${m._idx})">🗑 削除</button>`] }));
   // メモ
@@ -33010,17 +33158,44 @@ function _syncHash(str) {   // 32bit FNV-1a
   return (h >>> 0).toString(36);
 }
 const _syncItemKey = x => (x && typeof x === 'object' && x.id != null) ? 'i:' + x.id : 'h:' + _syncHash(JSON.stringify(x));
+// ★ 2026/11/18：牛・子牛・タスクなどは、1頭（1件）の中の欄ごとにも指紋を取っておく。
+//   両方の端末で同じ牛を変えたとき、牛まるごと新しい方にするのではなく、欄ごと（移動・授精などの記録は1件ずつ）にまとめる。
+//   （前は、止まっていた端末が古い中身のまま自動の直しで全部の牛を変えて送ると、ほかの端末で入れた移動などが全部消えていた）
+const _SYNC_FIELD_KEYS = ['cows', 'calves', 'retiredCows', 'calvingRecords'];   // タスクは数が多いので1件ずつ（済みのチェックは別に守っている）
+function _syncFieldDigest(x) {
+  const f = {};
+  Object.keys(x).forEach(p => {
+    if (p === '_mt') return;
+    const v = x[p];
+    f[p] = Array.isArray(v) ? v.map(e => _syncHash(JSON.stringify(e))) : _syncHash(JSON.stringify(v));
+  });
+  return f;
+}
 // 値の指紋：配列なら1件ずつ、オブジェクトならキーごと、それ以外は丸ごと
-function _syncDigest(str) {
+function _syncDigest(str, k) {
   let v; try { v = JSON.parse(str); } catch (e) { return { t: 's', h: _syncHash(String(str)) }; }
-  if (Array.isArray(v)) { const m = {}; v.forEach(x => { m[_syncItemKey(x)] = _syncHash(JSON.stringify(x)); }); return { t: 'a', m }; }
+  if (Array.isArray(v)) {
+    const m = {}; v.forEach(x => { m[_syncItemKey(x)] = _syncHash(JSON.stringify(x)); });
+    if (k && _SYNC_FIELD_KEYS.includes(k)) { const fm = {}; v.forEach(x => { if (x && typeof x === 'object' && !Array.isArray(x)) fm[_syncItemKey(x)] = _syncFieldDigest(x); }); return { t: 'a', m, f: fm }; }
+    return { t: 'a', m };
+  }
   if (v && typeof v === 'object') { const m = {}; Object.keys(v).forEach(k => { m[k] = _syncHash(JSON.stringify(v[k])); }); return { t: 'o', m }; }
   return { t: 's', h: _syncHash(String(str)) };
 }
 function _syncSetBase(k, str) {
   _syncedStr[k] = str;
-  try { _syncBase[k] = _syncDigest(str); localStorage.setItem('_syncBase', JSON.stringify(_syncBase)); } catch (e) {}
+  _syncBase[k] = _syncDigest(str, k);
+  _syncSaveBase();
 }
+// ★ 2026/11/18：base（そろえた時の指紋）が端末に保存できないときは、古い base を残さない。
+//   古い base が残ると、次に開いたとき「手元で消した・戻した」と取りちがえて、ほかの端末で入れた記録（チェック・移動など）を消してしまう
+function _syncSaveBase() {
+  try { localStorage.setItem('_syncBase', JSON.stringify(_syncBase)); }
+  catch (e) { try { localStorage.removeItem('_syncBase'); } catch (_) {} console.warn('同期：base を保存できませんでした（保存場所がいっぱい）'); }
+}
+function _syncDropBase(k) { delete _syncBase[k]; delete _syncedStr[k]; _syncSaveBase(); }
+// 手元に書いたものが本当に保存されたか
+function _storeOK(k, v) { try { return _store.getItem(k) === v; } catch (e) { return false; } }
 // 3方向マージ。base は指紋（_syncDigest）
 function syncMerge3(k, base, remoteStr, localStr) {
   if (remoteStr === localStr) return localStr;
@@ -33039,8 +33214,38 @@ function syncMerge3(k, base, remoteStr, localStr) {
     }
     return l;
   };
+  // 両方で同じ1件を変えたとき：欄ごとにまとめる（配列の欄は1件ずつ：足した方は残し、消した方は消す）
+  const mergeArr = (ra, la, bArr) => {
+    const bset = new Set(bArr || []), rh = ra.map(H), lh = la.map(H), rs = new Set(rh), ls = new Set(lh), out = [], seen = new Set();
+    la.forEach((x, i) => { const h = lh[i]; if (seen.has(h)) return; seen.add(h); if (bset.has(h) && !rs.has(h)) return; out.push(x); });
+    ra.forEach((x, i) => { const h = rh[i]; if (seen.has(h)) return; seen.add(h); if (bset.has(h) && !ls.has(h)) return; out.push(x); });
+    return out;
+  };
+  const mergeItem = (r, l, bf) => {
+    if (!bf || !(r && l && typeof r === 'object' && typeof l === 'object') || Array.isArray(r) || Array.isArray(l)) return pickBoth(r, l);
+    const win = pickBoth(r, l), o = {};
+    new Set([...Object.keys(l), ...Object.keys(r)]).forEach(p => {
+      if (p === '_mt') return;
+      const inR = p in r, inL = p in l, rv = r[p], lv = l[p];
+      const rh = inR ? H(rv) : undefined, lh = inL ? H(lv) : undefined, b = bf[p];
+      if (rh === lh) { if (inL) o[p] = lv; return; }
+      if (Array.isArray(b) && (!inR || Array.isArray(rv)) && (!inL || Array.isArray(lv))) {
+        const m = mergeArr(inR ? rv : [], inL ? lv : [], b);
+        if (p === 'events' || p === 'moves') m.sort((x, y) => String((x && x.date) || '').localeCompare(String((y && y.date) || '')));
+        if (m.length || (inL && inR)) o[p] = m;
+        return;
+      }
+      const bh = Array.isArray(b) ? undefined : b;
+      if (bh === undefined) { if (!inR) { o[p] = lv; return; } if (!inL) { o[p] = rv; return; } }
+      if (bh !== undefined && bh === lh) { if (inR) o[p] = rv; return; }   // 手元はこの欄を変えていない → クラウドの方
+      if (bh !== undefined && bh === rh) { if (inL) o[p] = lv; return; }   // クラウドはこの欄を変えていない → 手元の方
+      if (p in win) o[p] = win[p];                                         // 同じ欄を両方で変えた → 後から変えた方
+    });
+    const mt = Math.max(r._mt || 0, l._mt || 0); if (mt) o._mt = mt;
+    return o;
+  };
   if (Array.isArray(R) && Array.isArray(L) && (!base || base.t === 'a')) {
-    const bm = (base && base.m) || null;
+    const bm = (base && base.m) || null, bfm = (base && base.f) || null;
     const rmap = new Map(); R.forEach(x => rmap.set(_syncItemKey(x), x));
     const out = [], seen = new Set();
     L.forEach(lx => {
@@ -33051,7 +33256,7 @@ function syncMerge3(k, base, remoteStr, localStr) {
         if (lh === rh) out.push(lx);
         else if (bh !== undefined && bh === lh) out.push(rx);        // 手元は変えていない → クラウドの方
         else if (bh !== undefined && bh === rh) out.push(lx);        // クラウドは変えていない → 手元の方
-        else out.push(pickBoth(rx, lx));                             // 両方で変えた
+        else out.push(bfm && bfm[key] ? mergeItem(rx, lx, bfm[key]) : pickBoth(rx, lx));   // 両方で変えた → 欄ごとにまとめる
       } else {
         if (bh !== undefined && bh === lh) {                         // ほかの端末で消した（手元は変えていない）→ 消す
           if (TB && !_ibTombOK(TB, lx, key)) { console.warn('同期：授精簿の行が無くなっていたが、消した記録が無いので残しました', lx.d, lx.t, lx.s); out.push(lx); }
@@ -33116,13 +33321,51 @@ function _syncLegacyMerge(k, rv, lv) {
 // クラウドの値と手元の値をまとめる（base があれば3方向、なければ前からのやり方）
 function _syncReconcile(k, rv, lv) {
   if (k === 'changeLog') { const r = _syncReconcile0(k, rv, lv); return r == null ? r : _histCapStr(r); }
-  return _syncReconcile0(k, rv, lv);
+  let m = _syncReconcile0(k, rv, lv);
+  try { if (k === 'tasks' || k === 'cows') m = _syncKeepChecks(k, rv, lv, m); } catch (e) { console.error(e); }
+  return m;
+}
+// ★ 2026/11/18：まとめた結果で、クラウドにある「チェック（済み）」「移動」「タグ」が消えるときは、記録に残す。
+//   タスクのチェックは、手元で自分で外した（_undoneAt が新しい）とき以外は消さない
+function _syncLostLog(entry) {
+  try { const L = JSON.parse(localStorage.getItem('syncLostLog') || '[]'); L.push(Object.assign({ t: new Date().toISOString() }, entry)); localStorage.setItem('syncLostLog', JSON.stringify(L.slice(-40))); } catch (e) {}
+}
+function _syncKeepChecks(k, rv, lv, m) {
+  if (m == null || m === rv) return m;
+  let R, M, Lc; try { R = JSON.parse(rv); M = JSON.parse(m); Lc = lv ? JSON.parse(lv) : []; } catch (e) { return m; }
+  if (!Array.isArray(R) || !Array.isArray(M)) return m;
+  const mm = new Map(M.map(x => [x && x.id, x])), lm = new Map((Lc || []).map(x => [x && x.id, x]));
+  if (k === 'tasks') {
+    const fixed = [];
+    R.forEach(r => {
+      if (!r || !r.done) return;
+      const x = mm.get(r.id); if (!x || x.done) return;
+      const l = lm.get(r.id);
+      if (x._undoneAt && x._undoneAt > (r._mt || 0)) return;   // 手元で、あとから自分で外した
+      x.done = r.done; if (r.doneAt) x.doneAt = r.doneAt; if (r._mt && (!x._mt || r._mt > x._mt)) x._mt = r._mt; delete x._undoneAt;
+      fixed.push(r.id + (l ? (l.done ? '' : '(手元は未)') : '(手元に無)'));
+    });
+    if (fixed.length) { _syncLostLog({ k, step: 'merge', kept: fixed.length, ids: fixed.slice(0, 8) }); return JSON.stringify(M); }
+  }
+  if (k === 'cows') {
+    const lost = [];
+    R.forEach(r => {
+      const x = mm.get(r && r.id); if (!x) return;
+      const mv = e => e && e.type === 'move' ? e.date + '>' + e.to : null;
+      const rs = (r.events || []).map(mv).filter(Boolean), xs = new Set((x.events || []).map(mv).filter(Boolean));
+      const gone = rs.filter(z => !xs.has(z));
+      const tg = (r.tags || []).filter(t => !(x.tags || []).includes(t));
+      if (gone.length || tg.length) lost.push(r.id + (gone.length ? ' 移動' + gone.length : '') + (tg.length ? ' タグ' + tg.length : ''));
+    });
+    if (lost.length) _syncLostLog({ k, step: 'merge', lost: lost.length, ids: lost.slice(0, 8), lvSame: lv === _syncedStr[k] });
+  }
+  return m;
 }
 function _syncReconcile0(k, rv, lv) {
   if (lv == null || lv === rv) return rv;
   if (_syncedStr[k] !== undefined && lv === _syncedStr[k]) return rv;     // 手元はそろえた時のまま → クラウドの方
   const base = _syncBase[k];
-  if (base && base.t && _syncHash(lv) && JSON.stringify(_syncDigest(lv)) === JSON.stringify(base)) return rv;   // 手元は変えていない
+  if (base && base.t && _syncHash(lv) && JSON.stringify(_syncDigest(lv, k)) === JSON.stringify(base)) return rv;   // 手元は変えていない
   return base ? syncMerge3(k, base, rv, lv) : _syncLegacyMerge(k, rv, lv);
 }
 function _syncAfterLocalChange() {
@@ -33139,7 +33382,9 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111802';
+const APP_BUILD = '2026111809';
+window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
+window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
   const b = remote && remote._appBuild ? String(remote._appBuild) : '';
   if (b && b > APP_BUILD) {
@@ -33193,7 +33438,8 @@ function initFirebaseSync() {
         const lv = _store.getItem(k);
         const merged = _syncReconcile(k, rv, lv);
         _store.setItem(k, merged);
-        _syncSetBase(k, rv);                 // クラウドの値を base にする（まとめた差はこのあと送る）
+        if (_storeOK(k, merged)) _syncSetBase(k, rv);   // クラウドの値を base にする（まとめた差はこのあと送る）
+        else _syncDropBase(k);                           // 端末に保存できなかった → base を進めない
         if (merged !== rv) needPush = true;
       });
     }
@@ -33221,8 +33467,9 @@ function initFirebaseSync() {
         if (rv === _syncedStr[k]) return;               // 自分が送った値（エコー）か、変わっていない
         const lv = _store.getItem(k);
         const merged = _syncReconcile(k, rv, lv);
-        _syncSetBase(k, rv);
         if (merged !== lv) { _store.setItem(k, merged); changed = true; }
+        if (_storeOK(k, merged)) _syncSetBase(k, rv);   // 手元に保存できたときだけ base を進める
+        else { _syncDropBase(k); return; }
         if (merged !== rv) push = true;                 // 手元の変更が残っている → あとで送る
       });
       if (changed) { _syncAfterLocalChange(); }
@@ -33262,10 +33509,18 @@ function saveToFirebase() {
       }, (err, committed, snap) => {
         if (err || !committed || !snap) { if (err) { console.error('Firebase update error:', k, err); failed = true; } done(); return; }
         const v = snap.val(), vs = typeof v === 'string' ? v : JSON.stringify(v);
-        _syncSetBase(k, vs);
         const now = _store.getItem(k);
         if (now === lv && vs !== lv) { _store.setItem(k, vs); reload = true; }   // ほかの端末の記録が混ざった → 手元にも入れる
+        else if (now !== lv && vs !== lv) {
+          // ★ 2026/11/18：送っている間に手元がまた変わった。クラウドに混ざったほかの端末の記録（チェック・移動など）を、
+          //   手元の新しい中身にもまとめてから base を進める（前は手元に入れないまま base だけ進めて、次に送ったとき消していた）
+          const m2 = _syncReconcile(k, vs, now);
+          if (m2 !== now) { _store.setItem(k, m2); reload = true; }
+          setTimeout(() => { try { saveToFirebase(); } catch (e) {} }, 100);
+        }
         else if (now !== lv) setTimeout(() => { try { saveToFirebase(); } catch (e) {} }, 100);   // 送っている間に手元がまた変わった
+        const cur2 = _store.getItem(k);
+        if (cur2 === vs || _storeOK(k, cur2)) _syncSetBase(k, vs); else _syncDropBase(k);
         done();
       }, false);
     });
@@ -34571,11 +34826,18 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         <div onclick="switchTab('insembook')"><span>📄 ${document.documentElement.classList.contains('no-etcert') ? '授精証明書' : '授精証明書・移植証明書'}</span><span style="color:#64748b;">›</span></div>
         <div onclick="openBirthReport()"><span>🐄 らくちく出生報告</span><span style="color:${br ? '#f59e0b' : '#64748b'};font-weight:${br ? 700 : 400};">${br ? br + '頭まだ ›' : '›'}</span></div>
         <div onclick="nuiPrintMenu()"><span>🖨 お産予定・授精簿の印刷</span><span style="color:#64748b;">›</span></div>
-        <div onclick="openIbRestore()"><span>☁ 消えた授精簿の行を戻す（バックアップから）</span><span style="color:#64748b;">›</span></div>
         <div onclick="switchTab('history')"><span>📝 変更履歴</span><span style="color:#64748b;">›</span></div>
         <div onclick="switchTab('calc')"><span>🧮 発情・分娩の日を計算</span><span style="color:#64748b;">›</span></div>
         <div onclick="openModal('modal-settings')"><span>⚙ 設定・データ管理</span><span style="color:#64748b;">›</span></div>
-      </div>`;
+      </div>
+      <details style="margin-top:16px;" ${(() => { try { return localStorage.getItem('nuiFixOpen') === '1' ? 'open' : ''; } catch (e) { return ''; } })()} ontoggle="try{localStorage.setItem('nuiFixOpen',this.open?'1':'0')}catch(e){}">
+        <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#64748b;letter-spacing:2px;margin:0 2px 6px;">🔧 困ったとき（データの修復）▼</summary>
+        <div class="lst">
+          <div onclick="openSyncDiag()"><span>🔎 同期のようすを調べる</span><span style="color:#64748b;">${'版 ' + String(window.APP_BUILD || '').slice(-4)} ›</span></div>
+          <div onclick="openLostRecover()"><span>🩹 消えた移動・タグ・チェックを取り戻す</span><span style="color:#64748b;">›</span></div>
+          <div onclick="openIbRestore()"><span>☁ 消えた授精簿の行を戻す（バックアップから）</span><span style="color:#64748b;">›</span></div>
+        </div>
+      </details>`;
   }
   window.nuiPrintMenu = async function () {
     const ok = await appConfirm('どちらを印刷しますか？\n\n「OK」＝お産予定の表\n「キャンセル」＝授精簿（授精簿の画面を開きます）');
