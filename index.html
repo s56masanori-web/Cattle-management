@@ -5771,7 +5771,14 @@ function renderPregList() {
     const curB = [], curD = [];
     const sexM = (list, ym) => { const L = list.filter(c => (c.dob || '').startsWith(ym)); return [L.filter(c => c.sex === '雄').length, L.filter(c => c.sex === '雌').length]; };
     const sexCur = [], sexPrev = [];
-    for (let i = 0; i < 12; i++) { const mm = String(i + 1).padStart(2, '0'); sexCur.push(sexM(born, `${pregYear}-${mm}`)); sexPrev.push(prevM[i] == null ? null : sexM(prevBorn, `${prevYear}-${mm}`)); }
+    // ★ 2026/11/18：品種ごとの頭数（生まれた子牛＋分娩予定）
+    const BRK = ['褐毛', '黒毛', 'F1', '不明'];
+    const brM = (bl, dl, ym) => { const o = { b: {}, d: {} }; bl.filter(c => (c.dob || '').startsWith(ym)).forEach(c => { const k = _annCalfBreed(c); o.b[k] = (o.b[k] || 0) + 1; }); dl.filter(c => c.dueDate.startsWith(ym)).forEach(c => { const k = dueCalfBreed(c); o.d[k] = (o.d[k] || 0) + nDue(c); }); return o; };
+    const brCur = [], brPrev = [];
+    for (let i = 0; i < 12; i++) { const mm = String(i + 1).padStart(2, '0'); sexCur.push(sexM(born, `${pregYear}-${mm}`)); sexPrev.push(prevM[i] == null ? null : sexM(prevBorn, `${prevYear}-${mm}`)); brCur.push(brM(born, due, `${pregYear}-${mm}`)); brPrev.push(prevM[i] == null ? null : brM(prevBorn, prevDue, `${prevYear}-${mm}`)); }
+    const brTot = k => brCur.reduce((a, o) => a + (o.b[k] || 0), 0), brDue = k => brCur.reduce((a, o) => a + (o.d[k] || 0), 0);
+    const BRL = { '褐毛': '🟥 褐毛', '黒毛': '⬛ 黒毛', 'F1': 'F1', '不明': '❔ 品種不明' };
+    const breedRows = BRK.filter(k => brTot(k) + brDue(k)).map(k => `<tr><td style="padding:3px 6px 3px 0;font-weight:700;white-space:nowrap;">${BRL[k]}</td><td style="padding:3px 6px;text-align:right;font-weight:900;font-family:'JetBrains Mono',monospace;">${brTot(k) + brDue(k)}頭</td><td style="padding:3px 6px;text-align:right;color:var(--accent);white-space:nowrap;">生まれた ${brTot(k)}</td><td style="padding:3px 0 3px 6px;text-align:right;color:var(--purple);white-space:nowrap;">予定 ${brDue(k)}</td></tr>`).join('');
     const cells = Array.from({ length: 12 }, (_, i) => {
       const ym = `${pregYear}-${String(i + 1).padStart(2, '0')}`;
       const b = born.filter(c => c.dob.startsWith(ym)).length;
@@ -5793,11 +5800,13 @@ function renderPregList() {
         <div style="font-size:12px;color:var(--muted);">${pregYear === todayStr.slice(0, 4) ? '今年' : pregYear + '年'}（${pregYear}年1〜12月）全部で</div>
         <div style="font-size:30px;font-weight:900;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.2;">${totBorn + totDue}<span style="font-size:15px;">頭</span></div>
         <div style="font-size:12px;"><span style="color:var(--accent);">もう生まれた ${totBorn}頭</span>　＋　<span style="color:var(--purple);">これから生まれる予定 ${totDue}頭</span></div>
+        ${breedRows ? `<table style="margin:8px auto 0;border-collapse:collapse;font-size:12px;border-top:1px solid var(--border);">${breedRows}</table>` : ''}
       </div>
       <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;">${cells}</div>
       <div style="font-size:10px;color:var(--muted);margin-top:6px;">済＝生まれた子牛の頭数（死産含む）／予＝妊娠中の牛の分娩予定（双子は2頭）</div>
-      ${_calvCompareChart(pregYear, prevYear, curB, curD, prevM, sexCur, sexPrev)}
-    </div>`;
+      ${_calvCompareChart(pregYear, prevYear, curB, curD, prevM, sexCur, sexPrev, brCur, brPrev)}
+    </div>
+    ${(() => { const h = calfBirthSummaryHTML(pregYear, 'renderPregList()', '_pregSumOpen'); return h ? `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:12px;">${h}</div>` : ''; })()}`;
   })();
 
   const calvingHTML = yearHTML + (Object.keys(monthMap).length ? (
@@ -5839,11 +5848,35 @@ function renderPregList() {
   container.innerHTML = tabBar + (currentSub==='exam' ? renderExamHTML(pq) : currentSub==='waiting' ? waitingHTML : calvingHTML);
 }
 
+// 妊娠中の牛から生まれる予定の子牛の品種（最後の授精・移植の精液／胚から）
+function dueCalfBreed(cow) {
+  try {
+    const e = [...(cow.events || [])].sort((a, b) => b.date.localeCompare(a.date)).find(x => ['ai_done', 'et_done', 'estrus_ai', 'estrus_et'].includes(x.type));
+    if (!e) return '不明';
+    let memo = e.memo || ''; if (!memo) memo = insemMemoFor(cow.id, e.date) || '';
+    const str = memo.match(/胚番号:([^\/\n]+)/)?.[1]?.trim() || memo.match(/精液:([^\/\n]+)/)?.[1]?.trim() || memo.trim();
+    const isEt = ['et_done', 'estrus_et'].includes(e.type) || looksLikeEmbryo(str) || looksLikeEmbryo(memo);
+    const semB = name => { name = String(name || '').trim(); if (!name) return '不明'; const inv = (typeof semenInventory !== 'undefined' ? semenInventory : []).find(s => s.name && (name.startsWith(s.name) || s.name.startsWith(name))); return _annBreed(inv && inv.breed); };
+    if (!isEt) return semB(str);
+    const key = String(str).split(/[\s　／/]/)[0], lotKey = key.replace(/-\d+$/, '');
+    const EI = typeof embryoInventory !== 'undefined' ? embryoInventory : [];
+    const inv = EI.find(x => (x.embryoDetails || []).some(d => d.no === key)) || EI.find(x => x.lot === lotKey);
+    if (inv) { const b = _annBreed(inv.breed); if (b !== '不明') return b; }
+    for (const r of (typeof collectionRecordsNew !== 'undefined' ? collectionRecordsNew : [])) {
+      const hit = (r.frozenEmbryos || []).some(x => String(x.no || '').trim() === key) || (r.freshEmbryos || []).some(x => String(x.embryoNo || '').trim() === key) || (r.cultureEmbryos || []).some(x => String(x.embryoNo || '').trim() === key);
+      if (!hit) continue;
+      const d = r.donorId && _annCowById(r.donorId); const b = _annBreed(d && d.breed); if (b !== '不明') return b;
+      const b2 = semB(r.sire); if (b2 !== '不明') return b2;
+    }
+    const ds = embryoDonorSire(key) || ''; const b3 = semB(ds.split('×').pop()); if (b3 !== '不明') return b3;
+    return '不明';
+  } catch (err) { return '不明'; }
+}
 // 月別の分娩頭数を前の年とくらべる棒グラフ
 //   1か月に棒は1本（今年＝緑、分娩予定は点線の枠）。♂♀の頭数は月の下に、棒の列にそろえて出す（♂青・♀からし色の文字）
 //   前の年は左に灰色の棒を同じ太さで並べる（いない月は 0、記録を始める前の月は何も書かない）。
 //   色は色の見分けがつきにくい人でも分かれる青×からし色（検証ずみ）。月をタップすると下に内訳が出る
-function _calvCompareChart(y, py, B, D, P, SC, SP) {
+function _calvCompareChart(y, py, B, D, P, SC, SP, BC, BP) {
   const MALE = '#3987e5', FEM = '#c98500';
   const known = P.map((p, i) => p != null ? i + 1 : 0).filter(Boolean);
   const partial = known.length && known.length < 12;
@@ -5899,7 +5932,7 @@ function _calvCompareChart(y, py, B, D, P, SC, SP) {
     }
     bars += `<rect x="${x0}" y="0" width="${gw}" height="${H}" style="fill:transparent;cursor:pointer" onclick="_cvSel(${i})"/>`;
   }
-  window._cvData = { y, py, B, D, P, SC, SP };
+  window._cvData = { y, py, B, D, P, SC, SP, BC, BP };
   const sm = (Lx, k) => (Lx || []).reduce((a, x) => a + (x ? x[k] : 0), 0);
   const hp = (SP || []).some(Boolean);
   const sw = (st) => `<span style="display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:3px;${st}"></span>`;
@@ -5913,6 +5946,7 @@ function _calvCompareChart(y, py, B, D, P, SC, SP) {
     <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--text);margin:8px 0 2px;">
       <span>${sw('background:var(--accent)')}生まれた ${B.reduce((a, b) => a + b, 0)}${SEXOK ? `（<span style="color:${MALE};font-weight:700;">♂${sm(SC, 0)}</span>・<span style="color:${FEM};font-weight:700;">♀${sm(SC, 1)}</span>）` : ''}</span>
       <span>${sw('border:1.2px dashed var(--text);box-sizing:border-box')}予定 ${D.reduce((a, b) => a + b, 0)}</span>
+      ${BC ? `<span style="color:var(--muted);">${_cvBreedTxt(BC)}</span>` : ''}
       ${known.length ? `<span style="color:var(--muted);">${sw('background:#9ca3af;opacity:.55')}${py}年（左の灰色）</span>` : ''}
     </div>
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" role="img" aria-label="${y}年の月別分娩頭数（${py}年とくらべる）">
@@ -5940,7 +5974,15 @@ function _cvInfo(i) {
     <table style="border-collapse:collapse;font-size:12px;">
       ${row(c.y, b + d, sx && b ? sx[0] : null, sx && b ? sx[1] : null, curExtra)}
       ${row(c.py, p, p == null ? null : spx ? spx[0] : null, p == null ? null : spx ? spx[1] : null, p == null ? '記録なし' : '', true)}
-    </table>`;
+    </table>
+    ${c.BC ? `<div style="margin-top:4px;font-size:11.5px;">${c.y}年：${_cvBreedTxt(c.BC[i]) || '—'}</div>` : ''}
+    ${c.BP && c.BP[i] ? `<div style="font-size:11.5px;color:var(--muted);">${c.py}年：${_cvBreedTxt(c.BP[i]) || '—'}</div>` : ''}`;
+}
+// 品種ごとの頭数（生まれた＋予定）を「🟥褐毛 12・⬛黒毛 3」のように
+function _cvBreedTxt(L) {
+  const L2 = (Array.isArray(L) ? L : [L]).filter(Boolean); if (!L2.length) return '';
+  const lab = { '褐毛': '🟥褐毛', '黒毛': '⬛黒毛', 'F1': 'F1', '不明': '❔不明' };
+  return ['褐毛', '黒毛', 'F1', '不明'].map(k => { const b = L2.reduce((a, o) => a + (o.b[k] || 0), 0), d = L2.reduce((a, o) => a + (o.d[k] || 0), 0); return b + d ? `${lab[k]} <b style="color:var(--text);">${b + d}</b>${d && b ? `<span style="font-size:10px;">（予${d}）</span>` : d ? `<span style="font-size:10px;">（予定）</span>` : ''}` : ''; }).filter(Boolean).join('　');
 }
 function _cvSel(i) { const el = document.getElementById('cv-info'); if (el) el.innerHTML = _cvInfo(i); }
 // 生まれた子牛の ♂♀（月ごと・前の年とくらべる）。予定の牛は性別がまだ分からないので入れない
@@ -6308,6 +6350,31 @@ document.addEventListener('click', function(e) {
   }
 });
 
+// ★ 2026/11/18：牛ごとの分娩間隔（ストーリーと同じ数え方：分娩記録・分娩イベント・最終分娩日を集め、10日以内は同じ分娩）
+function cowCalvingIntervals(cow) {
+  if (!cow) return null;
+  const ds = new Set(), rec = new Set();
+  (cow.events || []).filter(e => e.type === 'calving' && e.date).forEach(e => ds.add(e.date));
+  (typeof calvingRecords !== 'undefined' ? calvingRecords : []).filter(r => r.cowId === cow.id && r.date).forEach(r => { ds.add(r.date); rec.add(r.date); });
+  if (cow.calvingDate) ds.add(cow.calvingDate);
+  const G = [];
+  // 分娩と分娩の間が200日より短いことはないので、それより近い日付は同じ分娩（記録の日付ずれ）としてまとめる
+  [...ds].sort().forEach(d => { const g = G[G.length - 1]; if (g && diffDays(d, g[0]) < 200) g.push(d); else G.push([d]); });
+  const L = G.map(g => g.find(d => rec.has(d)) || g[0]);
+  const iv = [], list = []; for (let i = 1; i < L.length; i++) { const d = diffDays(L[i], L[i - 1]); iv.push(d); list.push({ from: L[i - 1], to: L[i], days: d }); }
+  const est = (cow.status === 'pregnant' && cow.dueDate && L.length) ? diffDays(cow.dueDate, L[L.length - 1]) : null;
+  if (!iv.length && est == null) return null;
+  return { last: iv.length ? iv[iv.length - 1] : null, avg: iv.length ? Math.round(iv.reduce((a, b) => a + b, 0) / iv.length) : null, n: iv.length, est, list };
+}
+function cowCalvingIntervalText(cow) {
+  const r = cowCalvingIntervals(cow); if (!r) return '';
+  const col = d => d > 400 ? 'var(--danger)' : d > 380 ? 'var(--warn)' : 'var(--text)';
+  const p = [];
+  if (r.last != null) p.push(`前回 <b style="color:${col(r.last)};">${r.last}日</b>`);
+  if (r.n >= 2) p.push(`平均 <b style="color:${col(r.avg)};">${r.avg}日</b>（${r.n}回）`);
+  if (r.est != null) p.push(`今回の見込み <b style="color:${col(r.est)};">${r.est}日</b>`);
+  return p.length ? `<div class="nui-cc-key" style="font-size:12px;color:var(--muted);">📏 分娩間隔 ${p.join(' ・ ')}</div>` : '';
+}
 // タグの札の色（同じタグはいつも同じ色）。個体カードを描くときに使うので、ここで先に決めておく
 function nuiTagStyle(t) {
   const PAL = [['#fbbf24', '#1f1600'], ['#4ade80', '#0d2a1a'], ['#c4a5f5', '#1c1230'], ['#22d3ee', '#06232a'], ['#f472b6', '#2a0f1f'], ['#fb923c', '#1a0f00'], ['#a3e635', '#16210a'], ['#e2e8f0', '#1e2333']];
@@ -6785,6 +6852,7 @@ function renderCowList() {
         </div>
         ${_sub ? `<div style="font-size:12px;color:var(--muted);margin-top:3px;">${_sub}</div>` : ''}
         ${_key}
+        ${cowCalvingIntervalText(cow)}
         ${cow.status === 'pregnant' ? '' : lastInsemLabel}
         ${insemHistoryLabel}
         ${donorStopBanner(cow)}
@@ -11694,6 +11762,24 @@ function barnBulkMove() {
   save(); try { renderAll(); } catch (e) {} renderBarnBoard();
   appAlert(toStory ? `${n}頭を「${to}」へ移しました（${fmtDate(date)}）` : `${n}頭の所在を「${to}」にしました（ストーリーには残しません）`);
 }
+// ★ 2026/11/18：牛群リストで、牛がどの牛舎にいるかを探す（耳標・名前・個体識別番号の4けた）
+function _barnFind() {
+  const box = document.getElementById('barn-found'); if (!box) return;
+  const q = String(window._barnQ || '').trim();
+  if (!q) { box.innerHTML = ''; return; }
+  const E = _stEsc, m = _barnMembers(), hits = [];
+  Object.keys(m).forEach(b => (m[b] || []).forEach(x => {
+    const c = x.c, isCow = x.kind === 'cow';
+    let nid = ''; try { nid = String((isCow ? ((getMasterCow(c.id) || {}).nationalId || c.nationalId) : c.nationalId) || '').replace(/\D/g, ''); } catch (e) {}
+    const id = isCow ? c.id : (c.earTagId || '');
+    if (cowQueryMatch(q, { id, name: isCow ? (cowDisplayName(c.id) || c.name) : c.name, nationalId: nid })) hits.push({ b, x, id, nid, isCow });
+  }));
+  box.innerHTML = `<div style="margin:0 12px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;">${hits.length ? hits.slice(0, 20).map(h => `
+    <div onclick="_barnOpen='${E(h.b)}';renderBarnBoard();setTimeout(()=>{const r=document.querySelector('[data-barn-hit=&quot;${E(h.x.kind + ':' + h.x.c.id)}&quot;]');if(r){r.scrollIntoView({block:'center'});r.style.background='rgba(34,197,94,.18)';}},50)" style="display:flex;gap:8px;align-items:center;padding:9px 10px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">
+      <b style="min-width:58px;">${E(h.id || '（耳標なし）')}</b>${h.nid.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;">${h.nid.slice(-5, -1)}-${h.nid.slice(-1)}</span>` : ''}
+      <span style="flex:1;color:var(--muted);font-size:12px;">${h.isCow ? E(cowDisplayName(h.x.c.id) || '') : '子牛'}</span>
+      <span style="font-weight:800;color:var(--accent);white-space:nowrap;">🏠 ${h.b ? E(h.b) : '牛群なし'} ›</span></div>`).join('') : '<div style="padding:9px 10px;font-size:12px;color:var(--muted);">見つかりません（廃用・出荷した牛は出ません）</div>'}</div>`;
+}
 function _barnMembers() {
   const m = {};
   const add = (b, x) => { (m[b] = m[b] || []).push(x); };
@@ -11762,12 +11848,14 @@ function renderBarnBoard() {
   const row = x => {
     const ck = (k) => `<input type="checkbox" ${_barnSel.has(k) ? 'checked' : ''} onclick="event.stopPropagation()" onchange="_barnToggle('${E(k)}',this.checked)" style="width:20px;height:20px;flex-shrink:0;margin:0;">`;
     if (x.kind === 'cow') { const c = x.c; let st = ''; try { st = cowDisplayStatus(c).label; } catch (e) {}
-      return `<div onclick="showCowDetail('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('cow:' + c.id)}<b style="min-width:60px;">${E(c.id)}</b>${(() => { let d = ''; try { const mc = getMasterCow(c.id); d = String((mc && mc.nationalId) || c.nationalId || '').replace(/\D/g, ''); } catch (e) {} return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;">${E(c.name || '')}</span><span style="color:var(--muted);font-size:11px;">${E(st)}${c.dueDate && c.status === 'pregnant' ? ' 予定' + fmtDateShort(c.dueDate) : ''}</span></div>`; }
+      return `<div data-barn-hit="cow:${E(c.id)}" onclick="showCowDetail('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('cow:' + c.id)}<b style="min-width:60px;">${E(c.id)}</b>${(() => { let d = ''; try { const mc = getMasterCow(c.id); d = String((mc && mc.nationalId) || c.nationalId || '').replace(/\D/g, ''); } catch (e) {} return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;">${E(c.name || '')}</span><span style="color:var(--muted);font-size:11px;">${E(st)}${c.dueDate && c.status === 'pregnant' ? ' 予定' + fmtDateShort(c.dueDate) : ''}</span></div>`; }
     const c = x.c, mo = c.dob ? Math.floor(diffDays(td, c.dob) / 30.4) : null;
-    return `<div onclick="openEditCalfModal('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('calf:' + c.id)}<b style="min-width:60px;">${E(c.earTagId || '')}</b>${(() => { const d = String(c.nationalId || '').replace(/\D/g, ''); return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;display:flex;gap:5px;flex-wrap:wrap;">${calfFlagChips(c, true)}</span><span style="color:var(--muted);font-size:11px;">${mo !== null ? mo + 'か月' : ''}</span></div>`;
+    return `<div data-barn-hit="calf:${E(c.id)}" onclick="openEditCalfModal('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('calf:' + c.id)}<b style="min-width:60px;">${E(c.earTagId || '')}</b>${(() => { const d = String(c.nationalId || '').replace(/\D/g, ''); return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;display:flex;gap:5px;flex-wrap:wrap;">${calfFlagChips(c, true)}</span><span style="color:var(--muted);font-size:11px;">${mo !== null ? mo + 'か月' : ''}</span></div>`;
   };
   box.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden;">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;background:var(--bg3);gap:8px;"><b style="font-size:13px;">🏠 牛群リスト</b><span style="font-size:12px;color:var(--muted);flex:1;">在籍 ${total}頭</span><button onclick="openBarnEditor()" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;">⚙ 牛舎を編集</button></div>
+    <div style="padding:8px 12px 4px;"><input type="search" id="barn-q" value="${E(window._barnQ || '')}" placeholder="🔍 どこにいる？ 耳標・名前・識別番号の4けた" autocomplete="off" oninput="window._barnQ=this.value;_barnFind()" style="width:100%;box-sizing:border-box;margin:0;font-size:15px;"></div>
+    <div id="barn-found"></div>
     ${_barnSel.size ? `<div style="position:sticky;top:0;z-index:5;padding:10px 12px;background:#0b2a12;border-bottom:1px solid var(--accent2);">
       <div style="font-size:13px;font-weight:800;margin-bottom:6px;">✅ ${_barnSel.size}頭を選んでいます → 移動先</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
@@ -11785,6 +11873,7 @@ function renderBarnBoard() {
         ${open ? `<div style="padding:0 12px 6px;">${l.length ? `<div style="text-align:right;padding:6px 0 2px;"><button onclick="_barnSelAll('${E(b)}', ${l.every(x => _barnSel.has(x.kind + ':' + x.c.id)) ? 'false' : 'true'})" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;">${l.every(x => _barnSel.has(x.kind + ':' + x.c.id)) ? 'この牛舎の選択をはずす' : 'この牛舎を全部選ぶ'}</button></div>` : ''}${l.length ? l.sort((a, z) => String(a.kind === 'cow' ? a.c.id : a.c.earTagId).localeCompare(String(z.kind === 'cow' ? z.c.id : z.c.earTagId), 'ja', { numeric: true })).map(row).join('') : '<div style="font-size:12px;color:var(--muted);padding:8px 0;">いません</div>'}</div>` : ''}`; }).join('')}
     ${emptyN && (hideEmpty || window._barnShowEmpty) ? `<div onclick="window._barnShowEmpty=!window._barnShowEmpty;renderBarnBoard()" style="padding:8px 12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);cursor:pointer;">${hideEmpty ? `▸ 0頭の牛舎 ${emptyN}か所を隠しています（タップで出す）` : '▴ 0頭の牛舎を隠す'}</div>` : ''}
   </div>`;
+  try { _barnFind(); } catch (e) {}
 }
 
 // ===== 📥 ファームノートのCSVから取り込む（牛の一覧・状態・牛群・子牛・分娩の履歴・廃用・肥育成績） =====
@@ -15101,6 +15190,110 @@ function saveCalfGenomic() {
   const calf = calves.find(c => c.id === window._genCalfId);
   if (calf) { const g = _genReadForm(); if (g) calf.genomic = g; else delete calf.genomic; save(); }
   closeCalfGenomic(); renderCalves();
+}
+// 📊 その年の産仔の内訳（ET・AI・合計）。子牛タブとお産予定の両方で使う
+//   RR：開け閉めしたあとに描き直す関数（文字列）、OK：開いた状態を覚えるキー
+function calfBirthSummaryHTML(thisYear, RR, OK) {
+  const etCalvesThisYear = calves.filter(c => c.dob && c.dob.startsWith(thisYear) && c.embryoNo);
+  const aiCalvesThisYear = calves.filter(c => c.dob && c.dob.startsWith(thisYear) && !c.embryoNo && c.insemType !== 'et' && !c.donor);
+  const total = etCalvesThisYear.length;
+  const male = etCalvesThisYear.filter(c => c.sex === '雄').length;
+  const female = etCalvesThisYear.filter(c => c.sex === '雌').length;
+  if (!total && !aiCalvesThisYear.length) return '';
+      // 品種：子牛の品種欄 → 空なら父牛（精液在庫）の品種から推定
+      const breedOf = c => {
+        const b = String(c.breed || '');
+        if (b.includes('褐')) return '褐毛';
+        if (b.includes('黒')) return '黒毛';
+        const sire = String(c.sire || '');
+        const inv = sire && (typeof semenInventory !== 'undefined' ? semenInventory : []).find(s => s.name && (sire.startsWith(s.name) || s.name.startsWith(sire)));
+        const ib = String(inv?.breed || '');
+        if (ib.includes('褐')) return '褐毛';
+        if (ib.includes('黒')) return '黒毛';
+        return '未設定';
+      };
+      const BR = [['褐毛','🟥 褐毛和種','#f87171'],['黒毛','⬛ 黒毛和種','#e2e8f0'],['未設定','❔ 品種未設定','var(--muted)']];
+      const monthChips = list => {
+        const bm = {};
+        list.forEach(c => { const m = parseInt(c.dob.slice(5,7)); bm[m] = (bm[m]||0)+1; });
+        return Object.entries(bm).sort((a,b)=>a[0]-b[0]).map(([m,n])=>
+          '<span style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);">'+m+'月 <strong style="color:var(--purple);">'+n+'頭</strong></span>').join('');
+      };
+      const blocksFor = (all, numCol) => BR.map(([key,label,col]) => {
+        const list = all.filter(c => breedOf(c) === key);
+        if (!list.length) return '';
+        const m = list.filter(c => c.sex === '雄').length, f = list.filter(c => c.sex === '雌').length;
+        return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:8px;">'+
+          '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;font-size:12px;margin-bottom:6px;">'+
+            '<span style="font-weight:700;color:'+col+';">'+label+'</span>'+
+            '<span><strong style="color:var(--text);font-size:15px;">'+list.length+'頭</strong></span>'+
+            '<span style="color:var(--muted);">♂ '+m+'頭　♀ '+f+'頭'+(list.length-m-f ? '　性別未設定 '+(list.length-m-f)+'頭' : '')+'</span>'+
+          '</div>'+
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+monthChips(list).split('color:var(--purple)').join('color:'+numCol)+'</div>'+
+        '</div>';
+      }).join('');
+      const breedBlocks = blocksFor(etCalvesThisYear, 'var(--purple)');
+      const aiTotal = aiCalvesThisYear.length;
+      const aiM = aiCalvesThisYear.filter(c => c.sex === '雄').length, aiF = aiCalvesThisYear.filter(c => c.sex === '雌').length;
+      // タップで「どの胚から生まれたか」の内訳を開く
+      const esc = _stEsc;
+      const detailOpen = !!window._etDetailOpen;
+      const detailHTML = !detailOpen ? '' : BR.map(([key,label,col]) => {
+        const list = etCalvesThisYear.filter(c => breedOf(c) === key).sort((a,b)=>a.dob.localeCompare(b.dob));
+        if (!list.length) return '';
+        let lastM = '';
+        return '<div style="font-size:12px;font-weight:700;color:'+col+';margin:12px 0 4px;">'+label+'（'+list.length+'頭）</div>'+
+          list.map(c => {
+            const m = parseInt(c.dob.slice(5,7)) + '月';
+            const head = m !== lastM ? '<div style="font-size:10px;color:var(--muted);margin:6px 0 2px;">'+m+'</div>' : '';
+            lastM = m;
+            const ds = c.donor ? (c.donor + (c.sire ? ' × ' + c.sire : '')) : (embryoDonorSire(c.embryoNo) || '');
+            const sexC = c.sex === '雄' ? '#60a5fa' : c.sex === '雌' ? '#f472b6' : 'var(--muted)';
+            const sexT = c.sex === '雄' ? (c.castrated ? '去勢' : '♂') : c.sex === '雌' ? '♀' : '？';
+            const tag = c.earTagId || (c.nationalId ? String(c.nationalId) : '');
+            return head + '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);">'+
+              '<div style="width:44px;flex-shrink:0;font-size:11px;color:var(--muted);font-family:\'JetBrains Mono\',monospace;">'+esc(fmtDateShort(c.dob))+'</div>'+
+              '<div style="width:16px;flex-shrink:0;font-weight:900;color:'+sexC+';">'+sexT+'</div>'+
+              '<div style="flex:1;min-width:0;">'+
+                '<div style="font-size:12px;font-weight:700;color:var(--purple);">'+(ds ? esc(ds) : '<span style="color:var(--muted);font-weight:400;">ドナー不明</span>')+'</div>'+
+                '<div style="font-size:11px;font-family:\'JetBrains Mono\',monospace;color:var(--muted);">'+esc(c.embryoNo)+'</div>'+
+                '<div style="font-size:11px;color:var(--muted);">母（受卵牛）: <span style="color:var(--text);">'+esc(c.damId||'—')+' '+esc(cowDisplayName(c.damId)||'')+'</span>'+(tag ? '　子牛: '+esc(tag) : '')+'</div>'+
+              '</div>'+
+            '</div>';
+          }).join('');
+      }).join('');
+      let sumOpen = false; try { sumOpen = localStorage.getItem(OK) === '1'; } catch (e) {}
+      const head = '<div onclick="(function(){try{localStorage.setItem(\''+OK+'\',localStorage.getItem(\''+OK+'\')===\'1\'?\'0\':\'1\')}catch(e){};'+RR+'})()" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
+        '<span style="font-size:12px;font-weight:700;color:var(--text);">📊 '+thisYear+'年 産仔の内訳</span>'+
+        '<span style="font-size:11px;color:var(--muted);">'+'計'+(total+aiTotal)+'頭（'+(total ? 'ET '+total+'頭' : '')+(total && aiTotal ? '・' : '')+(aiTotal ? 'AI '+aiTotal+'頭' : '')+'）　'+(sumOpen ? '▲ 閉じる' : '▼ 開く')+'</span></div>';
+      const aiHTML = !aiTotal ? '' : '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">'+
+        '<div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:6px;">💉 '+thisYear+'年 人工授精（AI）産仔</div>'+
+        '<div style="display:flex;gap:16px;font-size:13px;">'+
+          '<span>合計: <strong style="color:var(--text);font-size:16px;">'+aiTotal+'頭</strong></span>'+
+          '<span>♂ '+aiM+'頭</span>'+
+          '<span>♀ '+aiF+'頭</span>'+
+        '</div>'+ blocksFor(aiCalvesThisYear, 'var(--accent)') + '</div>';
+      const etHTML = !total ? '' : '<div style="margin-top:10px;cursor:pointer;" onclick="window._etDetailOpen=!window._etDetailOpen;'+RR+'">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:12px;font-weight:700;color:var(--purple);">🧬 '+thisYear+'年 受精卵産仔</span><span style="font-size:11px;color:var(--muted);">'+(detailOpen ? '▲ 閉じる' : '▼ タップで胚の内訳')+'</span></div>'+
+        '<div style="display:flex;gap:16px;font-size:13px;">'+
+          '<span>合計: <strong style="color:var(--text);font-size:16px;">'+total+'頭</strong></span>'+
+          '<span>♂ '+male+'頭</span>'+
+          '<span>♀ '+female+'頭</span>'+
+        '</div>'+
+        breedBlocks + detailHTML + '</div>';
+
+      // ★ 2026/11/18：ETとAIを合わせた合計（品種ごとも）
+      const allC = etCalvesThisYear.concat(aiCalvesThisYear);
+      const allM = allC.filter(c => c.sex === '雄').length, allF = allC.filter(c => c.sex === '雌').length;
+      const totHTML = '<div style="margin-top:10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;">'+
+        '<div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;font-size:13px;">'+
+          '<span style="font-weight:700;">合計（ET＋AI）</span>'+
+          '<strong style="color:var(--text);font-size:18px;">'+allC.length+'頭</strong>'+
+          '<span style="color:var(--muted);">♂ '+allM+'頭　♀ '+allF+'頭</span></div>'+
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin-top:4px;">'+
+          BR.map(([key,label,col]) => { const n = allC.filter(c => breedOf(c) === key).length; return n ? '<span><span style="color:'+col+';font-weight:700;">'+label+'</span> <strong>'+n+'頭</strong>（ET '+etCalvesThisYear.filter(c => breedOf(c) === key).length+'・AI '+aiCalvesThisYear.filter(c => breedOf(c) === key).length+'）</span>' : ''; }).join('')+
+        '</div></div>';
+      return sumOpen ? head + totHTML + etHTML + aiHTML : head;
 }
 // 保留（繁殖候補）の内訳：品種ごとに ET産仔・AI産仔・ゲノミックの判定
 function _calfBreedOf(c) {
@@ -25977,111 +26170,15 @@ function renderCalves() {
   }
 
   try { renderCalfKeptSummary(filtered); } catch (e) { console.error('keptSummary', e); }
-  // 今年（1〜12月）の受精卵産仔集計
-  const thisYear = new Date().getFullYear().toString();
-  const etCalvesThisYear = calves.filter(c => c.dob && c.dob.startsWith(thisYear) && c.embryoNo);
-  // ★ 2026/11/17：AI（ET以外）の産仔も同じように内訳を出す。ふだんはたたんで1行
-  const aiCalvesThisYear = calves.filter(c => c.dob && c.dob.startsWith(thisYear) && !c.embryoNo && c.insemType !== 'et' && !c.donor);
+  // 今年（1〜12月）の産仔の内訳（ET・AI・合計）
   const etSummaryEl = document.getElementById('et-calves-summary');
   if (etSummaryEl) {
-    const total = etCalvesThisYear.length;
-    const male = etCalvesThisYear.filter(c => c.sex === '雄').length;
-    const female = etCalvesThisYear.filter(c => c.sex === '雌').length;
-    const byMonth = {};
-    etCalvesThisYear.forEach(c => {
-      const m = parseInt(c.dob.slice(5,7)) + '月';
-      byMonth[m] = (byMonth[m]||0)+1;
-    });
-    if (total > 0 || aiCalvesThisYear.length) {
-      // 品種：子牛の品種欄 → 空なら父牛（精液在庫）の品種から推定
-      const breedOf = c => {
-        const b = String(c.breed || '');
-        if (b.includes('褐')) return '褐毛';
-        if (b.includes('黒')) return '黒毛';
-        const sire = String(c.sire || '');
-        const inv = sire && (typeof semenInventory !== 'undefined' ? semenInventory : []).find(s => s.name && (sire.startsWith(s.name) || s.name.startsWith(sire)));
-        const ib = String(inv?.breed || '');
-        if (ib.includes('褐')) return '褐毛';
-        if (ib.includes('黒')) return '黒毛';
-        return '未設定';
-      };
-      const BR = [['褐毛','🟥 褐毛和種','#f87171'],['黒毛','⬛ 黒毛和種','#e2e8f0'],['未設定','❔ 品種未設定','var(--muted)']];
-      const monthChips = list => {
-        const bm = {};
-        list.forEach(c => { const m = parseInt(c.dob.slice(5,7)); bm[m] = (bm[m]||0)+1; });
-        return Object.entries(bm).sort((a,b)=>a[0]-b[0]).map(([m,n])=>
-          '<span style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);">'+m+'月 <strong style="color:var(--purple);">'+n+'頭</strong></span>').join('');
-      };
-      const blocksFor = (all, numCol) => BR.map(([key,label,col]) => {
-        const list = all.filter(c => breedOf(c) === key);
-        if (!list.length) return '';
-        const m = list.filter(c => c.sex === '雄').length, f = list.filter(c => c.sex === '雌').length;
-        return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:8px;">'+
-          '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;font-size:12px;margin-bottom:6px;">'+
-            '<span style="font-weight:700;color:'+col+';">'+label+'</span>'+
-            '<span><strong style="color:var(--text);font-size:15px;">'+list.length+'頭</strong></span>'+
-            '<span style="color:var(--muted);">♂ '+m+'頭　♀ '+f+'頭'+(list.length-m-f ? '　性別未設定 '+(list.length-m-f)+'頭' : '')+'</span>'+
-          '</div>'+
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+monthChips(list).split('color:var(--purple)').join('color:'+numCol)+'</div>'+
-        '</div>';
-      }).join('');
-      const breedBlocks = blocksFor(etCalvesThisYear, 'var(--purple)');
-      const aiTotal = aiCalvesThisYear.length;
-      const aiM = aiCalvesThisYear.filter(c => c.sex === '雄').length, aiF = aiCalvesThisYear.filter(c => c.sex === '雌').length;
-      // タップで「どの胚から生まれたか」の内訳を開く
-      const esc = _stEsc;
-      const detailOpen = !!window._etDetailOpen;
-      const detailHTML = !detailOpen ? '' : BR.map(([key,label,col]) => {
-        const list = etCalvesThisYear.filter(c => breedOf(c) === key).sort((a,b)=>a.dob.localeCompare(b.dob));
-        if (!list.length) return '';
-        let lastM = '';
-        return '<div style="font-size:12px;font-weight:700;color:'+col+';margin:12px 0 4px;">'+label+'（'+list.length+'頭）</div>'+
-          list.map(c => {
-            const m = parseInt(c.dob.slice(5,7)) + '月';
-            const head = m !== lastM ? '<div style="font-size:10px;color:var(--muted);margin:6px 0 2px;">'+m+'</div>' : '';
-            lastM = m;
-            const ds = c.donor ? (c.donor + (c.sire ? ' × ' + c.sire : '')) : (embryoDonorSire(c.embryoNo) || '');
-            const sexC = c.sex === '雄' ? '#60a5fa' : c.sex === '雌' ? '#f472b6' : 'var(--muted)';
-            const sexT = c.sex === '雄' ? (c.castrated ? '去勢' : '♂') : c.sex === '雌' ? '♀' : '？';
-            const tag = c.earTagId || (c.nationalId ? String(c.nationalId) : '');
-            return head + '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);">'+
-              '<div style="width:44px;flex-shrink:0;font-size:11px;color:var(--muted);font-family:\'JetBrains Mono\',monospace;">'+esc(fmtDateShort(c.dob))+'</div>'+
-              '<div style="width:16px;flex-shrink:0;font-weight:900;color:'+sexC+';">'+sexT+'</div>'+
-              '<div style="flex:1;min-width:0;">'+
-                '<div style="font-size:12px;font-weight:700;color:var(--purple);">'+(ds ? esc(ds) : '<span style="color:var(--muted);font-weight:400;">ドナー不明</span>')+'</div>'+
-                '<div style="font-size:11px;font-family:\'JetBrains Mono\',monospace;color:var(--muted);">'+esc(c.embryoNo)+'</div>'+
-                '<div style="font-size:11px;color:var(--muted);">母（受卵牛）: <span style="color:var(--text);">'+esc(c.damId||'—')+' '+esc(cowDisplayName(c.damId)||'')+'</span>'+(tag ? '　子牛: '+esc(tag) : '')+'</div>'+
-              '</div>'+
-            '</div>';
-          }).join('');
-      }).join('');
-      etSummaryEl.style.display = '';
-      etSummaryEl.style.cursor = '';
-      etSummaryEl.onclick = null;
+    const h = calfBirthSummaryHTML(new Date().getFullYear().toString(), 'renderCalves()', '_calfSumOpen');
+    if (h) {
+      etSummaryEl.style.display = ''; etSummaryEl.style.cursor = ''; etSummaryEl.onclick = null;
       etSummaryEl.style.borderColor = 'var(--border)'; etSummaryEl.style.background = 'var(--bg3)'; etSummaryEl.style.padding = '10px 12px';
-      let sumOpen = false; try { sumOpen = localStorage.getItem('_calfSumOpen') === '1'; } catch (e) {}
-      const head = '<div onclick="(function(){try{localStorage.setItem(\'_calfSumOpen\',localStorage.getItem(\'_calfSumOpen\')===\'1\'?\'0\':\'1\')}catch(e){};renderCalves();})()" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
-        '<span style="font-size:12px;font-weight:700;color:var(--text);">📊 '+thisYear+'年 産仔の内訳</span>'+
-        '<span style="font-size:11px;color:var(--muted);">'+(total ? 'ET '+total+'頭' : '')+(total && aiTotal ? '・' : '')+(aiTotal ? 'AI '+aiTotal+'頭' : '')+'　'+(sumOpen ? '▲ 閉じる' : '▼ 開く')+'</span></div>';
-      const aiHTML = !aiTotal ? '' : '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">'+
-        '<div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:6px;">💉 '+thisYear+'年 人工授精（AI）産仔</div>'+
-        '<div style="display:flex;gap:16px;font-size:13px;">'+
-          '<span>合計: <strong style="color:var(--text);font-size:16px;">'+aiTotal+'頭</strong></span>'+
-          '<span>♂ '+aiM+'頭</span>'+
-          '<span>♀ '+aiF+'頭</span>'+
-        '</div>'+ blocksFor(aiCalvesThisYear, 'var(--accent)') + '</div>';
-      const etHTML = !total ? '' : '<div style="margin-top:10px;cursor:pointer;" onclick="window._etDetailOpen=!window._etDetailOpen;renderCalves();">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><span style="font-size:12px;font-weight:700;color:var(--purple);">🧬 '+thisYear+'年 受精卵産仔</span><span style="font-size:11px;color:var(--muted);">'+(detailOpen ? '▲ 閉じる' : '▼ タップで胚の内訳')+'</span></div>'+
-        '<div style="display:flex;gap:16px;font-size:13px;">'+
-          '<span>合計: <strong style="color:var(--text);font-size:16px;">'+total+'頭</strong></span>'+
-          '<span>♂ '+male+'頭</span>'+
-          '<span>♀ '+female+'頭</span>'+
-        '</div>'+
-        breedBlocks + detailHTML + '</div>';
-      etSummaryEl.innerHTML = sumOpen ? head + etHTML + aiHTML : head;
-    } else {
-      etSummaryEl.style.display = 'none';
-    }
+      etSummaryEl.innerHTML = h;
+    } else etSummaryEl.style.display = 'none';
   }
 
   // 移動待ちアラート
@@ -33382,7 +33479,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111809';
+const APP_BUILD = '2026111813';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -34714,7 +34811,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const head = document.createElement('div');
     let nid = ''; try { const mc = getMasterCow(c.id); const d = String((mc && mc.nationalId) || c.nationalId || '').replace(/\D/g, ''); if (d.length >= 5) nid = `<span class="nui-nid" style="margin:0 6px 0 0;">${d.slice(-5, -1)}-${d.slice(-1)}</span>`; } catch (e) {}
     const tg = (c.tags || []).map(t => `<button class="nui-tagc" style="${nuiTagStyle(t)}" onclick="closeModal('modal-cow');nuiTagFilter('${jsq(t)}')">🏷 ${esc(t)}</button>`).join('');
-    head.innerHTML = (nid || sub ? `<div style="font-size:12px;color:#94a3b8;margin:-6px 0 8px;">${nid}${esc(sub)}</div>` : '') + (tg ? `<div class="nui-tags" style="margin:-2px 0 10px;">${tg}</div>` : '');
+    let ci = ''; try { ci = cowCalvingIntervalText(c); } catch (e) {}
+    head.innerHTML = (nid || sub ? `<div style="font-size:12px;color:#94a3b8;margin:-6px 0 8px;">${nid}${esc(sub)}</div>` : '') + (tg ? `<div class="nui-tags" style="margin:-2px 0 10px;">${tg}</div>` : '') + (ci ? `<div style="margin:-4px 0 10px;">${ci}</div>` : '');
     met.parentNode.insertBefore(head, met);
     met.parentNode.insertBefore(m4, met);
     const dt = document.createElement('details'); dt.className = 'nui-more-met';
@@ -34766,7 +34864,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     box.insertBefore(head, box.firstChild);
     kids.forEach(x => {
       const isMonth = /^preg-month-/.test(x.id || ''), txt = x.textContent || '';
-      const isYear = !isMonth && (/分娩頭数/.test(txt) || /印刷する/.test(txt));
+      const isYear = !isMonth && (/分娩頭数|産仔の内訳/.test(txt) || /印刷する/.test(txt));
       const show = _pv === 1 ? isMonth : _pv === 2 ? isYear : false;
       x.classList.toggle('nui-hidden', !show);
     });
@@ -34790,8 +34888,34 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   }
   window.nuiYear = function (k) { const s = $('stats-year'); if (s) { s.value = k; s.dataset.userChanged = '1'; } renderStats(); };
   window.annTabsHTML = function (active) { return statsHead(active === 'stats' ? (window._nuiStatsSub || 'conc') : active); };
+  // 🐮 分娩・子牛のタブ：平均分娩間隔（その年に分娩した牛の、前の分娩からの日数）
+  function calvIntCard(box) {
+    box.querySelectorAll('.nui-ci-card').forEach(x => x.remove());
+    const yv = ($('stats-year') || {}).value || '';
+    const Y = /^R\d+$/.test(yv) ? 2018 + (+yv.slice(1)) : null;
+    const rows = [];
+    [...cows, ...(typeof retiredCows !== 'undefined' ? retiredCows : [])].forEach(c => { const r = cowCalvingIntervals(c); if (!r || !r.list) return; r.list.forEach(x => { if (!Y || +x.to.slice(0, 4) === Y) rows.push({ id: c.id, ...x }); }); });
+    const est = cows.map(c => ({ c, r: cowCalvingIntervals(c) })).filter(o => o.r && o.r.est != null);
+    const avg = rows.length ? Math.round(rows.reduce((a, b) => a + b.days, 0) / rows.length) : null;
+    const col = d => d > 400 ? '#ef4444' : d > 380 ? '#f59e0b' : '#4ade80';
+    const band = [['365日以下', x => x <= 365], ['366〜380日', x => x > 365 && x <= 380], ['381〜400日', x => x > 380 && x <= 400], ['401日以上', x => x > 400]];
+    const long = rows.slice().sort((a, b) => b.days - a.days).slice(0, 8);
+    const estAvg = est.length ? Math.round(est.reduce((a, b) => a + b.r.est, 0) / est.length) : null;
+    const el = document.createElement('section'); el.className = 'stats-card nui-ci-card'; el.dataset.nuiSub = 'calv'; el.dataset.nuiOrd = '-1';
+    el.style.cssText = 'background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;padding:14px;margin-bottom:12px;';
+    el.innerHTML = `<div class="stats-title" style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:10px;">📏 平均分娩間隔（${Y ? Y + '年に分娩した牛' : '全期間'}）</div>
+      ${avg == null ? '<div style="font-size:13px;color:#94a3b8;">この期間に2回目以降の分娩をした牛がいません</div>' : `
+      <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;"><span class="nui-mono" style="font-size:30px;font-weight:900;color:${col(avg)};">${avg}<span style="font-size:15px;">日</span></span><span style="font-size:13px;color:#94a3b8;">（${(avg / 30.4).toFixed(1)}か月・${rows.length}回）</span></div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px;">目安：黒毛和種の全国平均 13.2か月（約400日）／国の目標 12.5か月（約380日）</div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px;text-align:center;">${band.map(([l, f], i) => { const n = rows.filter(r => f(r.days)).length; return `<div style="background:#1e2333;border-radius:8px;padding:6px 2px;"><div style="font-size:16px;font-weight:900;color:${['#4ade80', '#4ade80', '#f59e0b', '#ef4444'][i]};">${n}</div><div style="font-size:10px;color:#94a3b8;">${l}</div></div>`; }).join('')}</div>
+      <details style="margin-top:10px;"><summary style="cursor:pointer;font-size:12px;color:#94a3b8;">長かった牛</summary>
+        ${long.map(r => `<div class="nui-a" onclick="showCowDetail('${jsq(r.id)}')" style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);"><span><b class="nui-mono">${esc(r.id)}</b> ${esc(nm(r.id))} <span style="font-size:11px;color:#94a3b8;">${md(r.from)} → ${md(r.to)}</span></span><b style="color:${col(r.days)};">${r.days}日</b></div>`).join('')}</details>`}
+      ${estAvg != null ? `<div style="font-size:12px;color:#94a3b8;margin-top:10px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px;">🍼 妊娠中の牛の見込み：平均 <b style="color:${col(estAvg)};">${estAvg}日</b>（${est.length}頭）</div>` : ''}`;
+    box.insertBefore(el, box.firstChild);
+  }
   function statsFilter() {
     const box = $('stats-container'); if (!box) return;
+    try { calvIntCard(box); } catch (e) { console.error('nuiCI', e); }
     const sub = window._nuiStatsSub || 'conc';
     const ORD = [/受胎率/, /詳細成績/, /移植胚/, /採卵/, /群ステータス/, /空胎日数/, /産子・死亡/, /産仔/];
     box.style.display = 'flex'; box.style.flexDirection = 'column';
