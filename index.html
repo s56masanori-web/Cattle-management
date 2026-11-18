@@ -33487,7 +33487,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111818';
+const APP_BUILD = '2026111820';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -34507,17 +34507,33 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     return out;
   }
   window.nuiShip = function () { SH = { q: '', sel: new Set(), day: 0, date: today(), memo: '', all: false }; vShip(); };
-  window.nuiShipSet = function (k, v) { SH[k] = v; if (k === 'day') SH.date = v === 0 ? today() : v === 1 ? addDays(today(), -1) : SH.date; if (k === 'q') return shipList(); vShip(); };
-  window.nuiShipTog = function (k) { SH.sel.has(k) ? SH.sel.delete(k) : SH.sel.add(k); shipList(); shipFoot(); };
+  window.nuiShipSet = function (k, v) { SH[k] = v; if (k === 'day') SH.date = v === 0 ? today() : v === 1 ? addDays(today(), -1) : SH.date; if (k === 'q') return shipList();
+    if (k === 'day' || k === 'date') [...SH.sel].forEach(x => { if (shipWd(x)) SH.sel.delete(x); });   // 日付を変えて休薬にかかった牛は外す
+    vShip(); };
+  // 休薬（食肉）がまだ終わっていない牛は出荷にできない。出荷日 ≦ 休薬が終わる日 なら止める
+  function shipWd(k) {
+    try {
+      if (typeof _vetData === 'undefined' || !_vetData) { if (typeof startVetSync === 'function') startVetSync(); return null; }
+      const id = k.slice(k.indexOf(':') + 1); let L = [];
+      if (k.startsWith('calf:')) { const c = calves.find(x => x.id === id); if (!c) return null; L = vetTreatmentsForCalf(c).concat(c.earTagId ? vetTreatmentsFor(c.earTagId) : []); }
+      else L = vetTreatmentsFor(id);
+      const end = L.map(vetMeatEnd).filter(Boolean).sort().pop();
+      return end && end >= (SH ? SH.date : today()) ? end : null;
+    } catch (e) { return null; }
+  }
+  window.nuiShipTog = function (k) {
+    if (!SH.sel.has(k)) { const w = shipWd(k); if (w) { appAlert(`⚠ この牛は休薬期間中です。\n${fmtDate(w)} まで出荷できません。\n\n治療の記録がまちがっているときは、その牛の治療記録を直してください。`); return; } }
+    SH.sel.has(k) ? SH.sel.delete(k) : SH.sel.add(k); shipList(); shipFoot();
+  };
   function shipList() {
     const box = $('nui-shiplist'); if (!box) return;
     const q = SH.q.trim();
     let L = shipCands();
     if (q) L = L.filter(o => cowQueryMatch(q, { id: o.tag, name: o.name, nationalId: o.nat }) || String(o.tag).toLowerCase().includes(q.toLowerCase()) || (o.loc && o.loc.includes(q)));
     else if (!SH.all) L = L.filter(o => o.fat || SH.sel.has(o.k));
-    const row = o => { const on = SH.sel.has(o.k); return `<div class="nui-a" onclick="nuiShipTog('${jsq(o.k)}')" style="display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid rgba(255,255,255,.06);${on ? 'background:rgba(34,197,94,.08);' : ''}">
+    const row = o => { const on = SH.sel.has(o.k), wd = shipWd(o.k); return `<div class="nui-a" onclick="nuiShipTog('${jsq(o.k)}')" style="${wd ? 'opacity:.75;' : ''}display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid rgba(255,255,255,.06);${on ? 'background:rgba(34,197,94,.08);' : ''}">
         <span class="nui-ck ${on ? 'on' : ''}" style="flex-shrink:0;">${on ? '✓' : ''}</span>
-        <span style="flex:1;min-width:0;"><span class="nui-mono" style="font-weight:700;font-size:15px;">${esc(o.tag || '耳標なし')}</span>${o.nat ? ` <span class="nui-nid">${esc(String(o.nat).slice(-5, -1) + '-' + String(o.nat).slice(-1))}</span>` : ''} <span style="color:#4ade80;font-weight:700;">${esc(o.name)}</span><br><span style="font-size:12px;color:#94a3b8;">${esc(o.sub)}</span></span></div>`; };
+        <span style="flex:1;min-width:0;"><span class="nui-mono" style="font-weight:700;font-size:15px;">${esc(o.tag || '耳標なし')}</span>${o.nat ? ` <span class="nui-nid">${esc(String(o.nat).slice(-5, -1) + '-' + String(o.nat).slice(-1))}</span>` : ''} <span style="color:#4ade80;font-weight:700;">${esc(o.name)}</span><br><span style="font-size:12px;color:#94a3b8;">${esc(o.sub)}</span>${wd ? `<br><span style="font-size:12px;font-weight:700;color:#f59e0b;">⚠ 休薬中 ${esc(md(wd))}まで出荷できません</span>` : ''}</span></div>`; };
     const A = L.filter(o => o.kind === 'calf'), R = L.filter(o => o.kind === 'ret');
     box.innerHTML = (A.length ? `<div style="font-size:13px;font-weight:700;color:#f59e0b;margin:4px 0 6px;">🥩 肥育牛（${A.length}頭）</div><div class="nui-card" style="padding:0 10px;">${A.map(row).join('')}</div>` : '')
       + (R.length ? `<div style="font-size:13px;font-weight:700;color:#f59e0b;margin:14px 0 6px;">🐄 廃用肥育の親牛（${R.length}頭）</div><div class="nui-card" style="padding:0 10px;">${R.map(row).join('')}</div>` : '')
@@ -34550,6 +34566,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   window.SH_memo = v => { if (SH) SH.memo = v; };
   window.nuiShipSave = function () {
     if (!SH || !SH.sel.size) return;
+    const bad = [...SH.sel].filter(k => shipWd(k));
+    if (bad.length) { bad.forEach(k => SH.sel.delete(k)); vShip(); appAlert(`⚠ 休薬期間中の牛が${bad.length}頭あったので外しました。もう一度確かめてください。`); return; }
     const d = SH.date || today(), memo = SH.memo.trim(); let n = 0;
     SH.sel.forEach(k => {
       const id = k.slice(k.indexOf(':') + 1);
@@ -34691,10 +34709,45 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   }
   const _rfat = window.renderFattening;
   // （枝肉成績の入力は「出荷した牛」から。肥育成績の画面には入力の枠を出さない）
+  // 🫀 内臓廃棄（肝廃棄率）：枝肉成績で「内臓の廃棄」を入れた分だけで数える
+  let _offY = null;
+  window.nuiOffY = function (y) { _offY = y; renderOffal(); };
+  function renderOffal() {
+    const pg = $('page-fattening'); if (!pg) return;
+    let box = $('fat-offal');
+    if (!box) { box = document.createElement('div'); box.id = 'fat-offal'; pg.insertBefore(box, pg.firstChild); }
+    const R = (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).filter(r => r.offalChecked && _ownFarmer(r.farmer));
+    if (!R.length) { box.innerHTML = ''; return; }
+    const yOf = r => (_normYMD(r.slaughterDate || '') || '').slice(0, 4);
+    const years = [...new Set(R.map(yOf).filter(Boolean))].sort().reverse();
+    if (!_offY || (_offY !== 'all' && !years.includes(_offY))) _offY = years[0] || 'all';
+    const L = R.filter(r => _offY === 'all' || yOf(r) === _offY);
+    const liv = L.filter(r => (r.offal || []).includes('肝臓'));
+    const rate = L.length ? Math.round(liv.length / L.length * 100) : 0;
+    const why = {}; liv.forEach(r => { const k = r.liverReason || '理由なし'; why[k] = (why[k] || 0) + 1; });
+    const org = {}; L.forEach(r => (r.offal || []).forEach(o => { if (o !== '肝臓') org[o] = (org[o] || 0) + 1; }));
+    const mon = Array.from({ length: 12 }, (_, i) => { const M = L.filter(r => +(_normYMD(r.slaughterDate) || '').slice(5, 7) === i + 1); return [M.length, M.filter(r => (r.offal || []).includes('肝臓')).length]; });
+    let open = false; try { open = localStorage.getItem('_offOpen') === '1'; } catch (e) {}
+    box.innerHTML = `<details ${open ? 'open' : ''} ontoggle="try{localStorage.setItem('_offOpen',this.open?'1':'0')}catch(e){}" style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 14px;margin-bottom:14px;">
+      <summary style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;">
+        <span style="font-size:14px;font-weight:900;">🫀 肝廃棄率 <span style="font-family:'JetBrains Mono',monospace;color:${rate >= 30 ? '#f59e0b' : 'var(--text)'};">${rate}%</span></span>
+        <span style="font-size:11px;color:var(--muted);">${_offY === 'all' ? '全期間' : _offY + '年'} ${liv.length}／${L.length}頭 ▼</span></summary>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 8px;">${years.concat(['all']).map(y => `<button class="st-chip ${_offY === y ? 'on' : ''}" onclick="nuiOffY('${y}')">${y === 'all' ? '全部' : y + '年'}</button>`).join('')}</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">肝臓の廃棄の理由：${Object.entries(why).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<b style="color:var(--text);">${esc(k)} ${n}頭</b>`).join('・') || 'なし'}</div>
+      ${Object.keys(org).length ? `<div style="font-size:12px;color:var(--muted);margin-bottom:6px;">肝臓以外の廃棄：${Object.entries(org).map(([k, n]) => `${esc(k)} ${n}頭`).join('・')}</div>` : ''}
+      ${_offY !== 'all' ? `<div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;margin-top:6px;">${mon.map(([n, l], i) => `<div style="background:var(--bg3);border-radius:6px;padding:4px 2px;text-align:center;${n ? '' : 'opacity:.45;'}"><div style="font-size:10px;color:var(--muted);">${i + 1}月</div><div style="font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;">${n ? l + '/' + n : '—'}</div></div>`).join('')}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px;">月ごと：肝廃棄の頭数／内臓廃棄を入れた頭数（と畜日の月）</div>` : ''}
+      <div style="font-size:10px;color:var(--muted);margin-top:6px;">「出荷した牛」で枝肉成績を入れるときに「内臓の廃棄」を入れた牛だけで数えています（CSVの分は入っていません）。</div>
+    </details>`;
+  }
+  if (typeof _rfat === 'function') window.renderFattening = function () { const r = _rfat.apply(this, arguments); try { renderOffal(); } catch (e) { console.error('offal', e); } return r; };
   // 枝肉成績を手で入れる（CSVで取り込んだものと同じ形で fatteningRecords に入れる）
-  const FMAIN = [['weight', '枝肉重量', 'num', 'kg'], ['bms', 'BMS', 'int', 'No.'], ['unitPrice', '単価', 'int', '円/kg'], ['amount', '金額', 'int', '円']];
-  const FMORE = [['carcassNo', '枝肉番号', 'text', ''], ['loin', 'ロース芯', 'num', 'cm²'], ['baraThick', 'ばら厚', 'num', 'cm'], ['fatThick', '皮下脂肪厚', 'num', 'cm'], ['yieldRate', '歩留基準値', 'num', '%'], ['liveWeight', '生体重', 'num', 'kg']];
-  const FF = FMAIN.concat(FMORE);
+  // 明細から入れる項目（肥育成績のCSVと同じ項目・同じ並び）。金額・脂肪交雑・月齢・出荷日齢・種雄牛・性は自動
+  const FF = [['weight', '枝重', 'num', 'kg'], ['bms', 'BMS', 'int', 'No.'], ['yieldRate', '歩留率', 'num', '%'], ['loin', 'ロース芯', 'num', 'cm²'], ['baraThick', 'ばら厚', 'num', 'cm'], ['fatThick', '脂肪厚', 'num', 'cm'], ['unitPrice', '単価', 'int', '円/kg'], ['carcassNo', '枝肉番号', 'text', ''], ['liveWeight', '生体重', 'num', 'kg']];
+  // BMS → 脂肪交雑の等級（1:1　2:2　3〜4:3　5〜7:4　8〜12:5）
+  const bmsMarb = b => b == null ? null : b >= 8 ? 5 : b >= 5 ? 4 : b >= 3 ? 3 : b >= 1 ? b : null;
+  const OFFAL = ['なし', '肝臓', '心臓', '肺', '腎臓', '胃腸', 'その他'];
+  const LIVER = ['肝膿瘍', '肝炎', '脂肪肝', '肝蛭', 'その他'];
   let FS = null, FQ = null;   // FQ：続けて入れる牛の列（[{kind,id}]）
   window.nuiFatBatch = function (d) {
     const inP = o => SL && (SL.y === 'all' || o.d.startsWith(SL.y)) && (!SL.m || +o.d.slice(5, 7) === SL.m) && (SL.tab === 'fat' ? o.kind === 'calf' : o.kind === 'ret');
@@ -34712,7 +34765,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const ymd = d => { const x = _normYMD(d); return /^\d{4}-\d{2}-\d{2}$/.test(x || '') ? x : ''; };
     const mg = rec ? String(rec.meatGrade || '') : '';
     FS = { kind, id, recId: rec ? rec.id : null, date: rec ? (ymd(rec.slaughterDate) || sd) : sd,
-      yg: rec ? (rec.yieldGrade || (mg.match(/^[ABC]/) || [''])[0]) : '', qg: rec ? ((mg.match(/[1-5]$/) || [''])[0]) : '' };
+      yg: rec ? (rec.yieldGrade || (mg.match(/^[ABC]/) || [''])[0]) : '', qg: rec ? ((mg.match(/[1-5]$/) || [''])[0]) : '',
+      off: new Set(rec && rec.offalChecked ? (rec.offal && rec.offal.length ? rec.offal : ['なし']) : []), liver: rec && rec.liverReason || '' };
     const v = k => rec && rec[k] != null && rec[k] !== '' ? rec[k] : '';
     const tag = kind === 'calf' ? (src.earTagId || '') : src.id;
     const qi = FQ ? FQ.findIndex(q => q.kind === kind && q.id === id) : -1, left = FQ ? FQ.length - qi - 1 : 0;
@@ -34724,7 +34778,9 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         <label for="ff-${k}" style="width:92px;flex-shrink:0;font-size:14px;font-weight:700;color:#e2e8f0;margin:0;">${l}</label>
         <input id="ff-${k}" ${t === 'text' ? '' : 'inputmode="decimal"'} enterkeyhint="next" value="${esc(String(v(k)))}" oninput="nuiFatCalc()" style="flex:1;min-width:0;height:44px;font-size:17px;margin:0;text-align:right;">
         <span style="width:42px;flex-shrink:0;font-size:12px;color:#94a3b8;">${u}</span></div>`;
-    const moreOpen = FMORE.some(f => v(f[0]) !== '');
+    const calcAmt = rec && rec.weight && rec.unitPrice ? Math.round(rec.weight * rec.unitPrice) : null;
+    FS.amtManual = !!(rec && rec.amount != null && rec.amount !== calcAmt);   // 前に手で直した金額があれば、手で入れる欄を開いておく
+    FS.sd = sd; FS.dob = src.dob || ''; FS.sire = kind === 'calf' ? (src.sire || '') : ''; FS.sexT = kind === 'calf' ? (src.sex === '雄' ? '去勢' : src.sex === '雌' ? '♀' : '') : '経産';
     scrShow(`${backBtn('nuiFatQuit()', '閉じる')}<span style="font-size:17px;font-weight:900;">🥩 枝肉成績</span>${FQ ? `<span style="font-size:13px;color:#fbbf24;font-weight:700;">${qi + 1}／${FQ.length}頭目</span>` : ''}`,
       `<div style="padding:12px 14px 30px;">
         <div class="nui-card" style="padding:10px 14px;">
@@ -34742,11 +34798,25 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
           <div style="display:flex;gap:6px;margin-bottom:6px;">${['A', 'B', 'C'].map(x => gb('yg', x)).join('')}</div>
           <div style="display:flex;gap:6px;">${['1', '2', '3', '4', '5'].map(x => gb('qg', x)).join('')}</div>
         </div>
-        <div class="nui-card" style="padding:4px 14px;margin-top:10px;">${FMAIN.map(field).join('')}
-          <div id="ff-calc" style="font-size:12px;color:#94a3b8;padding:6px 0;"></div></div>
-        <details class="nui-card" style="padding:4px 14px;margin-top:10px;" ${moreOpen ? 'open' : ''}>
-          <summary style="cursor:pointer;font-size:13px;font-weight:700;color:#94a3b8;padding:8px 0;">そのほかの項目（枝肉番号・ロース芯・ばら厚など）</summary>
-          ${FMORE.map(field).join('')}</details>
+        <div class="nui-card" style="padding:4px 14px;margin-top:10px;">${FF.map(field).join('')}
+          <div id="ff-warn" style="font-size:12px;color:#f59e0b;padding:4px 0;"></div></div>
+        <div class="nui-card" style="padding:12px 14px;margin-top:10px;">
+          <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">自動で入る項目</div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+            <span style="font-size:14px;font-weight:700;">金額 <span style="font-size:11px;font-weight:400;color:#94a3b8;">（単価×枝重）</span></span>
+            <span id="ff-amt" class="nui-mono" style="font-size:22px;font-weight:900;">—</span></div>
+          <div id="ff-amtbox" style="margin-top:6px;${FS.amtManual ? '' : 'display:none;'}">
+            <div style="display:flex;align-items:center;gap:8px;"><label for="ff-amount" style="width:92px;flex-shrink:0;font-size:13px;color:#e2e8f0;margin:0;">明細の金額</label>
+              <input id="ff-amount" inputmode="decimal" value="${esc(String(FS.amtManual ? v('amount') : ''))}" oninput="nuiFatCalc()" placeholder="空なら自動" style="flex:1;min-width:0;height:42px;font-size:16px;margin:0;text-align:right;"><span style="width:42px;font-size:12px;color:#94a3b8;">円</span></div></div>
+          <div style="text-align:right;margin-top:4px;${FS.amtManual ? 'display:none;' : ''}" id="ff-amtlink"><button type="button" class="nui-chip" style="font-size:11px;padding:3px 9px;" onclick="nuiFatAmt()">明細の金額とちがうときは手で直す</button></div>
+          <div id="ff-auto" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px;"></div>
+        </div>
+        <div class="nui-card" style="padding:12px 14px;margin-top:10px;">
+          <div style="font-size:14px;font-weight:700;margin-bottom:6px;">内臓の廃棄 <span style="font-size:11px;font-weight:400;color:#94a3b8;">（明細の廃棄の欄。なければ「なし」）</span></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">${OFFAL.map(x => `<button type="button" class="nui-chip${FS.off.has(x) ? ' on' : ''}" data-off="${x}" onclick="nuiFatOff('${x}')">${x}</button>`).join('')}</div>
+          <div id="ff-liver" style="margin-top:8px;${FS.off.has('肝臓') ? '' : 'display:none;'}"><div style="font-size:12px;color:#94a3b8;margin-bottom:4px;">肝臓の廃棄の理由</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">${LIVER.map(x => `<button type="button" class="nui-chip${FS.liver === x ? ' on' : ''}" data-lv="${x}" onclick="nuiFatLv('${x}')">${x}</button>`).join('')}</div></div>
+        </div>
         <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:18px;">
           ${rec ? `<button class="nui-chip" style="color:#f87171;border-color:#7f1d1d;" onclick="nuiFatDel()">この成績を消す</button>` : ''}</div>
       </div>`,
@@ -34755,21 +34825,40 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
            <button onclick="nuiFatSave(1)" style="flex:1;height:54px;border-radius:12px;border:none;background:#22c55e;color:#000;font-size:16px;font-weight:900;">💾 保存して次へ（あと${left}頭）</button>`
         : `<button onclick="nuiFatSave(0)" style="flex:1;height:54px;border-radius:12px;border:none;background:#22c55e;color:#000;font-size:17px;font-weight:900;">💾 保存する</button>`}</div>`);
     nuiFatCalc();
+    const di = $('ff-date'); if (di) di.addEventListener('change', nuiFatCalc);
   };
   window.nuiFatQuit = function () { fatDone(); };
+  window.nuiFatOff = function (x) {
+    if (x === 'なし') FS.off = FS.off.has('なし') ? new Set() : new Set(['なし']);
+    else { FS.off.delete('なし'); FS.off.has(x) ? FS.off.delete(x) : FS.off.add(x); }
+    if (!FS.off.has('肝臓')) FS.liver = '';
+    document.querySelectorAll('#nui-scr [data-off]').forEach(b => b.classList.toggle('on', FS.off.has(b.dataset.off)));
+    const lv = $('ff-liver'); if (lv) lv.style.display = FS.off.has('肝臓') ? '' : 'none';
+    document.querySelectorAll('#nui-scr [data-lv]').forEach(b => b.classList.toggle('on', b.dataset.lv === FS.liver));
+  };
+  window.nuiFatLv = function (x) { FS.liver = FS.liver === x ? '' : x; document.querySelectorAll('#nui-scr [data-lv]').forEach(b => b.classList.toggle('on', b.dataset.lv === FS.liver)); };
   window.nuiFatG = function (k, val) {
     FS[k] = FS[k] === val ? '' : val;
     document.querySelectorAll(`#nui-scr [data-g="${k}"]`).forEach(b => b.classList.toggle('on', b.dataset.v === FS[k]));
+    nuiFatCalc();
   };
   const fnum = (x, int) => { x = String(x || '').replace(/[０-９．]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[,，\s円kg]/g, ''); if (x === '') return null; const v = int ? parseInt(x) : parseFloat(x); return isNaN(v) ? null : v; };
-  // 単価×枝重＝金額 の目安を出す（金額が空なら保存のときに入れる）
+  window.nuiFatAmt = function () { FS.amtManual = true; const b = $('ff-amtbox'), l = $('ff-amtlink'); if (b) b.style.display = ''; if (l) l.style.display = 'none'; const i = $('ff-amount'); if (i) i.focus(); };
+  // 金額（単価×枝重）・脂肪交雑・月齢・出荷日齢などを、入れたそばから計算して見せる
   window.nuiFatCalc = function () {
-    const el = $('ff-calc'); if (!el) return;
-    const w = fnum(($('ff-weight') || {}).value), u = fnum(($('ff-unitPrice') || {}).value, 1), a = fnum(($('ff-amount') || {}).value, 1);
-    if (w && u) { const c = Math.round(w * u); el.innerHTML = `単価×枝重＝<b style="color:#e2e8f0;">${c.toLocaleString()}円</b>${a == null ? '（金額が空なら、これを入れます）' : Math.abs(a - c) > c * 0.15 ? '　<span style="color:#f59e0b;">⚠ 金額と大きくちがいます（税込・消費税の差なら大丈夫）</span>' : ''}`; }
-    else el.textContent = '';
-    const b = fnum(($('ff-bms') || {}).value, 1);
-    if (b != null && (b < 1 || b > 12)) el.innerHTML += '<div style="color:#f59e0b;">⚠ BMSは1〜12です</div>';
+    if (!FS) return;
+    const val = id => ($(id) || {}).value;
+    const w = fnum(val('ff-weight')), u = fnum(val('ff-unitPrice'), 1), man = FS.amtManual ? fnum(val('ff-amount'), 1) : null, b = fnum(val('ff-bms'), 1);
+    const calc = w && u ? Math.round(w * u) : null, amt = man != null ? man : calc;
+    const ae = $('ff-amt'); if (ae) ae.innerHTML = amt != null ? '¥' + amt.toLocaleString() + (man != null ? '<span style="font-size:11px;color:#94a3b8;"> 手入力</span>' : '') : '<span style="color:#475569;">単価と枝重を入れると出ます</span>';
+    const d = val('ff-date') || FS.date;
+    const auto = [['脂肪交雑', bmsMarb(b) ?? '—'], ['月齢', FS.dob && d ? (diffDays(d, FS.dob) / 30.4).toFixed(1) : '—'], ['出荷日齢', FS.dob && d ? diffDays(d, FS.dob) + '日' : '—'], ['種雄牛', FS.sire || '—'], ['性', FS.sexT || '—'], ['等級', (FS.yg || '') + (FS.qg || '') || '—']];
+    const ab = $('ff-auto'); if (ab) ab.innerHTML = auto.map(([l, x]) => `<div style="background:#171b26;border-radius:8px;padding:6px 4px;text-align:center;min-width:0;"><div style="font-size:14px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(String(x))}</div><div style="font-size:10.5px;color:#94a3b8;">${l}</div></div>`).join('');
+    const warn = [];
+    if (b != null && (b < 1 || b > 12)) warn.push('⚠ BMSは1〜12です');
+    if (man != null && calc && Math.abs(man - calc) > calc * 0.15) warn.push('⚠ 手で入れた金額が、単価×枝重と大きくちがいます');
+    if (w != null && (w < 150 || w > 800)) warn.push('⚠ 枝重が ' + w + 'kg になっています');
+    const we = $('ff-warn'); if (we) we.innerHTML = warn.join('<br>');
   };
   window.nuiFatSave = function (next) {
     if (!FS) return;
@@ -34777,8 +34866,9 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const g = id => (document.getElementById(id) || {}).value || '';
     const nid = g('ff-nid').replace(/\D/g, '');
     const vals = {}; FF.forEach(([k, l, t]) => { vals[k] = t === 'text' ? g('ff-' + k).trim() : fnum(g('ff-' + k), t === 'int'); });
-    if (vals.amount == null && vals.weight && vals.unitPrice) vals.amount = Math.round(vals.weight * vals.unitPrice);
-    const empty = !FS.yg && !FS.qg && FF.every(([k]) => vals[k] == null || vals[k] === '');
+    const man = FS.amtManual ? fnum(g('ff-amount'), 1) : null;
+    vals.amount = man != null ? man : (vals.weight && vals.unitPrice ? Math.round(vals.weight * vals.unitPrice) : null);
+    const empty = !FS.yg && !FS.qg && !FS.off.size && FF.every(([k]) => vals[k] == null || vals[k] === '');
     let rec = FS.recId ? fatteningRecords.find(r => r.id === FS.recId) : null;
     if (!(empty && !rec)) {
       if (!nid) { appAlert('個体識別番号を入れてください（成績を牛とつなぐのに使います）'); return; }
@@ -34799,7 +34889,11 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       rec.yieldGrade = FS.yg || '';
       rec.meatGrade = /^[AB]$/.test(FS.yg) && FS.qg ? FS.yg + FS.qg : FS.qg || '';
       FF.forEach(([k]) => { rec[k] = vals[k]; });
-      rec.marbling = rec.bms;
+      rec.amount = vals.amount;
+      rec.marbling = bmsMarb(rec.bms);
+      rec.slaughterDays = src.dob && d ? diffDays(d, src.dob) : null;
+      if (FS.off.size) { rec.offalChecked = true; rec.offal = [...FS.off].filter(x => x !== 'なし'); rec.liverReason = rec.offal.includes('肝臓') ? FS.liver : ''; }
+      else { delete rec.offalChecked; delete rec.offal; delete rec.liverReason; }
       if (isNew) fatteningRecords.push(rec);
       if (!src.nationalId) src.nationalId = nid;
       saveFattening();
