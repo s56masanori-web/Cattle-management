@@ -1008,7 +1008,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
     <button id="calf-filter-all" onclick="setCalfFilter('all')" style="background:var(--accent2);color:#000;border:none;font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">全て</button>
     <button id="calf-filter-pending" onclick="setCalfFilter('pending')" style="background:var(--bg3);color:var(--muted);border:1px solid var(--border);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">移動待ち</button>
     <button id="calf-filter-kept" onclick="setCalfFilter('kept')" style="background:var(--bg3);color:var(--muted);border:1px solid var(--border);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">🌟 保留（繁殖候補）</button>
-    <button id="calf-filter-moved" onclick="setCalfFilter('moved')" style="background:var(--bg3);color:var(--muted);border:1px solid var(--border);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">移動済み</button>
+    <button id="calf-filter-moved" onclick="setCalfFilter('moved')" style="background:var(--bg3);color:var(--muted);border:1px solid var(--border);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">離乳済</button>
     <button id="calf-filter-certTodo" onclick="setCalfFilter('certTodo')" style="background:var(--bg3);color:var(--muted);border:1px solid var(--border);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">📄 証明書まだ</button>
     <button onclick="markCalfCertIssued()" style="background:#1a0a2a;border:1px dashed var(--purple);color:var(--purple);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">✅ チェックした子牛を証明書発行済みに</button>
     <button onclick="goToInsemBookForCalves()" style="background:#1a0a2a;border:1px solid var(--purple);color:var(--purple);font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;cursor:pointer;">📄 授精証明書を発行</button>
@@ -11742,18 +11742,56 @@ function calfFlagChips(c, withSex) {
     (c.dehorned ? '<span style="font-size:11px;font-weight:800;color:#4ade80;border:1px solid #4ade80;padding:0 6px;border-radius:5px;">✂ 除角済</span>' : '') +
     (c.nosePrint ? '<span style="font-size:11px;font-weight:800;color:#c4b5fd;border:1px solid #c4b5fd;padding:0 6px;border-radius:5px;">鼻紋済</span>' : '');
 }
+// ★ 2026/11/19：離乳（＝移動済み）になる牛舎。子牛牛舎を決めている農場はそれ以外、ほかは「育成」「肥育」の名前の牛舎と出荷
+function weanBarn(to) {
+  to = String(to || '');
+  const cb = (typeof farmTargets !== 'undefined' && farmTargets && farmTargets._calfBarn) || (window.FARM_CFG && FARM_CFG.calfBarn);
+  if (cb) return !!to && to !== cb;
+  return /育成|肥育/.test(to) || to === '出荷';
+}
+// 離乳した日（はじめて育成などの牛舎へ移した日）。わからなければ ''
+function calfWeanDate(c) { const m = (c.moves || []).filter(x => x.date && !x.init && weanBarn(x.to)).sort((a, b) => a.date.localeCompare(b.date))[0]; return m ? m.date : ''; }
+// 生後4か月（120日）を過ぎても離乳していない子牛
+function calfWeanLate(c) { return (c.status || 'active') === 'active' && !c.deathDate && c.dob && diffDays(today(), c.dob) >= 120; }
+// 牛舎の中の「親牛」「子牛」：両方いるときは切り替えボタンで片方ずつ出す（長いスクロールにならないように）
+window._barnKind = window._barnKind || {};
+function barnKindOf(b, l) { const hasC = l.some(x => x.kind === 'cow'), hasK = l.some(x => x.kind !== 'cow'); if (!(hasC && hasK)) return ''; return _barnKind[b] || 'cow'; }
+// 今見えている牛（全部選ぶ もこの中だけ）
+function barnVisible(b, l) { const k = barnKindOf(b, l); return !k ? l : l.filter(x => (x.kind === 'cow') === (k === 'cow')); }
+function barnGroupHTML(l, rowFn, b, setJs) {
+  const key = x => String(x.kind === 'cow' ? x.c.id : (x.c.earTagId || ''));
+  const by = (a, z) => key(a).localeCompare(key(z), 'ja', { numeric: true });
+  const kd = barnKindOf(b, l);
+  if (!kd) return l.slice().sort(by).map(rowFn).join('');
+  const C = l.filter(x => x.kind === 'cow'), K = l.filter(x => x.kind !== 'cow');
+  const tab = (k, label, n) => { const on = kd === k; return `<button type="button" onclick="event.stopPropagation();${setJs(k)}" style="flex:1;height:40px;border-radius:10px;border:1.5px solid ${on ? '#22c55e' : '#2a3050'};background:${on ? 'rgba(34,197,94,.15)' : 'transparent'};color:${on ? '#4ade80' : '#94a3b8'};font-size:14px;font-weight:800;cursor:pointer;">${label} ${n}頭</button>`; };
+  return `<div style="display:flex;gap:6px;padding:6px 0;">${tab('cow', '🐄 親牛', C.length)}${tab('calf', '🍼 子牛', K.length)}</div>${(kd === 'cow' ? C : K).sort(by).map(rowFn).join('')}`;
+}
+function barnCountTxt(l) { const c = l.filter(x => x.kind === 'cow').length, k = l.length - c; return c && k ? `親 ${c}・子 ${k}` : ''; }
+// 牛群リストなどから子牛カード（子牛タブ）へ飛ぶ
+function goCalfCard(id) {
+  const c = calves.find(x => x.id === id); if (!c) return;
+  try { closeModal('modal-cow'); } catch (e) {}
+  try { if (typeof nuiClose === 'function') nuiClose(); } catch (e) {}
+  const q = document.getElementById('calf-search');
+  const nid = String(c.nationalId || '').replace(/\D/g, '');
+  if (q) q.value = c.earTagId || (nid.length >= 5 ? nid.slice(-5, -1) : '');
+  try { setCalfFilter('all'); } catch (e) {}
+  switchTab('calves');
+  setTimeout(() => { const el = document.querySelector(`[data-calfcard="${c.id}"]`); if (el) { el.scrollIntoView({ block: 'center' }); el.style.outline = '2px solid var(--accent)'; setTimeout(() => { el.style.outline = ''; }, 2500); } }, 120);
+}
 // ===== 🏠 牛群リスト：どの牛舎に何頭いるか（ファームノートの牛群リストと同じ見え方） =====
 let _barnOpen = null;
 const _barnSel = new Set();   // まとめて移動する牛・子牛（'cow:ID' / 'calf:ID'）
 function _barnToggle(key, on) { if (on) _barnSel.add(key); else _barnSel.delete(key); renderBarnBoard(); }
-function _barnSelAll(b, on) { (_barnMembers()[b] || []).forEach(x => { const k = x.kind + ':' + x.c.id; if (on) _barnSel.add(k); else _barnSel.delete(k); }); renderBarnBoard(); }
-function barnBulkMove() {
-  const to = (document.getElementById('barn-mv-to') || {}).value || '';
-  const date = (document.getElementById('barn-mv-date') || {}).value || today();
+function _barnSelAll(b, on) { barnVisible(b, _barnMembers()[b] || []).forEach(x => { const k = x.kind + ':' + x.c.id; if (on) _barnSel.add(k); else _barnSel.delete(k); }); renderBarnBoard(); }
+function barnBulkMove(opt) {
+  const to = opt ? opt.to : (document.getElementById('barn-mv-to') || {}).value || '';
+  const date = opt ? (opt.date || today()) : (document.getElementById('barn-mv-date') || {}).value || today();
   if (!to) { appAlert('移動先の牛舎を選んでください'); return; }
   if (!_barnSel.size) return;
   armUndo(`${_barnSel.size}頭の移動を記録しました`);
-  const toStory = !!(document.getElementById('barn-mv-story') || { checked: true }).checked;
+  const toStory = opt ? !!opt.story : !!(document.getElementById('barn-mv-story') || { checked: true }).checked;
   const extra = toStory ? {} : { init: true };   // init：所在の設定だけ（ストーリーには出さない）
   let n = 0;
   _barnSel.forEach(k => {
@@ -11763,7 +11801,10 @@ function barnBulkMove() {
       c.events = c.events || []; c.events.push(Object.assign({ type: 'move', date, to, memo: toStory ? '牛舎別からまとめて移動' : '所在の設定' }, extra)); n++;
     } else {
       const c = calves.find(x => x.id === id); if (!c || calfLocation(c) === to) return;
-      c.moves = c.moves || []; c.moves.push(Object.assign({ date, to, memo: toStory ? '牛舎別からまとめて移動' : '所在の設定' }, extra)); if (to === '出荷') c.shipDate = date; n++;
+      c.moves = c.moves || []; c.moves.push(Object.assign({ date, to, memo: toStory ? '牛舎別からまとめて移動' : '所在の設定' }, extra)); if (to === '出荷') c.shipDate = date;
+      // ★ 育成などの牛舎へ移したら離乳済（移動済み）にする。子牛牛舎を決めている農場は今までどおり牛舎で自動
+      if (!(window.FARM_CFG && FARM_CFG.calfBarn) && weanBarn(to) && ['active', 'kept'].includes(c.status || 'active')) { if (c.status === 'kept') c.isBreedingCandidate = true; c.status = 'moved'; }
+      n++;
     }
   });
   _barnSel.clear(); _barnOpen = to;
@@ -11858,7 +11899,7 @@ function renderBarnBoard() {
     if (x.kind === 'cow') { const c = x.c; let st = ''; try { st = cowDisplayStatus(c).label; } catch (e) {}
       return `<div data-barn-hit="cow:${E(c.id)}" onclick="showCowDetail('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('cow:' + c.id)}<b style="min-width:60px;">${E(c.id)}</b>${(() => { let d = ''; try { const mc = getMasterCow(c.id); d = String((mc && mc.nationalId) || c.nationalId || '').replace(/\D/g, ''); } catch (e) {} return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;">${E(c.name || '')}</span><span style="color:var(--muted);font-size:11px;">${E(st)}${c.dueDate && c.status === 'pregnant' ? ' 予定' + fmtDateShort(c.dueDate) : ''}</span></div>`; }
     const c = x.c, mo = c.dob ? Math.floor(diffDays(td, c.dob) / 30.4) : null;
-    return `<div data-barn-hit="calf:${E(c.id)}" onclick="openEditCalfModal('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('calf:' + c.id)}<b style="min-width:60px;">${E(c.earTagId || '')}</b>${(() => { const d = String(c.nationalId || '').replace(/\D/g, ''); return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;display:flex;gap:5px;flex-wrap:wrap;">${calfFlagChips(c, true)}</span><span style="color:var(--muted);font-size:11px;">${mo !== null ? mo + 'か月' : ''}</span></div>`;
+    return `<div data-barn-hit="calf:${E(c.id)}" onclick="goCalfCard('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('calf:' + c.id)}<b style="min-width:60px;">${E(c.earTagId || '')}</b>${(() => { const d = String(c.nationalId || '').replace(/\D/g, ''); return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;display:flex;gap:5px;flex-wrap:wrap;">${calfWeanLate(c) ? '<span style="font-size:11px;font-weight:800;color:#f59e0b;border:1px solid #b45309;padding:0 6px;border-radius:5px;white-space:nowrap;">⚠ 離乳まだ</span>' : ''}${calfFlagChips(c, true)}</span><span style="color:${calfWeanLate(c) ? '#f59e0b' : 'var(--muted)'};font-size:11px;font-weight:${calfWeanLate(c) ? 800 : 400};">${mo !== null ? mo + 'か月' : ''}</span></div>`;
   };
   box.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden;">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;background:var(--bg3);gap:8px;"><b style="font-size:13px;">🏠 牛群リスト</b><span style="font-size:12px;color:var(--muted);flex:1;">在籍 ${total}頭</span><button onclick="openBarnEditor()" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;">⚙ 牛舎を編集</button></div>
@@ -11876,9 +11917,9 @@ function renderBarnBoard() {
     </div>` : `<div style="padding:6px 12px;font-size:11px;color:var(--muted);">牛舎を開いて□にチェック → まとめて別の牛舎へ移せます</div>`}
     ${names.map(b => { const l = m[b] || [], open = _barnOpen === b;
       return `<div onclick="_barnOpen=${open ? 'null' : `'${E(b)}'`};renderBarnBoard();" style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-top:1px solid var(--border);cursor:pointer;${open ? 'background:rgba(96,165,250,.08);' : ''}">
-          <span style="font-size:14px;">${open ? '▾' : '▸'} ${b ? E(b) : '<span style="color:var(--muted);">牛群なし</span>'}</span>
-          <span style="min-width:30px;text-align:center;font-size:12px;font-weight:800;padding:2px 9px;border-radius:12px;background:${l.length ? '#65a30d' : 'var(--bg3)'};color:${l.length ? '#fff' : 'var(--muted)'};">${l.length}</span></div>
-        ${open ? `<div style="padding:0 12px 6px;">${l.length ? `<div style="text-align:right;padding:6px 0 2px;"><button onclick="_barnSelAll('${E(b)}', ${l.every(x => _barnSel.has(x.kind + ':' + x.c.id)) ? 'false' : 'true'})" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;">${l.every(x => _barnSel.has(x.kind + ':' + x.c.id)) ? 'この牛舎の選択をはずす' : 'この牛舎を全部選ぶ'}</button></div>` : ''}${l.length ? l.sort((a, z) => String(a.kind === 'cow' ? a.c.id : a.c.earTagId).localeCompare(String(z.kind === 'cow' ? z.c.id : z.c.earTagId), 'ja', { numeric: true })).map(row).join('') : '<div style="font-size:12px;color:var(--muted);padding:8px 0;">いません</div>'}</div>` : ''}`; }).join('')}
+          <span style="font-size:14px;">${open ? '▾' : '▸'} ${b ? E(b) : '<span style="color:var(--muted);">牛群なし</span>'}${(() => { const n = l.filter(x => x.kind === 'calf' && calfWeanLate(x.c)).length; return n ? ` <span style="font-size:11px;font-weight:800;color:#f59e0b;">⚠ 離乳まだ ${n}頭</span>` : ''; })()}</span>
+          <span style="display:flex;align-items:center;gap:8px;">${barnCountTxt(l) ? `<span style="font-size:11px;color:var(--muted);">${barnCountTxt(l)}</span>` : ''}<span style="min-width:30px;text-align:center;font-size:12px;font-weight:800;padding:2px 9px;border-radius:12px;background:${l.length ? '#65a30d' : 'var(--bg3)'};color:${l.length ? '#fff' : 'var(--muted)'};">${l.length}</span></span></div>
+        ${open ? `<div style="padding:0 12px 6px;">${l.length ? `<div style="text-align:right;padding:6px 0 2px;"><button onclick="_barnSelAll('${E(b)}', ${barnVisible(b, l).every(x => _barnSel.has(x.kind + ':' + x.c.id)) ? 'false' : 'true'})" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;">${barnVisible(b, l).every(x => _barnSel.has(x.kind + ':' + x.c.id)) ? '選択をはずす' : (barnKindOf(b, l) ? (barnKindOf(b, l) === 'cow' ? '親牛を全部選ぶ' : '子牛を全部選ぶ') : 'この牛舎を全部選ぶ')}</button></div>` : ''}${l.length ? barnGroupHTML(l, row, b, k => `_barnKind['${E(b)}']='${k}';renderBarnBoard();`) : '<div style="font-size:12px;color:var(--muted);padding:8px 0;">いません</div>'}</div>` : ''}`; }).join('')}
     ${emptyN && (hideEmpty || window._barnShowEmpty) ? `<div onclick="window._barnShowEmpty=!window._barnShowEmpty;renderBarnBoard()" style="padding:8px 12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);cursor:pointer;">${hideEmpty ? `▸ 0頭の牛舎 ${emptyN}か所を隠しています（タップで出す）` : '▴ 0頭の牛舎を隠す'}</div>` : ''}
   </div>`;
   try { _barnFind(); } catch (e) {}
@@ -26047,7 +26088,7 @@ function printCalvesList(){
   const todayStr = today();
   const filterLabel = calfFilter === 'pending' ? '移動待ち'
     : calfFilter === 'kept' ? '保留（繁殖候補）'
-    : calfFilter === 'moved' ? '移動済み' : calfFilter === 'certTodo' ? '授精証明書まだ' : '全て';
+    : calfFilter === 'moved' ? '離乳済' : calfFilter === 'certTodo' ? '授精証明書まだ' : '全て';
 
   // 生月ごとにまとめる（分娩予定表と同じ考え方）
   const monthMap = {};
@@ -26218,9 +26259,8 @@ function renderCalves() {
         ? `<span style="background:#0d2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;">🐄 個体タブ登録済み</span>`
         : calf.status === 'kept'
         ? `<span style="background:#0a2a0a;border:1px solid var(--accent2);color:var(--accent);font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;">🌟 繁殖候補</span>`
-        : calf.status === 'moved' && window.FARM_FEAT && FARM_FEAT.calfFlags ? ''
         : calf.status === 'moved'
-        ? `<span style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;">✓ 移動済み</span>${calf.isBreedingCandidate?'<span style="background:#0a2a0a;border:1px solid var(--accent2);color:var(--accent);font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;margin-left:4px;">🌟 繁殖候補</span>':''}`
+        ? `<span style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;">✓ 離乳済${(() => { const w = calfWeanDate(calf); return w ? ' ' + fmtDate(w) : ''; })()}</span>${calf.isBreedingCandidate?'<span style="background:#0a2a0a;border:1px solid var(--accent2);color:var(--accent);font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;margin-left:4px;">🌟 繁殖候補</span>':''}`
         : '';
       // フリーマーチン判定：同じ分娩記録の双子に雄がいる雌は保留不可
       const isTwinCalf = calf.memo === '双子' || calves.some(c =>
@@ -26289,7 +26329,7 @@ function renderCalves() {
         ? 'background:linear-gradient(135deg,#1a0a2a,#0f0520);border:2px solid var(--purple);'
         : 'border:1px solid var(--border);';
 
-      return `<div style="background:var(--card);${cardBg}border-radius:12px;margin-bottom:10px;overflow:hidden;">
+      return `<div data-calfcard="${calf.id}" style="background:var(--card);${cardBg}border-radius:12px;margin-bottom:10px;overflow:hidden;">
         <!-- サマリー行（常時表示） -->
         <div class="calf-sum" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;cursor:pointer;" onclick="event.stopPropagation();toggleCalfCard('${calf.id}')">
           <div style="flex-shrink:0;margin-right:8px;" onclick="event.stopPropagation();">
@@ -26326,7 +26366,7 @@ function renderCalves() {
               ${isEtCalf && calf.donor ? `<span style="font-size:11px;color:var(--purple);font-weight:700;">ドナー: ${calf.donor}${calf.sire?' × '+calf.sire:''}</span>` : ''}
               ${statusBadge}${etBadge}
               ${(() => { const v = calf.genomic ? calfGenomicVerdict(calf) : null; return v ? `<span title="ゲノミック：${v.label}" style="font-size:10px;font-weight:700;color:${v.keep ? '#4ade80' : '#f59e0b'};border:1px solid ${v.keep ? '#4ade80' : '#f59e0b'};padding:0 5px;border-radius:4px;">🧬${v.keep ? '保留向き' : '肥育向き'}</span>` : ''; })()}
-              ${(window.FARM_FEAT && FARM_FEAT.calfFlags) || document.documentElement.classList.contains('nui') ? (calf.status !== 'dead' && !calf.authCertIssued && calfNeedsCert(calf) ? `<span title="授精証明書 まだ" style="font-size:10px;color:var(--muted);border:1px dashed var(--border);padding:0 5px;border-radius:4px;">証明書まだ</span>` : '') : (() => { let op = ''; try { op = calf.status !== 'dead' && calf.authCertManual !== true ? _brOperator(calf).op : ''; } catch (e) {} return op ? `<span title="ほかの術者が授精・移植した子牛なので、こちらで証明書は出しません" style="font-size:10px;color:var(--muted);border:1px solid var(--border);padding:0 5px;border-radius:4px;">📄不要（術者 ${_stEsc(op)}）</span>` : ''; })() || (calf.authCertIssued ? `<span title="授精証明書 発行済み" style="font-size:10px;color:var(--purple);font-weight:700;background:rgba(139,92,246,.12);border:1px solid var(--purple);padding:0 5px;border-radius:4px;">📄済</span>` : calfNeedsCert(calf) ? `<span title="授精証明書 まだ" style="font-size:10px;color:var(--warn);font-weight:700;border:1px dashed var(--warn);padding:0 5px;border-radius:4px;">📄まだ</span>` : (() => { if (calf.status === 'dead') return ''; let op = ''; try { op = _brOperator(calf).op; } catch (e) {} return `<span title="ほかの術者が授精・移植した子牛なので、こちらで証明書は出しません" style="font-size:10px;color:var(--muted);border:1px solid var(--border);padding:0 5px;border-radius:4px;">📄不要${op ? '（術者 ' + _stEsc(op) + '）' : ''}</span>`; })())}
+              ${(window.FARM_FEAT && FARM_FEAT.calfFlags) || document.documentElement.classList.contains('nui') ? (calf.status !== 'dead' && !calf.authCertIssued && calfNeedsCert(calf) ? `<span title="授精証明書 まだ" style="font-size:10px;color:var(--muted);border:1px dashed var(--border);padding:0 5px;border-radius:4px;">証明書まだ</span>` : (() => { if (calf.status === 'dead' || calf.authCertIssued) return ''; let op = ''; try { op = _brOperator(calf).op; } catch (e) {} return op ? `<span title="ほかの術者が授精・移植した子牛なので、こちらで証明書は出しません" style="font-size:10px;color:var(--muted);border:1px solid var(--border);padding:0 5px;border-radius:4px;">📄不要（術者 ${_stEsc(op)}）</span>` : ''; })()) : (() => { let op = ''; try { op = calf.status !== 'dead' && calf.authCertManual !== true ? _brOperator(calf).op : ''; } catch (e) {} return op ? `<span title="ほかの術者が授精・移植した子牛なので、こちらで証明書は出しません" style="font-size:10px;color:var(--muted);border:1px solid var(--border);padding:0 5px;border-radius:4px;">📄不要（術者 ${_stEsc(op)}）</span>` : ''; })() || (calf.authCertIssued ? `<span title="授精証明書 発行済み" style="font-size:10px;color:var(--purple);font-weight:700;background:rgba(139,92,246,.12);border:1px solid var(--purple);padding:0 5px;border-radius:4px;">📄済</span>` : calfNeedsCert(calf) ? `<span title="授精証明書 まだ" style="font-size:10px;color:var(--warn);font-weight:700;border:1px dashed var(--warn);padding:0 5px;border-radius:4px;">📄まだ</span>` : (() => { if (calf.status === 'dead') return ''; let op = ''; try { op = _brOperator(calf).op; } catch (e) {} return `<span title="ほかの術者が授精・移植した子牛なので、こちらで証明書は出しません" style="font-size:10px;color:var(--muted);border:1px solid var(--border);padding:0 5px;border-radius:4px;">📄不要${op ? '（術者 ' + _stEsc(op) + '）' : ''}</span>`; })())}
               ${isEtCalf && calf.embryoNo ? `<span style="font-size:10px;color:var(--purple);font-family:'JetBrains Mono',monospace;background:rgba(139,92,246,.1);padding:1px 5px;border-radius:4px;">${calf.embryoNo}</span>` : ''}
             </div>
             <div style="font-size:11px;color:var(--muted);margin-top:2px;">
@@ -26364,7 +26404,6 @@ function renderCalves() {
             <button class="calf-action-btn" data-calfid="${calf.id}" data-action="keep" style="background:#0a2a0a;border:1px solid var(--accent2);color:var(--accent);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">🌟 繁殖候補として保留</button>
           ` : ''}
           ${calf.status === 'active' && !calf.deathDate ? `
-            <button class="calf-action-btn" data-calfid="${calf.id}" data-action="moved" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">${window.FARM_CFG && FARM_CFG.calfBarn ? '🏠 移動' : '✓ 移動済みにする'}</button>
           ` : ''}
           ${(calf.status === 'kept' || calf.isBreedingCandidate) ? `
             ${cows.some(c=>c.id===calf.earTagId)
@@ -26375,14 +26414,13 @@ function renderCalves() {
             }
           ` : ''}
           ${calf.status === 'kept' && !calf.deathDate ? `
-            <button class="calf-action-btn" data-calfid="${calf.id}" data-action="moved" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;cursor:pointer;">${window.FARM_CFG && FARM_CFG.calfBarn ? '🏠 移動' : '✓ 移動済みにする'}</button>
             <button class="calf-action-btn" data-calfid="${calf.id}" data-action="active" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">保留を解除</button>
           ` : ''}
           ${calf.status === 'moved' && calf.isBreedingCandidate ? `
             <button class="calf-action-btn" data-calfid="${calf.id}" data-action="active" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">🌟 繁殖候補を解除</button>
           ` : ''}
           ${calf.status === 'moved' ? `
-            <button class="calf-action-btn" data-calfid="${calf.id}" data-action="active" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">↩ 移動済みを取り消す</button>
+            <button class="calf-action-btn" data-calfid="${calf.id}" data-action="active" style="background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">↩ 離乳済を取り消す</button>
           ` : ''}
           ${window.FARM_FEAT && FARM_FEAT.calfFlags ? '' : `<button class="calf-action-btn" data-calfid="${calf.id}" data-action="delete" style="background:none;border:1px solid var(--danger);color:var(--danger);font-size:11px;padding:5px 10px;border-radius:6px;cursor:pointer;">🗑 削除</button>`}
           ${!calf.deathDate ? `
@@ -26530,7 +26568,7 @@ function saveMove() {
     const rec = { date, to, memo }; if (score) rec.score = score;
     calf.moves.push(rec);
     // 保留（繁殖候補）の子牛も移動済みにする。候補の印は残す（setCalfStatus と同じ考え方）
-    if (['育成舎①', '育成舎②', '肥育舎', '出荷'].includes(to) && ['active', 'kept'].includes(calf.status || 'active')) {
+    if ((['育成舎①', '育成舎②', '肥育舎', '出荷'].includes(to) || (!(window.FARM_CFG && FARM_CFG.calfBarn) && weanBarn(to))) && ['active', 'kept'].includes(calf.status || 'active')) {
       if (calf.status === 'kept') calf.isBreedingCandidate = true;
       calf.status = 'moved';
     }
@@ -33487,7 +33525,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026111820';
+const APP_BUILD = '2026111825';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -34127,7 +34165,7 @@ html.nui #page-today > :not(#nui-today){display:none !important;}
 .nui-tl{background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;padding:0 12px;}
 .nui-tr{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06);}
 .nui-tr:last-child{border-bottom:none;}
-.nui-ck{width:30px;height:30px;flex-shrink:0;border-radius:8px;font-size:18px;font-weight:900;border:2px solid #475569;background:transparent;color:#000;cursor:pointer;padding:0;}
+.nui-ck{width:30px;height:30px;flex-shrink:0;border-radius:8px;font-size:18px;font-weight:900;border:2px solid #475569;background:transparent;color:#000;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;line-height:1;}
 .nui-ck.on{border-color:#22c55e;background:#22c55e;}
 .nui-go{font-size:12px;font-weight:700;border:1px solid;border-radius:8px;padding:5px 9px;white-space:nowrap;background:none;cursor:pointer;font-family:inherit;}
 /* 記録の画面（全画面） */
@@ -34479,6 +34517,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   function render() {
     try {
       if (S.v === 'cow') return vCow();
+      if (S.v === 'multi') return vMulti();
       if (!cowOf(S.cow)) { S.v = 'cow'; return vCow(); }
       if (S.v === 'act') return vAct();
       if (S.v === 'ai') return vAI();
@@ -34486,6 +34525,135 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     } catch (e) { console.error('nuiRec', e); scrClose(); appAlert('画面を開けませんでした：' + e.message); }
   }
   window.nuiRender = render;
+
+  // ---------- ① の画面：🏠 牛群リストから選ぶ（1頭なら②へ、何頭も選んだらまとめて記録） ----------
+  const BP = { open: null, sel: new Set() };
+  const bpKey = x => x.kind + ':' + x.c.id;
+  function barnNames() {
+    const m = _barnMembers();
+    let names = [...getBarns(), ...Object.keys(m).filter(b => b && !getBarns().includes(b))];
+    if ((m[''] || []).length) names.push('');
+    return { m, names: names.filter(b => (m[b] || []).length) };
+  }
+  function bpRow(x) {
+    const k = bpKey(x), on = BP.sel.has(k), c = x.c, isCow = x.kind === 'cow';
+    let nid = ''; try { nid = String((isCow ? ((getMasterCow(c.id) || {}).nationalId || c.nationalId) : c.nationalId) || '').replace(/\D/g, ''); } catch (e) {}
+    const tag = isCow ? c.id : (c.earTagId || '耳標なし');
+    const mo = !isCow && c.dob ? Math.floor(diffDays(today(), c.dob) / 30.4) : null;
+    const sub = isCow ? (nm(c.id) || '') : [c.sex === '雄' ? (c.castrated ? '去勢' : '♂') : c.sex === '雌' ? '♀' : '', mo != null ? mo + 'か月' : ''].filter(Boolean).join('・');
+    return `<div class="nui-a" onclick="nuiBP('tog','${jsq(k)}')" style="display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid rgba(255,255,255,.06);${on ? 'background:rgba(34,197,94,.08);' : ''}">
+      <span class="nui-ck ${on ? 'on' : ''}" style="flex-shrink:0;">${on ? '✓' : ''}</span>
+      <span style="flex:1;min-width:0;"><span class="nui-mono" style="font-weight:700;font-size:15px;">${esc(tag)}</span>${nid.length >= 5 ? ` <span class="nui-nid">${esc(nid.slice(-5, -1) + '-' + nid.slice(-1))}</span>` : ''} <span style="font-size:12px;color:${isCow ? '#4ade80' : '#94a3b8'};font-weight:700;">${esc(isCow ? sub : '子牛 ' + sub)}</span>
+        ${!isCow && calfWeanLate(c) ? '<span style="font-size:11px;font-weight:800;color:#f59e0b;"> ⚠ 離乳まだ</span>' : ''}</span></div>`;
+  }
+  function barnPickHTML() {
+    if (!(window.FARM_FEAT && FARM_FEAT.barnList)) return '';
+    const { m, names } = barnNames(); if (!names.length) return '';
+    return `<div id="nui-bp"><div style="display:flex;justify-content:space-between;align-items:baseline;margin:14px 0 6px;"><span style="font-size:13px;font-weight:700;color:#94a3b8;">🏠 牛群リストから選ぶ</span><span style="font-size:11px;color:#64748b;">何頭も選ぶと、まとめて記録できます</span></div>
+      <div class="nui-card" style="padding:0 12px;">${names.map(b => { const L = m[b] || [], open = BP.open === b, n = L.filter(x => BP.sel.has(bpKey(x))).length, late = L.filter(x => x.kind === 'calf' && calfWeanLate(x.c)).length;
+        return `<div class="nui-a" onclick="nuiBP('open','${jsq(b)}')" style="display:flex;align-items:center;gap:8px;padding:12px 2px;${open ? '' : 'border-bottom:1px solid rgba(255,255,255,.06);'}">
+            <span style="flex:1;font-size:15px;font-weight:700;">${open ? '▾' : '▸'} ${b ? esc(b) : '<span style="color:#94a3b8;">牛群なし</span>'}${late ? ` <span style="font-size:11px;color:#f59e0b;">⚠ 離乳まだ${late}</span>` : ''}</span>
+            ${n ? `<span style="font-size:12px;font-weight:800;color:#4ade80;">${n}頭選択</span>` : barnCountTxt(L) ? `<span style="font-size:11px;color:#94a3b8;">${barnCountTxt(L)}</span>` : ''}<span class="nui-mono" style="font-size:13px;font-weight:800;background:#65a30d;color:#fff;border-radius:12px;padding:1px 9px;">${L.length}</span></div>
+          ${open ? `<div style="padding:0 0 8px;border-bottom:1px solid rgba(255,255,255,.06);"><div style="text-align:right;padding:2px 0 4px;"><button class="nui-chip" style="font-size:12px;" onclick="nuiBP('all','${jsq(b)}')">${barnVisible(b, L).every(x => BP.sel.has(bpKey(x))) ? '選ぶのをやめる' : (barnKindOf(b, L) ? (barnKindOf(b, L) === 'cow' ? '親牛を全部選ぶ' : '子牛を全部選ぶ') : '全部選ぶ')}</button></div>${barnGroupHTML(L, bpRow, b, k => `nuiBP('kind','${jsq(b)}|${k}')`)}</div>` : ''}`; }).join('')}</div></div>`;
+  }
+  // 選んだら下には「② 何をした へ」だけを出す（何をするかは②の画面で選ぶ）
+  function barnFootHTML() {
+    const n = BP.sel.size;
+    return `<div style="display:flex;gap:8px;align-items:center;">
+        <button onclick="nuiBP('clear')" style="flex:0 0 30%;height:54px;border-radius:12px;border:1px solid #3a3f5c;background:#1e2130;color:#cbd5e1;font-size:13px;font-weight:700;">選ぶのをやめる</button>
+        <button onclick="nuiBP('next')" style="flex:1;height:54px;border-radius:12px;border:none;background:#22c55e;color:#000;font-size:16px;font-weight:900;">✓ ${n}頭 → ② 何をした へ</button></div>`;
+  }
+  window.nuiBP = function (a, v) {
+    const sb = document.querySelector('#nui-scr .sb'), top = sb ? sb.scrollTop : 0;
+    const { m } = barnNames();
+    if (a === 'open') BP.open = BP.open === v ? null : v;
+    else if (a === 'tog') BP.sel.has(v) ? BP.sel.delete(v) : BP.sel.add(v);
+    else if (a === 'kind') { const i = v.lastIndexOf('|'); _barnKind[v.slice(0, i)] = v.slice(i + 1); }
+    else if (a === 'all') { const L = barnVisible(v, m[v] || []).map(bpKey), allOn = L.every(k => BP.sel.has(k)); L.forEach(k => allOn ? BP.sel.delete(k) : BP.sel.add(k)); }
+    else if (a === 'clear') BP.sel.clear();
+    else if (a === 'next') { const k = [...BP.sel]; if (!k.length) return; if (k.length === 1 && k[0].startsWith('cow:')) { BP.sel.clear(); return nuiRec(k[0].slice(4), null); } S.v = 'multi'; return render(); }
+    else return bpDo(a);
+    // ★ 画面全体は描き直さない（スクロールの位置がずれないように）。牛群リストの部分と下のボタンだけ入れ替える
+    const box = $('nui-bp');
+    if (!box) { render(); const sb2 = document.querySelector('#nui-scr .sb'); if (sb2) sb2.scrollTop = top; return; }
+    const tmp = document.createElement('div'); tmp.innerHTML = barnPickHTML(); box.replaceWith(tmp.firstElementChild);
+    const el = $('nui-scr'); let sf = el && el.querySelector('.sf');
+    if (BP.sel.size) { if (!sf && el) { el.insertAdjacentHTML('beforeend', '<div class="sf"><div class="wrap"></div></div>'); sf = el.querySelector('.sf'); } if (sf) sf.querySelector('.wrap').innerHTML = barnFootHTML(); }
+    else if (sf) sf.remove();
+    if (sb) sb.scrollTop = top;
+  };
+  // ② 何をした（何頭もまとめて）
+  function vMulti() {
+    const T = bpTargets(); if (!T.length) { S.v = 'cow'; return vCow(); }
+    const nCow = T.filter(t => t.kind === 'cow').length, nCalf = T.length - nCow;
+    const tile = (k, ic, l, sub, cls, ok) => `<div class="nui-tile ${cls}" style="padding:16px 6px;${ok ? '' : 'opacity:.4;'}" onclick="${ok ? `nuiBP('${k}')` : `appAlert('${sub}')`}"><div class="i">${ic}</div><div style="font-size:15px;font-weight:800;">${l}</div><div style="font-size:10.5px;color:#94a3b8;margin-top:2px;">${sub}</div></div>`;
+    scrShow(`${backBtn("nuiMultiBack()")}<span style="font-size:17px;font-weight:900;">➕ ${T.length}頭にまとめて記録</span>`,
+      `<div style="margin:12px 14px 0;" class="nui-card"><div style="padding:10px 14px;">
+          <div style="font-size:14px;font-weight:800;">${[nCow ? '親牛 ' + nCow + '頭' : '', nCalf ? '子牛 ' + nCalf + '頭' : ''].filter(Boolean).join('・')}</div>
+          <div style="font-size:12px;color:#94a3b8;margin-top:2px;max-height:54px;overflow:auto;">${T.map(t => esc(t.id)).join('・')}</div></div></div>
+      <div style="padding:10px 14px 4px;">${steps(2)}</div>
+      <div style="padding:10px 14px 30px;">
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;">
+          ${tile('move', '🏠', '移動', '育成などへ移すと子牛は離乳済', 'nui-y', true)}
+          ${tile('note', '📝', 'メモ・処置', 'ワクチン・削蹄・除角など', 'nui-b', true)}
+          ${tile('tag', '🏷', 'タグ', 'まとめてタグを付ける', 'nui-p', true)}
+          ${tile('ship', '🚚', '出荷', nCow ? '繁殖牛は先に廃用にしてください' : '子牛・肥育牛', 'nui-o', !nCow)}
+        </div>
+        <div style="text-align:center;margin-top:16px;"><button class="nui-chip" onclick="nuiMultiBack()">‹ 選ぶ牛を直す</button></div>
+      </div>`);
+  }
+  window.nuiMultiBack = function () { S.v = 'cow'; render(); };
+  // 選んだ牛を、牛群リストのまとめて記録（メモ・タグ）と同じ形にして渡す
+  function bpTargets() {
+    return [...BP.sel].map(k => { const kind = k.slice(0, k.indexOf(':')), id = k.slice(k.indexOf(':') + 1);
+      const obj = kind === 'cow' ? cows.find(c => c.id === id) : calves.find(c => c.id === id);
+      return obj ? { key: obj.id, kind, id: kind === 'cow' ? obj.id : (obj.earTagId || '耳標なし'), obj } : null; }).filter(Boolean);
+  }
+  function bpUseHerdSel() { const T = bpTargets(); window._herdRowsShown = T.map(t => ({ key: t.key, kind: t.kind, id: t.id })); _herdSel.clear(); T.forEach(t => _herdSel.add(t.key)); return T; }
+  function bpDo(a) {
+    const keys = [...BP.sel]; if (!keys.length) return;
+    if (a === 'one') { const id = keys[0].slice(4); BP.sel.clear(); return nuiRec(id, null); }
+    if (a === 'ship') {
+      const cowK = keys.filter(k => k.startsWith('cow:'));
+      if (cowK.length) { appAlert(`繁殖牛（${cowK.length}頭）は出荷の前に「廃用」にしてください。\n1頭だけ選んで「この牛に記録する」→「🚚 出荷」から、出荷・販売で廃用にできます。\n\n子牛・肥育牛だけ選んでください。`); return; }
+      BP.sel.clear(); return nuiShip(keys);
+    }
+    if (a === 'note') { bpUseHerdSel(); BP.sel.clear(); scrClose(); return herdBulkNote(); }
+    if (a === 'tag') { bpUseHerdSel(); BP.sel.clear(); scrClose(); return herdBulkTag(); }
+    if (a === 'move') return vBulkMove();
+  }
+  // まとめて移動（牛群リストの「移動を記録する」と同じ。育成などへ移すと離乳済になる）
+  let BM = null;
+  function vBulkMove() {
+    if (!BM) BM = { to: '', date: today(), story: null };
+    const T = bpTargets(), T0 = today();
+    const allNone = T.every(t => !(t.kind === 'cow' ? cowLocation(t.obj) : calfLocation(t.obj)));
+    if (BM.story === null) BM.story = !allNone;
+    const barns = getBarns().concat(T.every(t => t.kind === 'calf') ? ['出荷'] : []);
+    scrShow(`${backBtn("BMback()")}<span style="font-size:17px;font-weight:900;">🏠 ${T.length}頭をまとめて移動</span>`,
+      `<div style="padding:12px 14px 30px;">
+        <div style="font-size:12px;color:#94a3b8;margin-bottom:10px;">${T.slice(0, 30).map(t => esc(t.id)).join('・')}${T.length > 30 ? ' ほか' : ''}</div>
+        <div style="font-size:12px;font-weight:700;color:#94a3b8;margin-bottom:6px;">移動先</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">${barns.map(b => `<button class="nui-ch${BM.to === b ? ' on' : ''}" onclick="BMset('to','${jsq(b)}')">${esc(b)}</button>`).join('')}</div>
+        ${BM.to && weanBarn(BM.to) && T.some(t => t.kind === 'calf' && (t.obj.status || 'active') === 'active') ? '<div style="font-size:12px;color:#4ade80;margin-top:8px;">✓ 子牛は「離乳済」になります</div>' : ''}
+        <div style="font-size:12px;font-weight:700;color:#94a3b8;margin:14px 0 6px;">移動した日</div>
+        <input type="date" value="${BM.date}" max="${T0}" onchange="BMset('date',this.value||'${T0}')" style="height:46px;font-size:16px;">
+        <label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:14px;"><input type="checkbox" ${BM.story ? 'checked' : ''} onchange="BMset('story',this.checked)" style="width:20px;height:20px;"> ストーリーに「移動」として残す</label>
+        <div style="font-size:11px;color:#64748b;margin-top:4px;">はじめて所在を決めるだけのときは外してください</div>
+      </div>`,
+      `<button onclick="BMsave()" ${BM.to ? '' : 'disabled'} style="width:100%;height:54px;border-radius:12px;border:none;background:#22c55e;color:#000;font-size:17px;font-weight:900;opacity:${BM.to ? 1 : .45};">${BM.to ? `🏠 ${T.length}頭を「${esc(BM.to)}」へ移す` : '移動先を選んでください'}</button>`);
+  }
+  window.BMback = function () { BM = null; S.v = BP.sel.size ? 'multi' : 'cow'; render(); };
+  window.BMset = function (k, v) { BM[k] = v; vBulkMove(); };
+  window.BMsave = function () {
+    if (!BM || !BM.to) return;
+    const to = BM.to;
+    _barnSel.clear(); [...BP.sel].forEach(k => _barnSel.add(k));
+    // 牛群リストの「まとめて移動」をそのまま使う
+    const opt = { to, date: BM.date, story: !!BM.story };
+    BM = null; BP.sel.clear(); scrClose();
+    barnBulkMove(opt);
+  };
 
   // ---------- 🚚 出荷（肥育牛＝子牛から育てた牛、廃用肥育の親牛） ----------
   let SH = null;
@@ -34496,17 +34664,18 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       const loc = calfLocation(c); if (loc === '出荷') return;
       if (cows.some(x => x.id === c.earTagId)) return;   // 繁殖牛になった子牛は出さない
       const fat = c.status === 'moved' || /肥育/.test(loc);
-      out.push({ k: 'calf:' + c.id, kind: 'calf', fat, tag: c.earTagId || '', nat: c.nationalId || '', name: c.name || '', loc,
+      out.push({ k: 'calf:' + c.id, kind: 'calf', fat, tag: c.earTagId || '', nat: c.nationalId || '', name: c.name || '', loc, dob: c.dob || '',
         sub: [c.sex === '雄' ? (c.castrated ? '去勢' : '♂') : c.sex === '雌' ? '♀' : '', c.dob ? md(c.dob) + '生まれ（' + Math.floor(diffDays(today(), c.dob) / 30.4) + 'か月）' : '', loc ? '🏠' + loc : ''].filter(Boolean).join('・') });
     });
     (typeof retiredCows !== 'undefined' ? retiredCows : []).forEach(c => {
       if (c.retireExit !== 'fatten' || c.shipDate) return;
       out.push({ k: 'ret:' + c.id, kind: 'ret', fat: true, tag: c.id, nat: c.nationalId || '', name: c.name || nm(c.id) || '', loc: '',
-        sub: '廃用肥育 ' + diffDays(today(), c.retireDate || today()) + '日目' + (c.shipPlan ? '・出荷予定 ' + md(c.shipPlan) : '') });
+        sub: '廃用肥育 ' + diffDays(today(), c.retireDate || today()) + '日目' + (c.shipPlan ? '・出荷予定 ' + md(c.shipPlan) : ''), dob: c.retireDate || '' });
     });
-    return out;
+    // ★ 2026/11/19：月齢の高い牛（生まれた日の古い順）から。廃用肥育は廃用日の古い順
+    return out.sort((a, b) => (a.dob || '9999').localeCompare(b.dob || '9999'));
   }
-  window.nuiShip = function () { SH = { q: '', sel: new Set(), day: 0, date: today(), memo: '', all: false }; vShip(); };
+  window.nuiShip = function (pre) { SH = { q: '', sel: new Set(), day: 0, date: today(), memo: '', all: false }; (pre || []).forEach(k => { if (!shipWd(k)) SH.sel.add(k); }); vShip(); };
   window.nuiShipSet = function (k, v) { SH[k] = v; if (k === 'day') SH.date = v === 0 ? today() : v === 1 ? addDays(today(), -1) : SH.date; if (k === 'q') return shipList();
     if (k === 'day' || k === 'date') [...SH.sel].forEach(x => { if (shipWd(x)) SH.sel.delete(x); });   // 日付を変えて休薬にかかった牛は外す
     vShip(); };
@@ -34915,7 +35084,6 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       if (seen.has(t.cowId) || todayL.length >= 8) return; const c = cowOf(t.cowId); if (!c) return;
       seen.add(t.cowId); todayL.push(cowLine(c, (t.date < T ? md(t.date) + ' ' : '') + (t.action || '')));
     });
-    const rec = recentLoad().map(cowOf).filter(Boolean).filter(c => !seen.has(c.id)).slice(0, 5).map(c => cowLine(c, cowSub(c)));
     const title = S.intent === 'ai' ? '💉 種付け' : S.intent === 'calv' ? '🍼 分娩' : '➕ 記録する';
     scrShow(`${backBtn('nuiClose()', '閉じる')}<span style="font-size:17px;font-weight:900;">${title}</span>`,
       `<div style="padding:12px 14px 4px;">${steps(1)}</div>
@@ -34925,16 +35093,15 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         <div id="nui-cowres" style="display:none;"></div>
         <div id="nui-lists">
           ${todayL.length ? `<div style="font-size:13px;font-weight:700;color:#f59e0b;margin-bottom:6px;">📋 今日の予定がある牛</div><div class="nui-card" style="padding:0 12px;">${todayL.join('')}</div>` : ''}
-          ${rec.length ? `<div style="font-size:13px;font-weight:700;color:#94a3b8;margin:14px 0 6px;">🕘 さっき見た牛</div><div class="nui-card" style="padding:0 12px;">${rec.join('')}</div>` : ''}
-          <div class="nui-card nui-a" onclick="nuiShip()" style="margin-top:14px;padding:13px 14px;display:flex;align-items:center;gap:10px;">
-            <span style="font-size:24px;">🚚</span><span style="flex:1;"><b style="font-size:15px;">出荷を記録</b><br><span style="font-size:12px;color:#94a3b8;">肥育牛・廃用肥育の親牛（何頭でもまとめて）</span></span><span style="color:#64748b;">›</span></div>
-        </div></div>`);
+          ${barnPickHTML()}
+        </div></div>`, BP.sel.size ? barnFootHTML() : '');
     if (window.matchMedia('(min-width:1100px)').matches) setTimeout(() => { const q = $('nui-q'); if (q) q.focus(); }, 30);
   }
   const ACT = {
     ai: ['💉', '種付け', 'nui-g', 'AI・自然交配'], preg: ['🔍', '妊鑑', 'nui-b', ''], et: ['🧬', '移植ET', 'nui-p', ''], calv: ['🍼', '分娩', 'nui-p', ''],
     estrus: ['🔥', '発情', 'nui-o', ''], med: ['💊', '治療', 'nui-b', ''], prog: ['📅', 'プログラム', 'nui-g', ''], move: ['🏠', '移動', 'nui-y', ''],
-    still: ['💔', '流死産', 'nui-r', ''], memo: ['📝', 'メモ', 'nui-y', '']
+    still: ['💔', '流死産', 'nui-r', ''], memo: ['📝', 'メモ', 'nui-y', ''],
+    retire: ['🚫', '廃用', 'nui-r', ''], ship: ['🚚', '出荷', 'nui-y', '']
   };
   window.nuiAct = function (k) {
     const id = S.cow;
@@ -34949,6 +35116,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     if (k === 'move') return openMoveDialog('cow', id);
     if (k === 'still') { openStillbirthWizard(); try { selectSbWizCow(id, nm(id)); } catch (e) {} return; }
     if (k === 'memo') return openCowNote(id);
+    if (k === 'retire') return openRetireModal(id);
+    if (k === 'ship') { openRetireModal(id); try { setRetireExit('ship'); } catch (e) {} return; }   // 繁殖牛の出荷＝出荷・販売で廃用
   };
   function vAct() {
     const c = cowOf(S.cow), k = stKey(c), li = lastIns(c);
@@ -34956,7 +35125,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const FAV = { wait: ['preg', 'ai'], preg: ['calv', 'med'], program: ['ai', 'et'], donor: ['ai', 'med'], fresh: ['ai', 'med'], open: ['ai', 'estrus'] }[k] || ['ai', 'med'];
     const favSub = { preg: nextPreg ? (String(nextPreg.detail || '').match(/\d+日/) || [''])[0] ? '妊娠' + String(nextPreg.detail).match(/(\d+)日/)[1] + '日の予定' : '妊鑑の予定 ' + md(nextPreg.date) : '最後の授精の結果', ai: 'AI・自然交配', calv: c.dueDate ? '予定 ' + md(c.dueDate) : '', med: '薬・処置', estrus: '発情・見送り', et: '受精卵' };
     const BIG = { 'nui-g': '#22c55e', 'nui-b': '#3b82f6', 'nui-p': '#8b5cf6', 'nui-o': '#f97316' };
-    const rest = ['et', 'calv', 'estrus', 'med', 'prog', 'move', 'still', 'memo', 'ai', 'preg'].filter(x => !FAV.includes(x)).slice(0, 8);
+    const rest = ['et', 'calv', 'estrus', 'med', 'prog', 'move', 'still', 'memo', 'retire', 'ship', 'ai', 'preg'].filter(x => !FAV.includes(x)).slice(0, 10);
     scrShow(`${backBtn("nuiRec(null,null)")}<span style="font-size:17px;font-weight:900;">➕ 記録する</span>`,
       `<div style="margin:12px 14px 0;" class="nui-card"><div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
         <div style="min-width:0;"><span class="nui-mono" style="font-weight:900;font-size:20px;color:#4ade80;">${esc(c.id)}</span> <span style="font-size:16px;font-weight:700;">${esc(nm(c.id))}</span><div style="font-size:12px;color:#94a3b8;">${esc(li ? insLabel(li) + ' ・ ' + diffDays(today(), li.date) + '日前' : cowSub(c))}</div></div>${stTag(c)}</div></div>
