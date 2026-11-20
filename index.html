@@ -783,7 +783,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
       <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:4px;">📥 クラウドのバックアップから、消えた授精簿の行を戻す</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">毎日クラウドに取っているバックアップ（8日分）と今の授精簿を比べ、今は無い行だけを戻します。今ある行はそのままです。</div>
       <button onclick="closeModal('modal-settings');openSyncDiag()" style="margin-bottom:6px;background:#0a1a2a;border:1px solid var(--info);color:var(--info);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">🔎 同期のようすを調べる（版・保存場所）</button>
-      <button onclick="closeModal('modal-settings');openLostRecover()" style="margin-bottom:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">🩹 消えた移動・タグ・チェックを取り戻す</button>
+      <button onclick="closeModal('modal-settings');openLostRecover()" style="margin-bottom:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">🩹 消えた記録を取り戻す（お産・移動・タグ・チェック）</button>
       <button onclick="closeModal('modal-settings');openIbRestore()" style="background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">☁ バックアップを調べる</button>
       <button onclick="closeModal('modal-settings');openInvRestore()" style="margin-top:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">☁ 消えた在庫の記録（使用・入荷など）を戻す</button>
       <button onclick="closeModal('modal-settings');openInvMissing()" style="margin-top:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">📦 在庫に入っていない授精・移植を調べる</button>
@@ -7981,9 +7981,11 @@ function showCowStory(cowId) {
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
           <div style="font-size:14px;font-weight:900;color:var(--warn);">${ex.icon} ${cow.shipDate ? '出荷済' : fatt ? '廃用肥育中' : (cow.retireExit && cow.retireExit !== 'other' ? '廃用（' + ex.label + '）' : '廃用')}</div>
           ${fatt && !cow.shipDate ? `<button class="st-act" onclick="recordRetiredShip('${esc(cowId)}')">🚚 出荷を記録</button>` : ''}
+          ${fatt && cow.shipDate ? `<button class="st-act" onclick="openRetiredPrice('${esc(cowId)}')">💴 ${cow.salePrice ? '売値を直す' : '売値を入れる'}</button>` : ''}
         </div>
         <div style="font-size:12px;color:var(--text);margin-top:4px;line-height:1.7;">
           廃用日 <b>${fmtDate(cow.retireDate)}</b>${cow.reason ? `・理由 <b style="color:var(--warn);">${esc(cow.reason)}</b>` : ''}<br>
+          ${fatt && cow.shipDate && retiredPriceText(cow) ? `💴 <b>${esc(retiredPriceText(cow))}</b><br>` : ''}
           ${fatt ? `廃用肥育 <b>${days}日${cow.shipDate ? '' : '目'}</b>${cow.shipDate ? `・出荷 <b>${fmtDate(cow.shipDate)}</b>` : cow.shipPlan ? `・出荷予定 <b>${fmtDate(cow.shipPlan)}</b>（あと${diffDays(cow.shipPlan, today())}日）` : '・出荷予定 未設定'}` : ''}
         </div>
       </div>
@@ -8211,7 +8213,7 @@ function annualItems(year) {
   const FR = (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).filter(r => _ownFarmer(r.farmer) && inY(_normYMD(r.slaughterDate)));
   it.ship = FR.map(r => ({ breed: _annBreed(r.breed), date: _normYMD(r.slaughterDate), sex: r.sex, amount: Number(r.amount) || 0, label: `${r.sex || ''} ${r.sire || ''}`.trim() || '肥育牛',
     sub: [r.meatGrade, r.bms ? 'BMS' + r.bms : '', r.weight ? r.weight + 'kg' : '', r.amount ? Math.round(r.amount / 10000) + '万円' : ''].filter(Boolean).join('　') }));
-  it.retShip = RC.filter(r => r.shipDate && inY(r.shipDate)).map(r => ({ breed: _annBreed(r.breed), date: r.shipDate, label: `${r.id} ${r.name || ''}`, sub: '廃用牛の出荷' }));
+  it.retShip = RC.filter(r => r.shipDate && inY(r.shipDate)).map(r => ({ breed: _annBreed(r.breed), date: r.shipDate, amount: Number(r.salePrice) || 0, label: `${r.id} ${r.name || ''}`, sub: r.salePrice ? '売値 ' + Math.round(r.salePrice / 1000) / 10 + '万円' : '廃用牛の出荷（売値まだ）' }));
   it.intro = _annAllCows().filter(({ c }) => inY(c.introDate)).map(({ c, ret }) => ({ breed: _annBreed(c.breed), date: c.introDate, label: `${c.id} ${_annName(c.id) || c.name || ''}`, sub: ret ? '（現在は廃用）' : '' }));
   return it;
 }
@@ -9192,6 +9194,11 @@ function kpiYear(Y) {
     R['ship_age_' + b] = avg(L.map(r => Number(r.age)).filter(v => v > 0));
     R['ship_wt_' + b] = avg(L.map(r => Number(r.weight)).filter(v => v > 0));
     R['ship_up_' + b] = avg(L.map(r => Number(r.unitPrice)).filter(v => v > 0));
+    // 廃用肥育の売値（牛に入れた売値）
+    const RS = (typeof retiredCows !== 'undefined' ? retiredCows : []).filter(r => r.shipDate && inY(r.shipDate) && Number(r.salePrice) > 0 && (b === 'all' || _annBreed(r.breed) === b));
+    R['ret_amt_' + b] = RS.length ? RS.reduce((s, r) => s + Number(r.salePrice), 0) : null;
+    R['ret_n_' + b] = RS.length || null;
+    R['ret_avg_' + b] = RS.length ? R['ret_amt_' + b] / RS.length : null;
     R['ship_bms_' + b] = avg(L.map(r => Number(r.bms)).filter(v => v > 0));
     const g = L.filter(r => /[A-C]?\d/.test(String(r.meatGrade || '')));
     R['ship_a4_' + b] = g.length ? pct(g.filter(r => +(String(r.meatGrade).match(/\d/) || [0])[0] >= 4).length, g.length) : null;
@@ -9314,6 +9321,10 @@ const KPI_DEF = [
   ['ship_up', '枝肉単価', '円/kg', 0, 1, true],
   ['ship_a4', 'A4以上の割合', '%', 1, 1, true],
   ['ship_bms', 'BMS平均', '', 1, 1, true],
+  ['sec', '🚚 廃用肥育の売値'],
+  ['ret_amt', '売値の合計', '万円', 0, 1, true, 10000],
+  ['ret_n', '売値を入れた頭数', '頭', 0, 1, true],
+  ['ret_avg', '1頭あたりの売値', '万円', 1, 1, true, 10000],
   ['sec', '🐄 繁殖'],
   ['calv_int', '平均分娩間隔', 'か月', 1, -1],
   ['ins_le2', '2回以内で受胎した割合（経産）', '%', 1, 1],
@@ -13122,18 +13133,18 @@ async function openSyncDiag() {
 let _lostData = null;
 async function openLostRecover() {
   const from = new Date(Date.now() - 3 * 86400000).toISOString();
-  const srcCows = [], srcCalves = [], srcTasks = [];
-  try { _histLoad().filter(e => e && e.t >= from && e.after).forEach(e => { if (e.k === 'cows') srcCows.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); if (e.k === 'calves') srcCalves.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); }); } catch (e) {}
+  const srcCows = [], srcCalves = [], srcTasks = [], srcRecs = [];
+  try { _histLoad().filter(e => e && e.t >= from && e.after).forEach(e => { if (e.k === 'cows') srcCows.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); if (e.k === 'calvingRecords') srcRecs.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); if (e.k === 'calves') srcCalves.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); }); } catch (e) {}
   const db = window._fbDb, key = String(window._DATA_PATH || '').split('/').pop();
   if (db && key) {
     appAlert('バックアップを調べています…');
     for (let i = 0; i <= 3; i++) {
       const d = addDays(today(), -i);
-      for (const k of ['cows', 'calves', 'tasks']) {
+      for (const k of ['cows', 'calves', 'tasks', 'calvingRecords']) {
         try {
           const v = (await db.ref(`backups/${key}/${d}/${k}`).once('value')).val(); if (!v) continue;
           const L = typeof v === 'string' ? JSON.parse(v) : v; if (!Array.isArray(L)) continue;
-          (k === 'cows' ? srcCows : k === 'calves' ? srcCalves : srcTasks).push(...L.map(o => ({ o, from: fmtDate(d) + 'のバックアップ' })));
+          (k === 'cows' ? srcCows : k === 'calves' ? srcCalves : k === 'calvingRecords' ? srcRecs : srcTasks).push(...L.map(o => ({ o, from: fmtDate(d) + 'のバックアップ' })));
         } catch (e) {}
       }
     }
@@ -13145,6 +13156,18 @@ async function openLostRecover() {
     const c = cows.find(x => x.id === o.id); if (!c) return;
     (o.events || []).filter(e => e && e.type === 'move').forEach(e => { if (!(c.events || []).some(x => x.type === 'move' && x.date === e.date && x.to === e.to)) add('cowMove', c.id, `${c.id} ${cowDisplayName(c.id) || ''}　${fmtDate(e.date)} → ${e.to}`, e, from); });
     (o.tags || []).forEach(t => { if (!(c.tags || []).includes(t)) add('tag', c.id, `${c.id} ${cowDisplayName(c.id) || ''}　🏷 ${t}`, t, from); });
+    // ★ 2026/11/20：お産（母牛が分娩後になった記録）が消えていたら戻す
+    if (o.calvingDate && (!c.calvingDate || o.calvingDate > c.calvingDate)) add('calving', c.id, `${c.id} ${cowDisplayName(c.id) || ''}　🍼 お産 ${fmtDate(o.calvingDate)}（今は「${c.status === 'pregnant' ? '妊娠中' : c.status || ''}」）`,
+      { calvingDate: o.calvingDate, status: o.status, lactation: o.lactation, dueDate: o.dueDate || null, ev: (o.events || []).filter(e => e && e.type === 'calving' && e.date === o.calvingDate) }, from);
+  });
+  srcCalves.forEach(({ o, from }) => {
+    if (!o || !o.id || calves.some(x => x.id === o.id)) return;
+    if (o.earTagId && calves.some(x => x.earTagId && x.earTagId === o.earTagId)) return;
+    add('calf', o.id, `🍼 子牛 ${o.earTagId || '耳標なし'}　${o.dob ? fmtDate(o.dob) + '生まれ' : ''}　母 ${o.damId || '?'}${o.sex ? '・' + (o.sex === '雄' ? '♂' : o.sex === '雌' ? '♀' : o.sex) : ''}`, o, from);
+  });
+  srcRecs.forEach(({ o, from }) => {
+    if (!o || !o.id || calvingRecords.some(x => x.id === o.id)) return;
+    add('calvRec', o.id, `📋 分娩記録 ${o.date ? fmtDate(o.date) : ''}　母 ${o.cowId || o.damId || '?'}`, o, from);
   });
   srcCalves.forEach(({ o, from }) => {
     const c = calves.find(x => x.id === o.id); if (!c) return;
@@ -13157,11 +13180,11 @@ async function openLostRecover() {
   });
   _lostData = items;
   document.getElementById('lost-modal')?.remove();
-  const G = [['cowMove', '🏠 牛舎の移動（親牛）'], ['calfMove', '🏠 牛舎の移動（子牛）'], ['tag', '🏷 タグ（親牛）'], ['calfTag', '🏷 タグ（子牛）'], ['taskDone', '✓ タスクのチェック']];
+  const G = [['calving', '🍼 お産（母牛）'], ['calf', '🍼 子牛'], ['calvRec', '📋 分娩記録'], ['cowMove', '🏠 牛舎の移動（親牛）'], ['calfMove', '🏠 牛舎の移動（子牛）'], ['tag', '🏷 タグ（親牛）'], ['calfTag', '🏷 タグ（子牛）'], ['taskDone', '✓ タスクのチェック']];
   const w = document.createElement('div'); w.id = 'lost-modal';
   w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9300;display:flex;align-items:center;justify-content:center;padding:12px;';
   w.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;width:100%;max-width:560px;max-height:92vh;overflow:auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>🩹 消えた移動・タグ・チェックを取り戻す</b><button class="modal-close" onclick="document.getElementById('lost-modal').remove()">✕</button></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>🩹 消えた記録を取り戻す（お産・移動・タグ・チェック）</b><button class="modal-close" onclick="document.getElementById('lost-modal').remove()">✕</button></div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6;">ここ3日の変更履歴とクラウドのバックアップにあって、今は無いものです。わざと消したものはチェックを外してください。</div>
     ${items.length ? G.map(([k, l]) => { const L = items.map((x, i) => ({ x, i })).filter(o => o.x.kind === k); if (!L.length) return '';
       return `<div style="font-size:13px;font-weight:700;margin:12px 0 4px;">${l}（${L.length}）　<button class="st-act" onclick="document.querySelectorAll('.lost-${k}').forEach(c=>c.checked=true)">全部</button> <button class="st-act" onclick="document.querySelectorAll('.lost-${k}').forEach(c=>c.checked=false)">外す</button></div>
@@ -13188,6 +13211,19 @@ function runLostRecover() {
       else { c.tags = c.tags || []; if (!c.tags.includes(x.data)) c.tags.push(x.data); }
     } else if (x.kind === 'taskDone') {
       const t = tasks.find(o => o.id === x.id); if (t && !t.done) { t.done = true; t._mt = now; }
+    } else if (x.kind === 'calving') {
+      const c = cows.find(o => o.id === x.id); if (!c) return; const d = x.data;
+      if (!c.calvingDate || d.calvingDate > c.calvingDate) {
+        c.calvingDate = d.calvingDate; if (d.status) c.status = d.status;
+        if (d.lactation != null && (+d.lactation || 0) > (+c.lactation || 0)) c.lactation = d.lactation;
+        if (!d.dueDate) delete c.dueDate; else c.dueDate = d.dueDate;
+        c.events = c.events || []; (d.ev || []).forEach(e => { if (!c.events.some(y => y.type === 'calving' && y.date === e.date)) c.events.push(JSON.parse(JSON.stringify(e))); });
+        c._mt = now;
+      }
+    } else if (x.kind === 'calf') {
+      if (!calves.some(o => o.id === x.id)) { const o = JSON.parse(JSON.stringify(x.data)); o._mt = now; calves.push(o); }
+    } else if (x.kind === 'calvRec') {
+      if (!calvingRecords.some(o => o.id === x.id)) { const o = JSON.parse(JSON.stringify(x.data)); o._mt = now; calvingRecords.push(o); }
     }
   });
   save(); try { renderAll(); } catch (e) {}
@@ -23448,7 +23484,7 @@ function printCertPreview(){
   // 証明書は幅297mm（A4横の全幅）で、内側に余白を持っているためページ余白は0にする
   // 余白を取ると幅が足りず、はみ出した分が次のページに送られてしまう
   printIsolated('cert-preview-container', '証明書', {size:'A4 landscape', margin:'0'});
-  try { _askMarkCalfCertsAfterPrint(); } catch (e) {}
+  try { if (window._certPageAfter && window.nuiCertAfterPrint) nuiCertAfterPrint(); else _askMarkCalfCertsAfterPrint(); } catch (e) {}
 }
 // 証明書の発行オプション（体外受精胚か／他所の獣医師か）を反映して作り直す
 function applyCertOptions(){
@@ -23471,6 +23507,7 @@ function toggleExtVetInput(){
 }
 let _lastCertRecords = null;
 function openEtCertPreview(records) {
+  window._certPageAfter = null;
   var modal = document.getElementById('modal-cert-preview');
   if (!modal) return;
   _lastCertRecords = records;
@@ -23744,6 +23781,7 @@ function updateEggCartBadge() {
 }
 
 function openEggCartPreview() {
+  window._certPageAfter = null;
   if(!eggCertCart.length){
     // カートが空でもモーダルを開いて手入力ボタンを表示
     document.getElementById('egg-cert-list').innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px;">カートが空です。採卵記録から胚を追加するか、手入力で印刷してください。</div>';
@@ -24030,6 +24068,7 @@ function printSelectedEggCerts(side) {
     document.head.appendChild(styleEl);
     // 画面全体ではなく証明書だけを独立して印刷する（Macでの白紙・大量ページ対策）
     printIsolated('egg-cert-print-container', '受精卵証明書', {size:'A4 portrait', margin:'0', pageSelector:'.egg-cert-page', pageWidth:'210mm'});
+    try { if (window._certPageAfter && window._certPageAfter.kind === 'egg' && window.nuiCertAfterPrint) nuiCertAfterPrint(); } catch (e) {}
     setTimeout(function(){
       var el = document.getElementById('egg-cert-print-style');
       if(el) el.remove();
@@ -24627,6 +24666,7 @@ function printSelectedCerts() {
 }
 
 function openCertPreview(records) {
+  window._certPageAfter = null;
   var modal = document.getElementById('modal-cert-preview');
   if (!modal) return;
   var container = document.getElementById('cert-preview-container');
@@ -26579,6 +26619,39 @@ const SCORE_STAGES = ['育成舎①', '育成舎②', '出荷'];
 function getBarns() { const b = (typeof farmTargets !== 'undefined' && farmTargets && farmTargets._barns) || null; const cb = window.FARM_CFG && window.FARM_CFG.barns; return Array.isArray(b) && b.length ? b : Array.isArray(cb) && cb.length ? cb : DEFAULT_BARNS; }
 function cowMoves(cow) { return (cow.events || []).map((e, i) => ({ ...e, _idx: i })).filter(e => e.type === 'move').sort((a, b) => a.date.localeCompare(b.date)); }
 function cowLocation(cow) { const m = cowMoves(cow); return m.length ? m[m.length - 1].to : ''; }
+// ★ 2026/11/20：体格（1小〜5大）をあとから直す。生まれた時と、育成舎①・育成舎②・出荷へ移したときの体格
+function editCalfScores(calfId) {
+  const calf = calves.find(c => c.id === calfId); if (!calf) return;
+  const rows = [{ k: 'birth', label: '生まれた時', date: calf.dob, v: +(calf.weight || calf.size) || 0 }]
+    .concat((calf.moves || []).map((m, i) => ({ k: i, label: m.to, date: m.date, v: +m.score || 0, stage: SCORE_STAGES.includes(m.to) })).filter(r => r.stage || r.v));
+  window._ces = { id: calfId, v: Object.fromEntries(rows.map(r => [r.k, r.v])) };
+  const btns = r => [1, 2, 3, 4, 5].map(n => `<button type="button" data-ces="${r.k}" data-n="${n}" onclick="_cesSet('${r.k}',${n})" style="width:40px;height:40px;border-radius:9px;font-weight:900;font-size:15px;cursor:pointer;border:1px solid ${r.v === n ? 'var(--accent2)' : 'var(--border)'};background:${r.v === n ? 'var(--accent2)' : 'transparent'};color:${r.v === n ? '#000' : 'var(--text)'};">${n}</button>`).join('');
+  document.getElementById('confirm-title').innerHTML = `✏ 体格を直す — ${_stEsc(calf.earTagId || '耳標なし')}`;
+  document.getElementById('confirm-body').innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">1小〜5大。同じ数字をもう一度押すと空にします。</div>
+    ${rows.map(r => `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--border);"><div style="flex:1;min-width:0;"><b>${_stEsc(r.label)}</b><div style="font-size:11px;color:var(--muted);">${r.date ? fmtDate(r.date) : ''}</div></div>${btns(r)}</div>`).join('')}
+    ${rows.length === 1 ? '<div style="font-size:11px;color:var(--muted);margin-top:6px;">育成舎①・育成舎②・出荷へ移すと、そのときの体格もここで直せます。</div>' : ''}`;
+  const ok = document.getElementById('confirm-ok-btn');
+  ok.textContent = '保存する'; ok.style.cssText = '';
+  ok.onclick = () => {
+    const V = window._ces.v;
+    Object.entries(V).forEach(([k, v]) => {
+      if (k === 'birth') {
+        if (v) calf.weight = v; else delete calf.weight;
+        // 分娩の記録の体格も合わせる（双子で1つの記録を分けているときは子牛の方だけ）
+        const rec = calvingRecords.find(r => r.id === calf.calvingRecordId);
+        if (rec && calves.filter(c => c.calvingRecordId === calf.calvingRecordId).length <= 1) { if (v) rec.sizeScore = v; else delete rec.sizeScore; }
+      } else { const m = (calf.moves || [])[+k]; if (m) { if (v) m.score = v; else delete m.score; } }
+    });
+    save(); closeModal('modal-confirm');
+    try { renderAll(); } catch (e) {}
+    showCalfStory(calfId);
+  };
+  openModal('modal-confirm');
+}
+function _cesSet(k, n) {
+  const V = window._ces.v; V[k] = V[k] === n ? 0 : n;
+  document.querySelectorAll(`[data-ces="${k}"]`).forEach(b => { const on = +b.dataset.n === V[k]; b.style.background = on ? 'var(--accent2)' : 'transparent'; b.style.color = on ? '#000' : 'var(--text)'; b.style.borderColor = on ? 'var(--accent2)' : 'var(--border)'; });
+}
 function calfMoves(calf) { return (calf.moves || []).map((m, i) => ({ ...m, _idx: i })).sort((a, b) => a.date.localeCompare(b.date)); }
 function calfLocation(calf) { const m = calfMoves(calf); return m.length ? m[m.length - 1].to : ''; }
 // 子牛の体格の移り変わり（育成舎①・育成舎②・出荷の節目だけ。生時の体格は評価に入れない）
@@ -26955,9 +27028,10 @@ function showCalfStory(calfId) {
       ${calf.nationalId ? `個体識別番号 <span style="color:var(--text);font-family:'JetBrains Mono',monospace;">${esc(calf.nationalId)}</span><br>` : ''}
       ${[calf.sire, calf.maternalSire, calf.maternalGrandSire].filter(Boolean).length ? `🐄 血統 <span style="color:var(--text);font-weight:500;">${esc([calf.sire, calf.maternalSire, calf.maternalGrandSire].filter(Boolean).join(' × '))}</span>` : ''}
     </div>` : ''}
-    ${(() => { const v = calfVerdict(calf); const sc = calfScores(calf); if (!sc.length) return '';
+    ${(() => { const v = calfVerdict(calf); const sc = calfScores(calf); const bs = +(calf.weight || calf.size) || 0; if (!sc.length && !bs) return '';
       return `<div style="background:var(--bg3);border:1px solid ${v && v.bad ? (v.final ? '#ef4444' : '#f59e0b') : 'var(--border)'};border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12px;">
-        <b>体格の移り変わり</b>：${sc.map(x => `${esc(x.stage)} <b>${x.score}</b>`).join(' → ')}
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><span><b>体格の移り変わり</b>：${bs ? '生時 <b>' + bs + '</b>' + (sc.length ? ' → ' : '') : ''}${sc.map(x => `${esc(x.stage)} <b>${x.score}</b>`).join(' → ')}</span>
+        <button class="st-act" style="flex-shrink:0;" onclick="editCalfScores('${esc(calf.id)}')">✏ 直す</button></div>
         ${v && v.bad ? `<div style="color:${v.final ? '#ef4444' : '#f59e0b'};margin-top:3px;">${v.final ? '🚫 出荷時の体格が' + v.score + '。母 ' + esc(calf.damId || '') + ' × ' + esc(calf.sire || '') + ' は相性が悪いとみなします' : '⚠ ' + esc(v.stage) + 'で体格' + v.score + '（途中の評価）'}${v.ill ? '（治療歴あり：病気の影響かも）' : ''}</div>` : ''}
         ${v && v.declining && !v.bad ? '<div style="color:var(--warn);margin-top:3px;">伸びが悪い（だんだん下がっている）</div>' : ''}
       </div>`; })()}
@@ -30930,6 +31004,24 @@ function renderHomerun(recs){
       ${(()=>{ const s=hrSum(); return `<span style="font-size:11px;font-weight:800;color:${s===100?'var(--accent)':'var(--danger)'};">合計 ${s}%</span>`
         + (s!==100 ? `<button onclick="normalizeHrW()" style="background:var(--accent);border:none;color:#fff;font-size:10px;font-weight:700;padding:4px 8px;border-radius:5px;cursor:pointer;">100%に揃える</button>` : ''); })()}
     </div>` : ''}`;
+  if (document.documentElement.classList.contains('nui')) {
+    // 新しい画面：母牛別と同じ1枚のカード（並べ方▼＋ベスト/ワースト、配分は1行と「変える ›」）
+    const opts = [['total','総合スコア'],['wM','枝重（去勢♂）'],['wF','枝重（未経産♀）'],['bms','BMS'],['grade','等級']];
+    const s = hrSum();
+    const card = `<div id="nfat-hr" style="background:#171b26;border:1px solid #2a3050;border-radius:12px;padding:10px 12px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="font-size:12px;color:#94a3b8;">並べ方</span>
+        <select onchange="setHrMode(this.value)" style="flex:1;min-width:110px;width:auto;margin:0;height:36px;border-radius:9px;border:1px solid #2a3050;background:#0f1117;color:#e2e8f0;font-size:14px;font-weight:700;padding:0 8px;font-family:inherit;">${opts.map(([v,l])=>`<option value="${v}" ${hrMode===v?'selected':''}>${l}</option>`).join('')}</select>
+        <div class="nui-seg" style="flex:0 0 auto;"><button style="padding:0 14px;white-space:nowrap;" class="${!fatRankWorst?'on':''}" onclick="setFatRankOrder(false)">ベスト</button><button style="padding:0 14px;white-space:nowrap;" class="${fatRankWorst?'on':''}" onclick="setFatRankOrder(true)">ワースト</button></div>
+      </div>
+      ${hrMode==='total' ? `<div style="font-size:12px;color:#94a3b8;margin-top:8px;line-height:1.6;">総合＝枝重${HR_W.weight}・肉質等級${HR_W.grade}・歩留率${HR_W.yieldRate}${s!==100?` <b style="color:#fbbf24;">（合計${s}%）</b>`:''}
+        <button onclick="window._hrPatOpen=!window._hrPatOpen;renderFattening()" style="background:none;border:none;color:#4ade80;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit;padding:0;">${window._hrPatOpen?'閉じる':'変える ›'}</button></div>
+        ${window._hrPatOpen ? `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">${[['weight','枝重'],['grade','肉質等級'],['yieldRate','歩留率']].map(([k,l])=>`<label style="font-size:13px;color:#cbd5e1;display:inline-flex;align-items:center;gap:4px;">${l}<input type="number" min="0" max="100" step="5" value="${HR_W[k]}" onchange="setHrW('${k}',this.value)" style="width:60px;height:34px;margin:0;font-size:14px;padding:0 6px;background:#0f1117;border:1px solid #2a3050;color:#e2e8f0;border-radius:8px;text-align:right;"></label>`).join('')}
+          <span style="font-size:12px;font-weight:700;color:${s===100?'#4ade80':'#fbbf24'};">合計 ${s}%</span>${s!==100?`<button class="nui-chip" onclick="normalizeHrW()">100%に揃える</button>`:''}</div>` : ''}` : (hrMode==='wM'||hrMode==='wF' ? '<div style="font-size:12px;color:#94a3b8;margin-top:8px;">枝重は♂♀を分けて並べます</div>' : '')}
+      <div style="font-size:11px;color:#64748b;margin-top:6px;">全産子${rows.length}頭を1頭ずつ並べます${cap<rows.length?`（上位${cap}頭）`:''}。カードをタップすると、その母の全産子が出ます。</div>
+    </div>`;
+    return card + cards;
+  }
   return note + cards;
 }
 // 月別グラフの点をタップしたとき、その月の枝肉成績の明細を表示する
@@ -32307,6 +32399,7 @@ function renderRetiredList() {
  <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button onclick="showCowDetail('${cow.id}')" style="background:var(--bg3);border:1px solid var(--info);color:var(--info);font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;">📖 ストーリー</button>
           ${cow.retireExit === 'fatten' && !cow.shipDate ? `<button onclick="recordRetiredShip('${cow.id}')" style="background:var(--bg3);border:1px solid var(--warn);color:var(--warn);font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;">🚚 出荷を記録</button>` : ''}
+          ${cow.retireExit === 'fatten' && cow.shipDate ? `<button onclick="openRetiredPrice('${cow.id}')" style="background:var(--bg3);border:1px solid var(--warn);color:var(--warn);font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;">💴 ${cow.salePrice ? '売値を直す' : '売値を入れる'}</button>` : ''}
           <button onclick="restoreRetiredCow('${cow.id}')" style="background:var(--bg3);border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;">↩ 個体タブに戻す</button>
           <button onclick="deleteRetiredCow('${cow.id}')" style="background:none;border:1px solid var(--danger);color:var(--danger);font-size:12px;padding:6px 12px;border-radius:8px;cursor:pointer;">🗑 完全削除</button>
         </div>
@@ -32435,13 +32528,15 @@ function recordRetiredShip(cowId) {
   document.getElementById('confirm-body').innerHTML = `
     <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">廃用日 ${fmtDate(rc.retireDate)}${rc.shipPlan ? '・出荷予定 ' + fmtDate(rc.shipPlan) : ''}</div>
     <div class="form-group" style="margin-bottom:8px;"><label>出荷日</label><input type="date" id="ship-date-input" value="${today()}"></div>
-    <div class="form-group" style="margin-bottom:0;"><label>メモ（出荷先・枝重など）</label><input type="text" id="ship-memo-input" placeholder="例: 帯広市場 / 枝重420kg"></div>`;
+    <div class="form-group" style="margin-bottom:8px;"><label>💴 売値（円）<span style="font-weight:400;color:var(--muted);">　あとからでも入れられます</span></label><input type="text" inputmode="numeric" id="ship-price-input" placeholder="例: 650000"></div>
+    <div class="form-group" style="margin-bottom:0;"><label>メモ（出荷先など）</label><input type="text" id="ship-memo-input" placeholder="例: 帯広市場"></div>`;
   const ok = document.getElementById('confirm-ok-btn');
   ok.textContent = '記録する'; ok.style.cssText = '';
   ok.onclick = () => {
     rc.shipDate = document.getElementById('ship-date-input').value || today();
     const sm = document.getElementById('ship-memo-input').value.trim();
     if (sm) rc.shipMemo = sm;
+    const pv = _salePriceNum(document.getElementById('ship-price-input').value); if (pv) rc.salePrice = pv;
     save();
     closeModal('modal-confirm');
     renderRetiredList();
@@ -32450,6 +32545,27 @@ function recordRetiredShip(cowId) {
   };
   openModal('modal-confirm');
 }
+// ★ 2026/11/20：廃用肥育は売値だけを入れる（牛の salePrice に円で入れる）
+function _salePriceNum(v) { v = String(v || '').replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).replace(/[,，円\s]/g, ''); const m = v.match(/^(\d+(?:\.\d+)?)(万)?$/); if (!m) return null; const n = Math.round(parseFloat(m[1]) * (m[2] ? 10000 : 1)); return n > 0 ? n : null; }
+function openRetiredPrice(cowId) {
+  const rc = retiredCows.find(c => c.id === cowId); if (!rc) return;
+  document.getElementById('confirm-title').innerHTML = `💴 売値 — ${_stEsc(cowId)} ${_stEsc(rc.name || cowDisplayName(cowId) || '')}`;
+  document.getElementById('confirm-body').innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">出荷 ${rc.shipDate ? fmtDate(rc.shipDate) : '—'}（廃用 ${fmtDate(rc.retireDate)}）</div>
+    <div class="form-group" style="margin-bottom:0;"><label>売値（円）</label><input type="text" inputmode="numeric" id="ship-price-input" value="${rc.salePrice || ''}" placeholder="例: 650000（「65万」でも入ります）" style="font-size:18px;"></div>`;
+  const ok = document.getElementById('confirm-ok-btn');
+  ok.textContent = '保存する'; ok.style.cssText = '';
+  ok.onclick = () => {
+    const raw = document.getElementById('ship-price-input').value.trim(), pv = _salePriceNum(raw);
+    if (raw && !pv) { appAlert('売値は数字で入れてください（例：650000 または 65万）'); return; }
+    if (pv) rc.salePrice = pv; else delete rc.salePrice;
+    save(); closeModal('modal-confirm');
+    try { renderRetiredList(); } catch (e) {} try { if (typeof nuiShipList === 'function' && document.querySelector('#nui-scr .sh') && /出荷した牛/.test(document.querySelector('#nui-scr .sh').textContent)) nuiShipList(); } catch (e) {}
+    const mc = document.getElementById('modal-cow'); if (mc && mc.classList.contains('open')) showCowDetail(cowId);
+  };
+  openModal('modal-confirm');
+  setTimeout(() => { const i = document.getElementById('ship-price-input'); if (i) i.focus(); }, 60);
+}
+function retiredPriceText(cow) { return cow && cow.salePrice ? '売値 ' + Number(cow.salePrice).toLocaleString() + '円' : ''; }
 
 function deleteRetiredCow(cowId) {
   document.getElementById('confirm-title').innerHTML = `🗑 廃用牛を完全削除`;
@@ -33686,7 +33802,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112005';
+const APP_BUILD = '2026112011';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -34445,6 +34561,26 @@ html.hx-collection #nui-side [data-p="collection"], html.hx-collection #page-mor
 #page-more .nui-tile{background:#1a1f2e;border-color:#2a3050;color:#e2e8f0;}
 @media (min-width:700px){#page-more .g3{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));} #page-more .nui-tile{padding:14px 4px;}}
 html.nui #page-home #barn-board{margin-bottom:0 !important;}
+#nfat-top{margin-bottom:10px;}
+#nfat-top .nfat-h{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+#nfat-top .nfat-h .t{flex:1;font-size:20px;font-weight:900;}
+#nfat-top .nfat-l{font-size:12px;color:#94a3b8;margin:0 2px 5px;}
+#nfat-top .nfat-seg{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:#171b26;border:1px solid #2a3050;border-radius:12px;padding:4px;margin-bottom:10px;}
+#nfat-top .nfat-seg button{height:40px;border-radius:9px;border:none;background:transparent;color:#94a3b8;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
+#nfat-top .nfat-seg button.on{background:#14532d;color:#4ade80;}
+#nfat-top .nfat-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+#nfat-top .nfat-chips #fat-year-btn,#nfat-top .nfat-chips #fat-farmer-btn{height:auto !important;font-size:12px !important;font-weight:700;border:1px solid #2a3050 !important;background:#1e2333 !important;color:#cbd5e1 !important;border-radius:999px !important;padding:6px 11px !important;font-family:inherit;}
+#nfat-top .nfat-p{background:#171b26;border:1px solid #2a3050;border-radius:12px;padding:10px;margin:8px 0;}
+#nfat-top #nfat-csvp #fat-drop-zone{margin:0 !important;border:none !important;background:none !important;padding:4px !important;}
+#nfat-top #nfat-fltp{display:flex;gap:6px;flex-wrap:wrap;}
+#nfat-top #nfat-fltp label{height:36px !important;border-radius:999px !important;}
+#nfat-top #nfat-morep{display:flex;flex-direction:column;gap:6px;}
+#nfat-top #nfat-morep button{height:42px !important;width:100%;text-align:left;font-size:14px !important;font-weight:700;border:1px solid #2a3050 !important;background:#1e2333 !important;color:#e2e8f0 !important;border-radius:10px !important;padding:0 14px !important;font-family:inherit;}
+#nfat-top .nfat-note{font-size:12px;color:#94a3b8;margin:6px 2px 0;}
+#nfat-top .nfat-note:empty{display:none;}
+#nfat-top .nfat-card{background:#171b26;border:1px solid #2a3050;border-radius:12px;padding:10px 12px;margin-top:10px;}
+#nfat-top .nfat-card .nui-seg button{white-space:nowrap;}
+#nfat-top .nfat-sel{flex:1;min-width:110px;width:auto !important;margin:0 !important;height:36px;border-radius:9px;border:1px solid #2a3050;background:#0f1117;color:#e2e8f0;font-size:14px;font-weight:700;padding:0 8px;font-family:inherit;}
 @media print{#nui-side,#nui-scr,.nui-ibbar,.nui-ibfoot{display:none !important;} html.nui body{padding-left:0 !important;}}
 </style>
 <script>
@@ -34671,7 +34807,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     return el;
   }
   function scrClose() { document.body.classList.remove('nui-scr-open'); }
-  window.nuiClose = function () { scrClose(); };
+  window.nuiClose = function () { scrClose(); try { if (typeof curPage === 'function') sideMark(curPage()); } catch (e) {} };
   function scrShow(head, body, foot) {
     const el = scr();
     el.innerHTML = `<div class="sh">${head}</div><div class="sb"><div class="wrap">${body}</div></div>${foot ? `<div class="sf"><div class="wrap">${foot}</div></div>` : ''}`;
@@ -35069,8 +35205,221 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     return { fat: A.fat.sort(by), ret: A.ret.sort(by) };
   }
   // 枝肉成績がまだの牛（アプリで出荷を記録して、肥育成績にまだ無い牛）
-  function fatTodo() { const A = appShipped(); return A.fat.concat(A.ret).filter(o => !o.rec).sort((a, b) => b.d.localeCompare(a.d) || String(a.tag).localeCompare(String(b.tag))); }
+  function fatTodo() { const A = appShipped(); return A.fat.filter(o => !o.rec).sort((a, b) => b.d.localeCompare(a.d) || String(a.tag).localeCompare(String(b.tag))); }
   window.nuiShipTodo = function () { try { return fatTodo().length; } catch (e) { return 0; } };
+  // ---------- 📄 証明書（まだ出していないものだけ。授精・移植・受精卵の3種類をここから） ----------
+  // 授精簿は「記録を見る・直す」、ここは「まだ出していないものを出す」。印刷すると発行済みになって一覧から消える
+  let CP = null;
+  const CERT_FROM = '2026-10-01';   // 移植・受精卵は、この日から後を「まだ」として数える（前のものは「発行済みを見る」から出せる）
+  const cpOn = { et: () => !(window.FARM_FEAT && FARM_FEAT.etCert === false), egg: () => !(typeof _hx === 'function' && _hx('collection')) && typeof collectionRecordsNew !== 'undefined' && collectionRecordsNew.length > 0 };
+  function cpBook() {
+    const out = [];
+    (typeof INSEM_BOOK_DATA !== 'undefined' ? INSEM_BOOK_DATA : []).forEach((r, i) => { const ed = insemBookEdits['static_' + i] || {}; if (ed._deleted) return; out.push({ ...r, ...ed, _src: 'static', _idx: i }); });
+    (typeof insemBookRecords !== 'undefined' ? insemBookRecords : []).forEach((r, i) => { const ed = insemBookEdits['dynamic_' + i] || {}; if (ed._deleted || r._deleted) return; out.push({ ...r, ...ed, q: r.q != null && r.q !== '' ? r.q : ed.q, _src: 'dynamic', _idx: i }); });
+    return out;
+  }
+  const cpIsEtRow = r => r.insemType === 'et' || String(r.s || '').includes('×') || String(r.m || '').startsWith('胚番号:');
+  const cpIsEtCalf = c => c.insemType === 'et' || !!c.embryoNo || !!c.donor;
+  const cpRowOf = (c, B) => c.damId && c.insemDate ? B.find(r => r.t === c.damId && r.d === c.insemDate) : null;
+  // 授精証明書に使う授精簿の行（受精卵の子はドナーの授精の行）
+  function cpAiRows(c, B) {
+    const r = cpRowOf(c, B); if (!r) return [];
+    if (!cpIsEtRow(r)) return [r];
+    const col = (collectionRecordsNew || []).find(cr => cr.lot === String(r.s || '').replace(/-\d+$/, ''));
+    if (!col || !col.aiDates || !col.aiDates.length || !col.donorId) return [];
+    return col.aiDates.map(ai => B.find(x => x.t === col.donorId && x.d === ai.date && !String(x.op || '').replace(/在庫反映.*$/, '').trim())).filter(Boolean);
+  }
+  function cpSetQ(src, idx, q) {
+    if (src === 'dynamic') { const r = insemBookRecords[idx]; if (!r) return; r.q = q; const ed = insemBookEdits['dynamic_' + idx]; if (ed && 'q' in ed) ed.q = q; }
+    else { const k = src + '_' + idx; insemBookEdits[k] = insemBookEdits[k] || {}; insemBookEdits[k].q = q; }
+  }
+  function cpNextNo(B) {
+    const from = addDays(today(), -400);
+    const nums = B.filter(r => (r.d || '') >= from).map(r => String(r.q || '').trim()).filter(q => /^\d+$/.test(q)).map(Number).sort((a, b) => a - b);
+    const med = nums.length ? nums[Math.floor(nums.length / 2)] : 0;
+    const ok = nums.filter(n => !med || (n >= med * 0.5 && n <= med * 1.5 + 100));
+    return (ok.length ? Math.max(...ok) : 0) + 1;
+  }
+  function cpEmbryos(col) {   // updateEggCart と同じ並び（番号はカートの idx になる）
+    const fr = (col.frozenEmbryos || []).map(e => ({ e, k: '❄凍結' })), fs = (col.freshEmbryos || []).map(e => ({ e, k: '🌱新鮮' }));
+    const cu = (col.cultureEmbryos || []).filter(e => e.cultureResult === 'freeze' || e.cultureResult === 'et').map(e => ({ e: { ...e, no: e.embryoNo, cane: e.caneNo, stage: e.cultureStage || e.stage, rank: e.cultureRank || e.rank }, k: '🧫培養' }));
+    return fr.concat(fs).concat(cu).map((x, i) => ({ idx: i, no: String(x.e.no || x.e.embryoNo || ''), cane: x.e.cane || x.e.caneNo || '', stage: x.e.stage || '', rank: x.e.rank || '', kind: x.k })).filter(x => x.no);
+  }
+  const yAgo = () => addDays(today(), -365);
+  function cpItems(tab, done) {
+    const B = cpBook();
+    if (tab === 'ai') {
+      const L = calves.filter(c => c.status !== 'dead' && (done ? c.authCertIssued && (String(c.authCertIssued) >= yAgo() || (c.dob || '') >= yAgo()) : calfNeedsCert(c)));
+      return L.sort((a, b) => (a.dob || '').localeCompare(b.dob || '')).map(c => ({ key: c.id, c, row: cpRowOf(c, B), ai: cpAiRows(c, B), et: cpIsEtCalf(c) }));
+    }
+    if (tab === 'et') {
+      const L = calves.filter(c => c.status !== 'dead' && cpIsEtCalf(c) && (c.dob || '') >= yAgo()).filter(c => { let own = false; try { own = !_brOperator(c).op; } catch (e) {} return own; })
+        .filter(c => { const iss = !!c.etCertIssued || (c.dob || '') < CERT_FROM; return done ? iss : !iss; });
+      return L.sort((a, b) => (a.dob || '').localeCompare(b.dob || '')).map(c => ({ key: c.id, c, row: cpRowOf(c, B) }));
+    }
+    const out = [];
+    (collectionRecordsNew || []).filter(col => (col.date || '') >= yAgo()).sort((a, b) => (b.date || '').localeCompare(a.date || '')).forEach(col => {
+      const D = col.eggCertDone || {};
+      cpEmbryos(col).forEach(x => { const iss = !!D[x.no] || (col.date || '') < CERT_FROM; if (done ? iss : !iss) out.push({ key: col.id + '|' + x.idx, col, x, iss: D[x.no] || '' }); });
+    });
+    return out;
+  }
+  function cpCount(tab) { try { return cpItems(tab, false).length; } catch (e) { return 0; } }
+  window.nuiCertTodo = () => cpCount('ai') + (cpOn.et() ? cpCount('et') : 0) + (cpOn.egg() ? cpCount('egg') : 0);
+  const cpBox = on => `<span class="cp-bx" style="flex-shrink:0;width:24px;height:24px;border-radius:6px;border:2px solid ${on ? '#22c55e' : '#475569'};background:${on ? '#16a34a' : 'transparent'};display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;font-weight:900;">${on ? '✓' : ''}</span>`;
+  const qIn = (r, lab) => { const q = String(r.q || '').trim(); return `<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#94a3b8;" onclick="event.stopPropagation()">${lab ? esc(lab) + ' ' : ''}No.<input inputmode="numeric" value="${esc(q)}" placeholder="未記入" onchange="nuiCpQ('${r._src}',${r._idx},this)" style="width:70px;height:32px;border-radius:8px;border:1.5px solid ${q ? '#2a3050' : '#f59e0b'};background:${q ? '#0f1117' : '#1a0f00'};color:#e2e8f0;font-size:15px;font-weight:700;text-align:center;font-family:inherit;"></label>`; };
+  function cpRowHTML(it) {
+    const on = CP.sel.has(it.key), k = jsq(it.key);
+    if (CP.tab === 'egg') {
+      const x = it.x;
+      return `<div class="cp-r" data-k="${esc(it.key)}" onclick="nuiCpT('${k}')" style="display:flex;align-items:center;gap:10px;padding:9px 4px 9px 14px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;">${cpBox(on)}
+        <span style="flex:1;min-width:0;"><span class="nui-mono" style="font-weight:700;">${esc(x.no)}</span> <span style="font-size:12px;color:#94a3b8;">${esc([x.kind, x.cane, [x.stage, x.rank].filter(Boolean).join('/')].filter(Boolean).join('・'))}</span>${CP.done && it.iss ? `<br><span style="font-size:11px;color:#64748b;">${esc(md(it.iss))} 発行</span>` : ''}</span>
+        ${CP.done && it.iss ? `<button class="nui-chip" style="font-size:11px;padding:4px 8px;" onclick="event.stopPropagation();nuiCpUndo('${k}')">まだに戻す</button>` : ''}</div>`;
+    }
+    const c = it.c, ok = !!it.row, sire = c.sire || (it.row && it.row.s) || '';
+    const iss = CP.tab === 'ai' ? c.authCertIssued : c.etCertIssued;
+    let qs = '';
+    if (CP.tab === 'ai' && ok) {
+      if (!it.et) qs = qIn(it.ai[0]);
+      else qs = it.ai.length ? it.ai.map(r => qIn(r, 'ドナー授精 ' + md(r.d))).join(' ') : '<span style="font-size:11px;color:#94a3b8;">ドナーの授精の記録が授精簿にありません</span>';
+    }
+    return `<div class="cp-r" data-k="${esc(it.key)}" ${ok ? `onclick="nuiCpT('${k}')"` : ''} style="display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid rgba(255,255,255,.06);cursor:${ok ? 'pointer' : 'default'};opacity:${ok ? 1 : .6};">${ok ? cpBox(on) : '<span style="width:24px;flex-shrink:0;"></span>'}
+      <span style="flex:1;min-width:0;">
+        <span class="nui-mono" style="font-weight:700;font-size:15px;">${esc(c.earTagId || '耳標なし')}</span> <span style="color:#4ade80;font-weight:700;">${esc(damNameOf(c.damId, c) || '')}</span><span style="font-size:12px;color:#94a3b8;"> の子</span>
+        <div style="font-size:12px;color:#94a3b8;margin-top:1px;">${esc([c.dob ? md(c.dob) + '生まれ' : '', (it.et ? '移植 ' : '授精 ') + (c.insemDate ? md(c.insemDate) : '—'), sire].filter(Boolean).join('・'))}${CP.done && iss ? `・<span style="color:#64748b;">${esc(md(iss))} 発行</span>` : ''}</div>
+        ${ok ? (qs ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;">${qs}</div>` : '') : `<div style="font-size:12px;color:#fbbf24;margin-top:4px;">⚠ 授精簿にこの授精（${esc(c.insemDate ? md(c.insemDate) : '日付なし')}）が見つかりません<br><button class="nui-chip" style="margin-top:6px;font-size:12px;" onclick="event.stopPropagation();nuiCpMark('${k}')">手書きなどで出した → 発行済みにする</button></div>`}
+      </span>
+      ${CP.done && iss ? `<button class="nui-chip" style="font-size:11px;padding:4px 8px;flex-shrink:0;" onclick="event.stopPropagation();nuiCpUndo('${k}')">まだに戻す</button>` : ''}</div>`;
+  }
+  function cpFoot() {
+    const n = CP.sel.size, blank = CP.tab === 'ai' && !CP.done ? cpBlank().length : 0;
+    return `${blank ? `<button onclick="nuiCpFill()" style="width:100%;height:42px;border-radius:10px;border:1.5px solid #b45309;background:#1a0f00;color:#fbbf24;font-size:14px;font-weight:700;margin-bottom:8px;font-family:inherit;cursor:pointer;">No. を続き番号で入れる（${blank}か所）</button>` : ''}
+      <button id="cp-print" onclick="nuiCpPrint()" ${n ? '' : 'disabled'} style="width:100%;height:52px;border-radius:12px;border:none;background:${n ? '#16a34a' : '#1e2333'};color:${n ? '#fff' : '#64748b'};font-size:17px;font-weight:900;font-family:inherit;cursor:${n ? 'pointer' : 'default'};">📄 ${n ? n + '枚を印刷する' : '印刷するものを選んでください'}</button>
+      <div style="font-size:11px;color:#64748b;text-align:center;margin-top:6px;">${CP.done ? '発行済みのものをもう一度印刷できます' : '印刷すると発行済みになり、この一覧から消えます'}</div>`;
+  }
+  function cpBlank() {   // 番号が空の授精簿の行（同じ行は1回）
+    const seen = new Set(), out = [];
+    cpItems('ai', false).forEach(it => (it.row ? it.ai : []).forEach(r => { const k = r._src + '_' + r._idx; if (!seen.has(k) && !String(r.q || '').trim()) { seen.add(k); out.push(r); } }));
+    return out.sort((a, b) => (a.d || '').localeCompare(b.d || ''));
+  }
+  function vCert(keepScroll) {
+    const tabs = [['ai', '💉 授精'], cpOn.et() ? ['et', '🧬 移植'] : null, cpOn.egg() ? ['egg', '🥚 受精卵'] : null].filter(Boolean);
+    if (!tabs.some(t => t[0] === CP.tab)) CP.tab = 'ai';
+    const I = cpItems(CP.tab, CP.done);
+    const okKeys = new Set(I.filter(it => CP.tab === 'egg' || it.row).map(it => it.key));
+    CP.sel = new Set([...CP.sel].filter(k => okKeys.has(k)));
+    let list = '';
+    if (!I.length) list = `<div style="text-align:center;color:#64748b;padding:40px 10px;font-size:14px;">${CP.done ? '発行済みのものはありません' : '✓ まだ出していない証明書はありません'}</div>`;
+    else if (CP.tab === 'egg') {
+      const G = []; I.forEach(it => { const g = G[G.length - 1]; if (g && g.col === it.col) g.L.push(it); else G.push({ col: it.col, L: [it] }); });
+      list = G.map(g => { const inf = _getCollectionEmbryos(g.col.id); const d0 = inf.items[0] || {}; const all = g.L.every(it => CP.sel.has(it.key));
+        return `<div class="nui-card" style="padding:0;margin-bottom:10px;overflow:hidden;">
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:#171b26;"><span style="flex:1;min-width:0;"><b>${esc(md(g.col.date || ''))}</b> <span style="color:#4ade80;font-weight:700;">${esc(d0.dam || '')}</span> × ${esc(d0.sire || g.col.sire || '')}<br><span style="font-size:11px;color:#64748b;">${esc(g.col.lot || '')}・${g.L.length}個</span></span>
+          <button class="nui-chip${all ? ' on' : ''}" onclick="nuiCpG('${jsq(g.col.id)}')">${all ? '✓ 全部' : '全部えらぶ'}</button></div>${g.L.map(cpRowHTML).join('')}</div>`; }).join('');
+    } else list = `<div class="nui-card" style="padding:0 10px;">${I.map(cpRowHTML).join('')}</div>`;
+    const other = CP.tab === 'et' && !CP.done ? `<details style="margin-top:16px;"><summary style="cursor:pointer;font-size:13px;color:#94a3b8;">🐄 他の農家へ出した胚の移植証明書 ▼</summary>
+        <div class="nui-card" style="padding:0 10px;margin-top:6px;">${(collectionRecordsNew || []).filter(c => (c.date || '') >= yAgo()).sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(col => { const d0 = (_getCollectionEmbryos(col.id).items[0]) || {};
+          return `<div class="nui-a" onclick="openEtCertFromCollection('${jsq(col.id)}')" style="display:flex;align-items:center;padding:11px 2px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer;"><span style="flex:1;">${esc(md(col.date || ''))} <span style="color:#4ade80;font-weight:700;">${esc(d0.dam || '')}</span> × ${esc(d0.sire || '')} <span style="font-size:11px;color:#64748b;">${esc(col.lot || '')}</span></span><span style="color:#64748b;">›</span></div>`; }).join('') || '<div style="padding:12px;color:#64748b;font-size:13px;">採卵記録がありません</div>'}</div></details>` : '';
+    const sb = document.querySelector('#nui-scr .sb'), st = keepScroll && sb ? sb.scrollTop : 0;
+    scrShow(`${backBtn('nuiClose()', '閉じる')}<span style="font-size:17px;font-weight:900;flex:1;">📄 ${CP.done ? '発行済みの証明書' : '証明書'}</span>`,
+      `<div style="padding:12px 14px 30px;">
+        ${tabs.length > 1 ? `<div class="nui-seg" style="margin-bottom:10px;">${tabs.map(([k, l]) => { const n = cpCount(k); return `<button class="${CP.tab === k ? 'on' : ''}" onclick="nuiCpTab('${k}')">${l}${n ? ` <span style="color:#fbbf24;">${n}</span>` : ''}</button>`; }).join('')}</div>` : ''}
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="flex:1;font-size:12px;color:#94a3b8;">${CP.done ? 'この1年に発行したもの' : (CP.tab === 'ai' ? '授精証明書がまだの子牛' : CP.tab === 'et' ? '移植証明書がまだの子牛（自分で移植した子）' : '受精卵証明書がまだの胚')}${I.length ? `　${I.length}${CP.tab === 'egg' ? '個' : '頭'}` : ''}</span>
+          ${I.length ? `<button class="nui-chip" onclick="nuiCpAll()">${I.filter(it => okKeys.has(it.key)).every(it => CP.sel.has(it.key)) && CP.sel.size ? '選ぶのをやめる' : '全部えらぶ'}</button>` : ''}</div>
+        ${CP.tab === 'et' && !CP.done ? '<div style="font-size:11px;color:#64748b;margin:-4px 0 8px;">証明書の番号は今までどおり自動で付きます</div>' : ''}
+        ${list}${other}
+        <button onclick="nuiCpDone()" style="display:block;margin:18px auto 0;background:none;border:none;color:#94a3b8;font-size:13px;cursor:pointer;font-family:inherit;">${CP.done ? '‹ まだのものに戻る' : '発行済みを見る ›'}</button>
+        <button onclick="nuiClose();switchTab('insembook')" style="display:block;margin:8px auto 0;background:none;border:none;color:#64748b;font-size:12px;cursor:pointer;font-family:inherit;">📋 授精簿を開く（記録を見る・直す）</button>
+      </div>`, cpFoot());
+    if (st) { const s2 = document.querySelector('#nui-scr .sb'); if (s2) s2.scrollTop = st; }
+  }
+  function cpRefreshFoot() { const f = document.querySelector('#nui-scr .sf .wrap'); if (f) f.innerHTML = cpFoot(); }
+  window.nuiCert = function (tab) { CP = { tab: tab || (CP && CP.tab) || 'ai', done: false, sel: new Set() }; vCert(); try { sideMark('cert'); } catch (e) {} };
+  window.nuiCpTab = t => { CP.tab = t; CP.sel = new Set(); vCert(); };
+  window.nuiCpDone = () => { CP.done = !CP.done; CP.sel = new Set(); vCert(); };
+  window.nuiCpT = function (k) {
+    if (CP.sel.has(k)) CP.sel.delete(k); else CP.sel.add(k);
+    const el = [...document.querySelectorAll('#nui-scr .cp-r')].find(e => e.dataset.k === k);
+    if (el) { const b = el.querySelector('.cp-bx'); if (b) b.outerHTML = cpBox(CP.sel.has(k)); }
+    cpRefreshFoot();
+  };
+  window.nuiCpAll = function () {
+    const keys = cpItems(CP.tab, CP.done).filter(it => CP.tab === 'egg' || it.row).map(it => it.key);
+    const all = keys.length && keys.every(k => CP.sel.has(k));
+    CP.sel = all ? new Set() : new Set(keys); vCert(true);
+  };
+  window.nuiCpG = function (colId) {
+    const keys = cpItems('egg', CP.done).filter(it => it.col.id === colId).map(it => it.key);
+    const all = keys.every(k => CP.sel.has(k)); keys.forEach(k => all ? CP.sel.delete(k) : CP.sel.add(k)); vCert(true);
+  };
+  window.nuiCpQ = function (src, idx, el) {
+    const q = String(el.value || '').trim().replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    el.value = q; cpSetQ(src, +idx, q);
+    el.style.borderColor = q ? '#2a3050' : '#f59e0b'; el.style.background = q ? '#0f1117' : '#1a0f00';
+    save(); vCert(true);
+  };
+  window.nuiCpFill = async function () {
+    const Bl = cpBlank(); if (!Bl.length) return;
+    let n = cpNextNo(cpBook());
+    const plan = Bl.map(r => ({ r, q: String(n++) }));
+    const yes = await appConfirm(`No. が空の ${Bl.length}か所に、今の最後の番号の続きを入れます。\n\n` + plan.slice(0, 15).map(p => `${fmtDate(p.r.d)} ${p.r.t} → ${p.q}`).join('\n') + (plan.length > 15 ? `\n…ほか${plan.length - 15}か所` : '') + '\n\n入れますか？');
+    if (!yes) return;
+    try { armUndo('No. を続き番号で入れました'); } catch (e) {}
+    plan.forEach(({ r, q }) => cpSetQ(r._src, r._idx, q));
+    save(); vCert(true);
+  };
+  window.nuiCpMark = async function (k) {
+    if (!await appConfirm('この子牛を「発行済み」にして、一覧から消しますか？')) return;
+    const c = calves.find(x => x.id === k); if (!c) return;
+    if (CP.tab === 'ai') c.authCertIssued = today(); else c.etCertIssued = today();
+    save(); try { renderCalves(); } catch (e) {} vCert(true);
+  };
+  window.nuiCpUndo = async function (k) {
+    if (!await appConfirm('「まだ」に戻して、一覧に出しますか？')) return;
+    if (CP.tab === 'egg') { const [cid, i] = k.split('|'); const col = collectionRecordsNew.find(c => c.id === cid); const x = col && cpEmbryos(col).find(e => e.idx === +i); if (x && col.eggCertDone) delete col.eggCertDone[x.no]; }
+    else { const c = calves.find(x => x.id === k); if (c) { if (CP.tab === 'ai') c.authCertIssued = false; else c.etCertIssued = false; } }
+    save(); vCert(true);
+  };
+  // 今ある印刷のしくみを使う：見えないチェックを作って、いつもの関数を呼ぶ
+  function cpWithChecks(cls, rows, fn) {
+    const prev = [...document.querySelectorAll('.' + cls + ':checked')]; prev.forEach(e => { e.checked = false; });
+    const box = document.createElement('div'); box.style.display = 'none';
+    box.innerHTML = rows.map(r => `<input type="checkbox" class="${cls}" data-src="${r._src}" data-idx="${r._idx}" checked>`).join('');
+    document.body.appendChild(box);
+    try { fn(); } finally { box.remove(); prev.forEach(e => { e.checked = true; }); }
+  }
+  window.nuiCpPrint = function () {
+    const I = cpItems(CP.tab, CP.done).filter(it => CP.sel.has(it.key)); if (!I.length) return;
+    window._certPageAfter = null;
+    if (CP.tab === 'egg') {
+      eggCertCart = [];
+      I.forEach(it => updateEggCart({ dataset: { colid: it.col.id, idx: String(it.x.idx) }, checked: true }));
+      openEggCartPreview();
+      window._certPageAfter = { kind: 'egg', L: I.map(it => ({ cid: it.col.id, no: it.x.no })) };
+      return;
+    }
+    const rows = I.map(it => it.row).filter(Boolean);
+    const modal = $('modal-cert-preview'); if (modal) modal.classList.remove('open');
+    if (CP.tab === 'ai') { window._calfCertCalfIds = []; cpWithChecks('insem-cert-check', rows, printSelectedCerts); }
+    else cpWithChecks('et-cert-check', rows, printSelectedEtCerts);
+    if (modal && modal.classList.contains('open')) window._certPageAfter = { kind: CP.tab, ids: I.map(it => it.key) };
+  };
+  window.nuiCertAfterPrint = function () {
+    const h = window._certPageAfter; window._certPageAfter = null; if (!h) return;
+    const n = h.kind === 'egg' ? h.L.length : h.ids.length;
+    setTimeout(async () => {
+      if (!await appConfirm(`印刷できましたか？\n「はい」で ${n}枚を発行済みにして、一覧から消します。`)) return;
+      const d = today();
+      if (h.kind === 'egg') h.L.forEach(o => { const col = collectionRecordsNew.find(c => c.id === o.cid); if (col) { col.eggCertDone = col.eggCertDone || {}; col.eggCertDone[o.no] = d; } });
+      else h.ids.forEach(id => { const c = calves.find(x => x.id === id); if (c) { if (h.kind === 'ai') c.authCertIssued = d; else c.etCertIssued = d; } });
+      save();
+      try { renderCalves(); } catch (e) {}
+      if (CP && document.body.classList.contains('nui-scr-open') && /証明書/.test((document.querySelector('#nui-scr .sh') || {}).textContent || '')) { CP.sel = new Set(); vCert(true); }
+      try { sideBadges(); } catch (e) {}
+    }, 1200);
+  };
+
   window.nuiShipList = function () { if (!SL) SL = { tab: 'fat', y: today().slice(0, 4), m: 0 }; vShipList(); };
   window.nuiSL = function (k, v) { SL[k] = v; if (k === 'y') SL.m = 0; vShipList(); };
   function vShipList() {
@@ -35094,7 +35443,9 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         <div class="${op ? 'nui-a' : ''}" style="flex:1;min-width:0;" ${op ? `onclick="nuiClose();${op}"` : ''}>
           <span class="nui-mono" style="font-weight:700;font-size:15px;">${esc(o.tag || (o.nid ? '' : '耳標なし'))}</span>${o.nid ? ` <span class="nui-nid">${esc(nid5(o.nid))}</span>` : ''} <span style="color:#4ade80;font-weight:700;">${esc(o.name)}</span>
           <div style="font-size:12px;color:#94a3b8;">${[o.sex, o.age ? o.age + 'か月' : '', o.days != null ? '廃用から' + o.days + '日' : '', o.memo].filter(Boolean).map(esc).join('・')}</div>
-          ${o.kind === 'csv' ? '' : o.rec
+          ${o.kind === 'csv' ? '' : o.kind === 'ret'
+            ? `<button class="nui-chip" style="margin-top:6px;font-size:12px;color:${o.src.salePrice ? '#4ade80' : '#fbbf24'};border-color:${o.src.salePrice ? '#166534' : '#b45309'};" onclick="event.stopPropagation();openRetiredPrice('${jsq(o.id)}')">${o.src.salePrice ? '✓ ' + esc(retiredPriceText(o.src)) + '（直す）' : '💴 売値を入れる'}</button>`
+            : o.rec
             ? `<button class="nui-chip" style="margin-top:6px;font-size:12px;color:#4ade80;border-color:#166534;" onclick="event.stopPropagation();nuiFatForm('${o.kind}','${jsq(o.id)}')">✓ 枝肉成績 入力済（直す）</button>`
             : `<button class="nui-chip" style="margin-top:6px;font-size:12px;color:#fbbf24;border-color:#b45309;" onclick="event.stopPropagation();nuiFatForm('${o.kind}','${jsq(o.id)}')">✏ 枝肉成績を入れる</button>`}
         </div>
@@ -35228,7 +35579,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const calcAmt = rec && rec.weight && rec.unitPrice ? Math.round(rec.weight * rec.unitPrice) : null;
     FS.amtManual = !!(rec && rec.amount != null && rec.amount !== calcAmt);   // 前に手で直した金額があれば、手で入れる欄を開いておく
     FS.sd = sd; FS.dob = src.dob || ''; FS.sire = kind === 'calf' ? (src.sire || '') : ''; FS.sexT = kind === 'calf' ? (src.sex === '雄' ? '去勢' : src.sex === '雌' ? '♀' : '') : '経産';
-    scrShow(`${backBtn('nuiFatQuit()', '閉じる')}<span style="font-size:17px;font-weight:900;">🥩 枝肉成績</span>${FQ ? `<span style="font-size:13px;color:#fbbf24;font-weight:700;">${qi + 1}／${FQ.length}頭目</span>` : ''}`,
+    scrShow(`${backBtn('nuiFatQuit()', '閉じる')}<span style="font-size:17px;font-weight:900;">${kind === 'ret' ? '💴 売れた値段・枝肉成績' : '🥩 枝肉成績'}</span>${FQ ? `<span style="font-size:13px;color:#fbbf24;font-weight:700;">${qi + 1}／${FQ.length}頭目</span>` : ''}`,
       `<div style="padding:12px 14px 30px;">
         <div class="nui-card" style="padding:10px 14px;">
           <div><span class="nui-mono" style="font-weight:900;font-size:20px;color:#4ade80;">${esc(tag)}</span>${n ? ` <span class="nui-nid">${esc(nid5(n))}</span>` : ''} <span style="font-size:16px;font-weight:700;">${esc(src.name || nm(tag) || '')}</span></div>
@@ -35498,7 +35849,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const chip = (on) => `nui-ch${on ? ' on' : ''}`;
     const sexB = (k, v) => [['bull', '♂ オス', '#60a5fa', '#0a1a2a', '#3b82f6'], ['heifer', '♀ メス', '#f472b6', '#2a0f1f', '#ec4899']].map(([val, l, fg, bg, bd]) => { const on = v === val; return `<button onclick="nuiCV({${k}:'${val}'})" style="flex:1;height:50px;border-radius:8px;font-size:18px;font-weight:900;border:2px solid ${on ? bd : '#2a3050'};background:${on ? bg : '#1e2333'};color:${on ? fg : '#94a3b8'};cursor:pointer;font-family:inherit;">${l}</button>`; }).join('');
     const kinds = [['生きている', '#22c55e', '#14532d', '#4ade80'], ['死産', '#ef4444', '#7f1d1d', '#f87171'], ['虚弱', '#f59e0b', '#78350f', '#f59e0b']].map(([l, bd, bg, fg], i) => { const on = C.kind === i; return `<button onclick="nuiCV({kind:${i}})" style="flex:1;height:44px;border-radius:8px;font-size:14px;font-weight:700;border:1px solid ${on ? bd : '#2a3050'};background:${on ? bg : '#1e2333'};color:${on ? fg : '#e2e8f0'};cursor:pointer;font-family:inherit;">${l}</button>`; }).join('');
-    const sizes = [['2', '小'], ['3', '中'], ['4', '大']].map(([v, l]) => { const on = C.size === v; return `<button onclick="nuiCV({size:'${v}'})" style="flex:1;height:44px;border-radius:8px;background:${on ? '#14532d' : '#1e2333'};border:1px solid ${on ? '#22c55e' : '#2a3050'};color:${on ? '#4ade80' : '#e2e8f0'};font-weight:700;cursor:pointer;font-family:inherit;">${l}</button>`; }).join('');
+    // ★ 2026/11/20：体格は5段階（1小〜5大）。育成舎・出荷の体格と同じ物差し
+    const sizes = [['1', '小'], ['2', ''], ['3', '中'], ['4', ''], ['5', '大']].map(([v, l]) => { const on = C.size === v; return `<button onclick="nuiCV({size:'${v}'})" style="flex:1;height:50px;border-radius:8px;background:${on ? '#14532d' : '#1e2333'};border:1px solid ${on ? '#22c55e' : '#2a3050'};color:${on ? '#4ade80' : '#e2e8f0'};font-weight:800;cursor:pointer;font-family:inherit;line-height:1.1;"><span style="font-size:17px;">${v}</span>${l ? `<br><span style="font-size:10px;font-weight:700;opacity:.8;">${l}</span>` : ''}</button>`; }).join('');
     const CH = ['介助', '難産', '逆子', '胎盤停滞'];
     const days = [['今日 ' + md(T), 0], ['昨日 ' + md(addDays(T, -1)), 1], ['📅 ' + (C.day === 2 ? md(C.date) : '日付'), 2]];
     scrShow(`${backBtn("nuiBackAct()")}<span style="font-size:17px;font-weight:900;color:#c4a5f5;">🍼 分娩</span><span style="font-size:15px;"><span class="nui-mono" style="font-weight:700;">${esc(c.id)}</span> ${esc(nm(c.id))}</span>`,
@@ -35511,10 +35863,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
           <div style="display:flex;gap:6px;margin-top:6px;">${kinds}</div>
           <button onclick="nuiCV({twin:${!C.twin}})" style="margin-top:6px;width:100%;height:42px;border-radius:8px;font-size:13px;font-weight:700;border:1px dashed ${C.twin ? '#a78bfa' : '#2a3050'};background:${C.twin ? '#1c1230' : 'transparent'};color:${C.twin ? '#c4a5f5' : '#94a3b8'};cursor:pointer;font-family:inherit;">${C.twin ? '👯 双子 ✓（2頭目）' : '👯 双子のとき'}</button>
           ${C.twin ? `<div style="font-size:12px;color:#94a3b8;margin:8px 0 6px;">2頭目</div><div style="display:flex;gap:6px;">${sexB('sex2', C.sex2)}</div>` : ''}</div>
-        <div style="display:flex;gap:10px;">
-          <div class="nui-box" style="flex:1;"><label for="nui-tag" class="nui-lb">子牛の耳標</label><input id="nui-tag" class="nui-in" placeholder="あとでもOK" value="${esc(C.tag)}" oninput="S_nuiTag(this.value)"></div>
-          <div class="nui-box" style="width:130px;"><div class="nui-lb">体格</div><div style="display:flex;gap:4px;">${sizes}</div></div>
-        </div>
+        <div class="nui-box"><label for="nui-tag" class="nui-lb">子牛の耳標</label><input id="nui-tag" class="nui-in" placeholder="あとでもOK" value="${esc(C.tag)}" oninput="S_nuiTag(this.value)"></div>
+        <div class="nui-box"><div class="nui-lb">体格（1小〜5大）</div><div style="display:flex;gap:6px;">${sizes}</div></div>
         <details class="nui-box" ${C.chips.length || C.memo ? 'open' : ''}><summary style="cursor:pointer;font-size:13px;font-weight:700;">📝 お産のようす・メモ（なくてもOK） ▼</summary>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${CH.map(x => `<button class="nui-chip${C.chips.includes(x) ? ' on' : ''}" onclick="nuiCVChip('${x}')">${x}</button>`).join('')}</div>
           <input class="nui-in" style="margin-top:8px;" placeholder="そのほかのメモ" value="${esc(C.memo)}" oninput="S_nuiCMemo(this.value)"></details>
@@ -35884,7 +36234,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       <div class="sec">📚 記録簿・在庫</div><div class="g3">
         ${tile('nui-y', '📋', '授精簿', "switchTab('insembook')")}${tile('nui-p', '🌱', '採卵記録', "switchTab('collection')", '', '', 'collection')}${tile('nui-o', '🥚', '種・胚在庫', "switchTab('semen')", sem, '#ef4444')}${tile('nui-b', '💊', '薬品・治療簿', "switchTab('vet')")}</div>
       <div class="sec">🖨 書類・印刷</div><div class="lst">
-        <div onclick="switchTab('insembook')"><span>📄 ${document.documentElement.classList.contains('no-etcert') ? '授精証明書' : '授精証明書・移植証明書'}</span><span style="color:#64748b;">›</span></div>
+        <div onclick="nuiCert()"><span>📄 証明書</span>${(() => { const n = window.nuiCertTodo ? nuiCertTodo() : 0; return `<span style="color:${n ? '#f59e0b' : '#64748b'};font-weight:${n ? 700 : 400};">${n ? n + '枚まだ ›' : '›'}</span>`; })()}</div>
         <div onclick="openBirthReport()"><span>🐄 らくちく出生報告</span><span style="color:${br ? '#f59e0b' : '#64748b'};font-weight:${br ? 700 : 400};">${br ? br + '頭まだ ›' : '›'}</span></div>
         <div onclick="nuiPrintMenu()"><span>🖨 お産予定・授精簿の印刷</span><span style="color:#64748b;">›</span></div>
         <div onclick="switchTab('history')"><span>📝 変更履歴</span><span style="color:#64748b;">›</span></div>
@@ -35895,7 +36245,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#64748b;letter-spacing:2px;margin:0 2px 6px;">🔧 困ったとき（データの修復）▼</summary>
         <div class="lst">
           <div onclick="openSyncDiag()"><span>🔎 同期のようすを調べる</span><span style="color:#64748b;">${'版 ' + String(window.APP_BUILD || '').slice(-4)} ›</span></div>
-          <div onclick="openLostRecover()"><span>🩹 消えた移動・タグ・チェックを取り戻す</span><span style="color:#64748b;">›</span></div>
+          <div onclick="openLostRecover()"><span>🩹 消えた記録を取り戻す（お産・移動・タグ・チェック）</span><span style="color:#64748b;">›</span></div>
           <div onclick="openIbRestore()"><span>☁ 消えた授精簿の行を戻す（バックアップから）</span><span style="color:#64748b;">›</span></div>
         </div>
       </details>`;
@@ -35956,11 +36306,84 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   const _rib = window.renderInsemBook;
   if (typeof _rib === 'function') window.renderInsemBook = function () { const r = _rib.apply(this, arguments); try { if (_ibf === 'blank' && !(window._ibOnly && window._ibOnly.keys)) _ibf = 'all'; ibShape(); } catch (e) { console.error('nuiIb', e); } return r; };
 
+  // ---------- 🥩 肥育成績：上のボタンを整理（見るもの6つ／品種・年度・農家は1行／絞り込み／並べ方は1つのカード） ----------
+  const FAT_UI = { csv: false, more: false, flt: false, pat: false };
+  const FAT_VIEWS = [['dam', '🐄 母牛別'], ['sire', '🧬 種雄牛別'], ['homerun', '🎯 ベスト個体'], ['table', '📋 年度の表'], ['koubutsu', '📊 上物率'], ['ranking', '🏆 全体']];
+  function fatBuild() {
+    const pg = $('page-fattening'); if (!pg || $('nfat-top')) return !!pg;
+    const dz = $('fat-drop-zone'), bar = dz && dz.nextElementSibling; if (!dz || !bar) return false;
+    bar.id = 'fat-filterbar';
+    const top = document.createElement('div'); top.id = 'nfat-top';
+    top.innerHTML = `<div class="nfat-h"><span class="t">🥩 肥育成績</span><button class="nui-chip" id="nfat-csvb" onclick="nuiFat('csv')">📂 CSV</button><button class="nui-chip" id="nfat-moreb" onclick="nuiFat('more')" aria-label="ほかの操作">…</button></div>
+      <div id="nfat-csvp" class="nfat-p"></div><div id="nfat-morep" class="nfat-p"></div>
+      <div class="nfat-l">見るもの</div><div id="nfat-seg" class="nfat-seg"></div>
+      <div id="nfat-chips" class="nfat-chips"><button class="nui-chip" id="nfat-breed" onclick="nuiFat('breed')"></button></div>
+      <div id="nfat-fltp" class="nfat-p"></div><div id="nfat-note" class="nfat-note"></div>
+      <div id="nfat-sort"></div>`;
+    pg.insertBefore(top, pg.firstChild);
+    $('nfat-csvp').appendChild(dz);
+    const ch = $('nfat-chips');
+    ['fat-year-wrap', 'fat-farmer-wrap'].forEach(id => { const e = $(id); if (e) ch.appendChild(e); });
+    const fb = document.createElement('button'); fb.className = 'nui-chip'; fb.id = 'nfat-fltb'; fb.onclick = () => nuiFat('flt'); ch.appendChild(fb);
+    ['fat-own-semen', 'fat-min3', 'fat-living-only'].forEach(id => { const e = $(id); if (e && e.parentElement) $('nfat-fltp').appendChild(e.parentElement); });
+    const mp = $('nfat-morep');
+    const rec = document.createElement('button'); rec.textContent = '📋 個体一覧（全頭）'; rec.onclick = () => { FAT_UI.more = false; setFatView('record'); }; mp.appendChild(rec);
+    [...bar.querySelectorAll('button')].forEach(b => mp.appendChild(b));
+    const ln = $('fat-living-note'); if (ln) $('nfat-note').after(ln);
+    bar.style.display = 'none';
+    document.addEventListener('click', e => { if ((FAT_UI.more || FAT_UI.flt) && !e.target.closest('#nfat-morep,#nfat-moreb,#nfat-fltp,#nfat-fltb')) { FAT_UI.more = false; FAT_UI.flt = false; fatShape(); } });
+    return true;
+  }
+  function fatShape() {
+    if (!fatBuild()) return;
+    const view = ($('fat-view') || {}).value || 'ranking';
+    const has = (typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).length > 0;
+    const sh = (id, on) => { const e = $(id); if (e) e.style.display = on ? '' : 'none'; };
+    sh('nfat-csvp', FAT_UI.csv || !has); sh('nfat-morep', FAT_UI.more); sh('nfat-fltp', FAT_UI.flt);
+    $('nfat-csvb').classList.toggle('on', FAT_UI.csv); $('nfat-moreb').classList.toggle('on', FAT_UI.more);
+    $('nfat-seg').innerHTML = FAT_VIEWS.map(([k, l]) => `<button class="${view === k ? 'on' : ''}" onclick="setFatView('${k}')">${l}</button>`).join('');
+    const br = ($('fat-breed-filter') || {}).value || '褐毛';
+    $('nfat-breed').textContent = (br === '黒毛' ? '⬛ 黒毛' : '🟥 褐毛') + ' ⇄';
+    const F = [['fat-own-semen', '🧊 自家精液'], ['fat-min3', '📊 3頭以上'], ['fat-living-only', '🐄 現存牛のみ']].filter(([id]) => ($(id) || {}).checked);
+    const fb = $('nfat-fltb'); fb.textContent = '⚙ 絞り込み' + (F.length ? ' ' + F.length : ''); fb.classList.toggle('on', F.length > 0 || FAT_UI.flt);
+    $('nfat-note').textContent = F.length ? '絞り込み中：' + F.map(f => f[1]).join('・') : '';
+    // 並べ方（母牛別・種雄牛別のとき）：今の行を隠して、1枚のカードにまとめる
+    const ds = $('fat-detail-sort'), box = $('nfat-sort');
+    if ((view === 'dam' || view === 'sire') && ds) {
+      const row = ds.parentElement; row.style.display = 'none';
+      const desc = row.nextElementSibling; if (desc && /総合スコアの配分/.test(desc.textContent)) desc.style.display = 'none';
+      const P = (typeof FAT_SCORE_PATTERNS !== 'undefined' && FAT_SCORE_PATTERNS[fatScorePattern]) || {};
+      const pb = (p, l) => `<button class="nui-chip${fatScorePattern === p ? ' on' : ''}" onclick="setFatScorePattern(${p})">${l}</button>`;
+      box.innerHTML = `<div class="nfat-card">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:12px;color:#94a3b8;">並べ方</span>
+          <select onchange="nuiFat('sort',this.value)" class="nfat-sel">${[...ds.options].map(o => `<option value="${o.value}" ${o.selected ? 'selected' : ''}>${esc(o.textContent.replace(/順$/, ''))}</option>`).join('')}</select>
+          <div class="nui-seg" style="flex:0 0 auto;"><button style="padding:0 14px;" class="${!fatRankWorst ? 'on' : ''}" onclick="setFatRankOrder(false)">ベスト</button><button style="padding:0 14px;" class="${fatRankWorst ? 'on' : ''}" onclick="setFatRankOrder(true)">ワースト</button></div>
+          ${view === 'sire' ? `<button class="nui-chip${fatFarmerAdjust ? ' on' : ''}" onclick="toggleFatFarmerAdjust()">⚖ 農家補正</button>` : ''}
+        </div>
+        ${ds.value === 'score' ? `<div style="font-size:12px;color:#94a3b8;margin-top:8px;line-height:1.6;">総合スコア＝<b style="color:#e2e8f0;">${esc(P.label || '')}</b>（${esc(P.desc || '')}）
+          <button onclick="nuiFat('pat')" style="background:none;border:none;color:#4ade80;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit;padding:0;">${FAT_UI.pat ? '閉じる' : '変える ›'}</button></div>
+          ${FAT_UI.pat ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">${pb(3, '増体＋A4以上')}${pb(1, '枝重重視')}${pb(2, 'A4以上重視')}${pb(0, '⚙ 自分で決める')}</div>` : ''}` : ''}
+      </div>`;
+    } else box.innerHTML = '';
+  }
+  window.nuiFat = function (k, v) {
+    if (k === 'csv') { FAT_UI.csv = !FAT_UI.csv; FAT_UI.more = false; }
+    else if (k === 'more') { FAT_UI.more = !FAT_UI.more; FAT_UI.flt = false; }
+    else if (k === 'flt') { FAT_UI.flt = !FAT_UI.flt; FAT_UI.more = false; }
+    else if (k === 'pat') FAT_UI.pat = !FAT_UI.pat;
+    else if (k === 'breed') { const s = $('fat-breed-filter'); if (s) { s.value = s.value === '黒毛' ? '褐毛' : '黒毛'; renderFattening(); return; } }
+    else if (k === 'sort') { const s = $('fat-detail-sort'); if (s) { s.value = v; renderFattening(); return; } }
+    fatShape();
+  };
+  const _rf = window.renderFattening;
+  if (typeof _rf === 'function') window.renderFattening = function () { const r = _rf.apply(this, arguments); try { fatShape(); } catch (e) { console.error('nuiFat', e); } return r; };
+
   // ---------- PC：横のメニュー ----------
   const SIDE = [
     ['毎日', [['home', '🏠 ホーム', "switchTab('home')"], ['today', '📋 今日のタスク', "switchTab('today')", 'today-badge'], ['preg', '🍼 お産予定', "switchTab('preg')"], ['cows', '🐄 牛をさがす', "switchTab('cows')"]]],
     ['記録簿', [['insembook', '📋 授精簿', "switchTab('insembook')", 'ib'], ['collection', '🌱 採卵記録', "switchTab('collection')"], ['semen', '🥚 種・胚在庫', "switchTab('semen')"]]],
-    ['書類・成績', [['cert', '📄 証明書', "switchTab('insembook')"], ['annual', '📊 牧場の成績', "_annTab='sum';switchTab('annual')"], ['more', '☰ その他・設定', "switchTab('more')"]]]
+    ['書類・成績', [['cert', '📄 証明書', "nuiCert()", 'cert'], ['annual', '📊 牧場の成績', "_annTab='sum';switchTab('annual')"], ['more', '☰ その他・設定', "switchTab('more')"]]]
   ];
   function buildSide() {
     if ($('nui-side')) return;
@@ -35977,6 +36400,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     document.querySelectorAll('#nui-side .bd').forEach(b => {
       let v = 0;
       if (b.dataset.b === 'ib') v = ibBlank().length;
+      else if (b.dataset.b === 'cert') { try { v = nuiCertTodo(); } catch (e) { v = 0; } }
       else { const a = $(b.dataset.b); v = a && a.style.display !== 'none' ? (+a.textContent || 0) : 0; }
       b.textContent = v; b.style.display = v ? '' : 'none';
     });
