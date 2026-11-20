@@ -16530,7 +16530,7 @@ function renderStats() {
 
           const pseudoRec = {
             sire: key,
-            sizeScore: rec?.sizeScore ?? null,
+            sizeScore: rec?.sizeScore ?? (() => { const v = +(c.weight || c.size); return v >= 1 && v <= 5 ? v : null; })(),   // ★ 子牛に入れた体格も使う
             birthTiming,
             // 体重は子牛データ優先。「不明」や文字列を数値化し、ありえない値は除外
             // 生時体重（kg）は birthWeightKg。weight欄は体格(1〜5)なので使わない
@@ -16538,6 +16538,10 @@ function renderStats() {
           };
           sireMap[key].recs.push(pseudoRec);
           if (pseudoRec.sizeScore) sireMap[key].sizes.push(pseudoRec.sizeScore);
+          // ★ 2026/11/20：そのあとの体格（育成舎①・育成舎②・出荷）。出荷があれば出荷、なければいちばん新しいもの
+          try { const sc = calfScores(c), last = sc.find(x => x.stage === '出荷') || sc[sc.length - 1];
+            if (last) { const d = sireMap[key]; (d.later = d.later || []).push(last.score); if (last.stage === '出荷') d.nShip = (d.nShip || 0) + 1;
+              if (pseudoRec.sizeScore) (d.pairs = d.pairs || []).push([+pseudoRec.sizeScore, last.score]); } } catch (e) {}
           if (pseudoRec.birthTiming && pseudoRec.birthTiming !== '不明') {
             sireMap[key].timings[pseudoRec.birthTiming] = (sireMap[key].timings[pseudoRec.birthTiming]||0) + 1;
           } else {
@@ -16582,23 +16586,39 @@ function renderStats() {
           const avgSize = d.sizes.length ? d.sizes.reduce((a,b)=>a+b,0)/d.sizes.length : null;
           const avgWeight = d.weights.length ? (d.weights.reduce((a,b)=>a+b,0)/d.weights.length).toFixed(1) : null;
           const total = d.recs.length;
+          const L = d.later || [], avgLater = L.length ? L.reduce((a, b) => a + b, 0) / L.length : null;
+          const P = d.pairs || [], pb = P.length ? P.reduce((a, x) => a + x[0], 0) / P.length : null, pl = P.length ? P.reduce((a, x) => a + x[1], 0) / P.length : null;
+          let growTag = '';
+          if (P.length) {
+            if (pb <= 2.5 && pl >= 4) growTag = '<span style="color:var(--accent);">🌱 小さく生まれて大きく育つ（初産にも使いやすい）</span>';
+            else if (pb >= 4 && pl <= 2.5) growTag = '<span style="color:var(--warn);">⚠ 大きく生まれて伸びない（過大児に注意）</span>';
+            else if (pl - pb >= 1) growTag = '<span style="color:var(--accent);">👍 生まれたあとよく伸びる</span>';
+            else if (pb - pl >= 1) growTag = '<span style="color:var(--warn);">↘ 生まれた時より小さくなる</span>';
+            else growTag = '<span style="color:var(--muted);">生まれた時と同じくらい</span>';
+          }
           return `
             <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <div style="font-size:14px;font-weight:700;color:var(--text);">${name}</div>
                 <div style="font-size:11px;color:var(--muted);">${total}頭分</div>
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div style="background:var(--bg2);border-radius:8px;padding:10px;text-align:center;">
-                  <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">平均体格スコア</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:${P.length ? 6 : 10}px;">
+                <div style="background:var(--bg2);border-radius:8px;padding:10px 4px;text-align:center;">
+                  <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">生まれた時の体格</div>
                   <div style="font-size:15px;">${avgSize !== null ? sizeLabel(avgSize) : '—'}</div>
                   <div style="font-size:10px;color:var(--muted);margin-top:2px;">1(極小)〜5(極大)</div>
+                </div>
+                <div style="background:var(--bg2);border-radius:8px;padding:10px 4px;text-align:center;">
+                  <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">${d.nShip && d.nShip === L.length ? '出荷時の体格' : '育ったあとの体格'}</div>
+                  <div style="font-size:15px;">${avgLater !== null ? sizeLabel(avgLater) : '—'}</div>
+                  <div style="font-size:10px;color:var(--muted);margin-top:2px;">${L.length ? L.length + '頭' + (d.nShip ? '（出荷' + d.nShip + '）' : '（途中）') : '育成①・②・出荷で入れる'}</div>
                 </div>
                 <div style="background:var(--bg2);border-radius:8px;padding:10px;text-align:center;">
                   <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">平均生時体重</div>
                   <div style="font-size:18px;font-weight:700;color:var(--text);">${avgWeight ? avgWeight+'kg' : '—'}</div>
                 </div>
               </div>
+              ${P.length ? `<div style="font-size:12px;font-weight:700;margin-bottom:10px;">${growTag} <span style="font-weight:400;color:var(--muted);">（両方ある${P.length}頭：生時 ${pb.toFixed(1)} → ${pl.toFixed(1)}）</span></div>` : ''}
               <div style="background:var(--bg2);border-radius:8px;padding:10px;">
                 <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">分娩タイミング（分娩予定日からの自動判定）</div>
                 ${timingBar(d.timings)}
@@ -33666,7 +33686,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112004';
+const APP_BUILD = '2026112005';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -35779,9 +35799,60 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       ${estAvg != null ? `<div style="font-size:12px;color:#94a3b8;margin-top:10px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px;">🍼 妊娠中の牛の見込み：平均 <b style="color:${col(estAvg)};">${estAvg}日</b>（${(estAvg / 30.4).toFixed(1)}か月・${est.length}頭）</div>` : ''}`;
     box.insertBefore(el, box.firstChild);
   }
+  // 🧬 種雄牛別の体格：生まれた時の体格（1小〜5大）と、育成舎①・育成舎②・出荷の体格をくらべる
+  //   小さく生まれて大きく育つ ＝ 初産にも使いやすい・よく育つ種 ／ 大きく生まれて伸びない ＝ 過大児の心配・あまりよくない
+  let _ssOpen = null;
+  window.nuiSS = function (k) { _ssOpen = _ssOpen === k ? null : k; statsFilter(); };
+  function sireSizeCard(box) {
+    box.querySelectorAll('.nui-ss-card').forEach(x => x.remove());
+    const all = calves.filter(c => c.sire);
+    const by = {};
+    all.forEach(c => {
+      const birth = +(c.weight || c.size) || null;
+      const sc = calfScores(c), ship = sc.find(x => x.stage === '出荷'), last = ship || sc[sc.length - 1] || null;
+      if (!birth && !last) return;
+      let dg = null; try { if (measureOn()) { const R = measureRows(c); const v = R.map(m => m.dg).filter(x => x != null); if (v.length) dg = v.reduce((a, b) => a + b, 0) / v.length; } } catch (e) {}
+      const k = normalizeSireName(c.sire) || c.sire;
+      (by[k] = by[k] || []).push({ c, birth, sc, last, ship: !!ship, dg });
+    });
+    const avg = L => L.length ? L.reduce((a, b) => a + b, 0) / L.length : null;
+    const rows = Object.entries(by).map(([sire, L]) => {
+      const b = avg(L.map(x => x.birth).filter(Boolean)), l = avg(L.map(x => x.last && x.last.score).filter(Boolean));
+      const nShip = L.filter(x => x.ship).length, nLast = L.filter(x => x.last).length;
+      const dg = avg(L.map(x => x.dg).filter(v => v != null));
+      let tag = '', tc = '#94a3b8';
+      if (b != null && l != null) {
+        if (b <= 2.5 && l >= 4) { tag = '🌱 小さく生まれて大きく育つ（初産向き）'; tc = '#4ade80'; }
+        else if (b >= 4 && l <= 2.5) { tag = '⚠ 大きく生まれて伸びない（過大児に注意）'; tc = '#f59e0b'; }
+        else if (l - b >= 1) { tag = '👍 生まれたあとよく伸びる'; tc = '#4ade80'; }
+        else if (b - l >= 1) { tag = '↘ 生まれた時より小さくなる'; tc = '#f59e0b'; }
+      }
+      return { sire, L, b, l, nShip, nLast, dg, tag, tc };
+    }).filter(r => r.L.length).sort((a, z) => (z.nLast - a.nLast) || (z.L.length - a.L.length));
+    const el = document.createElement('section'); el.className = 'stats-card nui-ss-card'; el.dataset.nuiSub = 'calv'; el.dataset.nuiOrd = '-2';
+    el.style.cssText = 'background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;padding:14px;margin-bottom:12px;';
+    const f = v => v == null ? '—' : v.toFixed(1);
+    el.innerHTML = `<div class="stats-title" style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:4px;">🧬 種雄牛別の体格（生まれた時 → 出荷時）</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px;">体格は1小〜5大。生まれた時は分娩の記録、そのあとは育成舎①・育成舎②・出荷へ移したときの体格です（全期間）。出荷の体格がまだの子は、いちばん新しい体格で数えています。</div>
+      ${rows.length ? `<div style="display:grid;grid-template-columns:1fr 44px 44px 44px;gap:0 6px;font-size:11px;color:#94a3b8;padding:0 2px 4px;"><span>種雄牛（頭数）</span><span style="text-align:center;">生時</span><span style="text-align:center;">出荷時</span><span style="text-align:center;">伸び</span></div>
+      ${rows.map(r => { const d = r.b != null && r.l != null ? r.l - r.b : null, op = _ssOpen === r.sire;
+        return `<div style="border-top:1px solid rgba(255,255,255,.06);">
+          <div class="nui-a" onclick="nuiSS('${jsq(r.sire)}')" style="display:grid;grid-template-columns:1fr 44px 44px 44px;gap:0 6px;align-items:center;padding:8px 2px;">
+            <span style="min-width:0;"><b style="font-size:14px;">${esc(r.sire)}</b> <span style="font-size:11px;color:#94a3b8;">${r.L.length}頭${r.nShip ? '・出荷' + r.nShip : ''}${r.dg != null ? '・DG ' + r.dg.toFixed(2) : ''}</span>${r.tag ? `<div style="font-size:11px;font-weight:700;color:${r.tc};">${r.tag}</div>` : ''}</span>
+            <span class="nui-mono" style="text-align:center;font-size:16px;font-weight:800;">${f(r.b)}</span>
+            <span class="nui-mono" style="text-align:center;font-size:16px;font-weight:800;">${f(r.l)}${r.nShip < r.nLast && r.l != null ? '<span style="font-size:9px;color:#94a3b8;">途中</span>' : ''}</span>
+            <span class="nui-mono" style="text-align:center;font-size:14px;font-weight:800;color:${d == null ? '#475569' : d > 0 ? '#4ade80' : d < 0 ? '#f59e0b' : '#e2e8f0'};">${d == null ? '—' : (d > 0 ? '+' : '') + d.toFixed(1)}</span></div>
+          ${op ? `<div style="padding:0 2px 8px;">${r.L.map(x => `<div class="nui-a" onclick="goCalfCard('${jsq(x.c.id)}')" style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:5px 0;border-top:1px dashed rgba(255,255,255,.06);">
+              <span><b class="nui-mono">${esc(x.c.earTagId || '耳標なし')}</b> <span style="color:#94a3b8;">母 ${esc(x.c.damId || '')}${x.c.dob ? '・' + x.c.dob.slice(0, 7) : ''}</span></span>
+              <span style="white-space:nowrap;">生時 <b>${x.birth || '—'}</b>${x.sc.map(s => ` → ${esc(s.stage.replace('育成舎', '育'))} <b>${s.score}</b>`).join('')}</span></div>`).join('')}</div>` : ''}
+        </div>`; }).join('')}`
+      : '<div style="font-size:13px;color:#94a3b8;">体格を入れた子牛がまだいません。分娩の記録と、育成舎①・育成舎②・出荷へ移すときに体格（1〜5）を入れると、ここに種雄牛ごとに出ます。</div>'}`;
+    box.insertBefore(el, box.firstChild);
+  }
   function statsFilter() {
     const box = $('stats-container'); if (!box) return;
     box.querySelectorAll('.nui-ci-card').forEach(x => x.remove());   // 平均分娩間隔は「📒 まとめ」へ移した
+    box.querySelectorAll('.nui-ss-card').forEach(x => x.remove());   // 種雄牛ごとの体格の伸びは「種雄牛別産仔分析」に入れた
     const sub = window._nuiStatsSub || 'conc';
     const ORD = [/受胎率/, /詳細成績/, /移植胚/, /採卵/, /群ステータス/, /空胎日数/, /産子・死亡/, /産仔/];
     box.style.display = 'flex'; box.style.flexDirection = 'column';
