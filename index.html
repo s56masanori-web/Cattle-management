@@ -727,6 +727,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
       <button class="modal-close" onclick="closeModal('modal-settings')">✕</button>
     </div>
     <div id="advisor-setting" style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px;"></div>
+    <div id="measure-setting" style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px;"></div>
     <div style="display:flex;gap:8px;margin-bottom:10px;">
       <button class="btn btn-secondary" style="flex:1;font-size:13px;" onclick="closeModal('modal-settings');exportAllICS()">📤 全予定を共有</button>
       <button class="btn btn-secondary" style="flex:1;font-size:13px;color:var(--muted);" onclick="closeModal('modal-settings');logout()">⏻ ログアウト</button>
@@ -4073,7 +4074,27 @@ function syncInsemTasks() {
     }
   });
 }
+// ★ 2026/11/20：妊娠中の牛に「🏠 産室移動」のタスクが無ければ作る（同期のトラブルなどで消えていた分も戻す）。
+//   分娩予定日の10日前（双子は20日前）。IDは牛と予定日から決めるので、スマホとPCで別々に作っても1つにまとまる。
+//   牛群リストで産室に入っている牛は「済み」にする。産室を使わない農場（sanshitsuTask:false）は何もしない
+function ensureSanshitsuTasks() {
+  if (window.FARM_CFG && FARM_CFG.sanshitsuTask === false) return false;
+  let ch = false; const T = today();
+  cows.forEach(c => {
+    if (c.status !== 'pregnant' || !c.dueDate || c.dueDate < addDays(T, -3)) return;
+    const mv = addDays(c.dueDate, c.twin ? -20 : -10);
+    let loc = ''; try { loc = cowLocation(c); } catch (e) {}
+    const inRoom = loc === '産室';
+    const t = tasks.find(x => x.cowId === c.id && x.action === '🏠 産室移動' && x.date >= addDays(c.dueDate, -60) && x.date <= addDays(c.dueDate, 10));
+    if (t) { if (!t.done && inRoom) { t.done = true; t.doneAt = new Date().toISOString(); t._autoDone = true; ch = true; } return; }
+    tasks.push({ id: 'san_' + c.id + '_' + c.dueDate, cowId: c.id, date: mv, action: '🏠 産室移動', detail: `分娩予定日（${fmtDate(c.dueDate)}）の${c.twin ? 20 : 10}日前`, color: '#a78bfa', priority: 'high',
+      done: inRoom, ...(inRoom ? { doneAt: new Date().toISOString(), _autoDone: true } : {}), timeOfDay: '' });
+    ch = true;
+  });
+  return ch;
+}
 function save() {
+  try { ensureSanshitsuTasks(); } catch (e) { console.error('ensureSanshitsuTasks', e); }
   try { syncRecipientPlaceholders(); } catch (e) { console.error('syncRecipientPlaceholders', e); }
   try { syncInsemTasks(); } catch (e) { console.error('syncInsemTasks', e); }
   try { syncReturnTasks(); } catch (e) { console.error('syncReturnTasks', e); }
@@ -4371,6 +4392,7 @@ function initApp() {
   try { if (initNosePrintFlags()) save(); } catch (e) { console.error('nosePrint', e); }
   try { if (syncCalfMovedByBarn()) save(); } catch (e) { console.error('calfMoved', e); }
   try { if (window.FARM_CFG && FARM_CFG.sanshitsuTask === false && tasks.some(t => !t.done && t.action === '🏠 産室移動')) save(); } catch (e) {}
+  try { if (ensureSanshitsuTasks()) save(); } catch (e) { console.error('ensureSanshitsuTasks', e); }
   renderAll();
   initSwipe();
   // 開いたときの最初の画面（設定 startTab: 'home' ならホーム）。開いた最初の1回だけ
@@ -9668,7 +9690,63 @@ const ADV_REF = {
 };
 function advisorOn() { return !(typeof farmTargets !== 'undefined' && farmTargets._advisor === 0); }
 function setAdvisor(on) { farmTargets._advisor = on ? 1 : 0; save(); try { renderAnnual(); } catch (e) {} try { renderAdvisorSetting(); } catch (e) {} }
+// ★ 2026/11/20：📏 体測（メジャーで胸囲・体高・体長を測って、推定体重と増体を出す）。設定でオン・オフ（長島牧場ははじめからオン）
+function measureOn() { const v = typeof farmTargets !== 'undefined' ? farmTargets._measure : undefined; if (v === 1 || v === 0) return v === 1; return !!(window.FARM_CFG && FARM_CFG.farmId === 'nagashima'); }
+function setMeasure(on) { farmTargets._measure = on ? 1 : 0; save(); try { renderMeasureSetting(); } catch (e) {} try { renderAll(); } catch (e) {} }
+function renderMeasureSetting() {
+  const el = document.getElementById('measure-setting'); if (!el) return;
+  const on = measureOn();
+  el.innerHTML = `<div style="display:flex;align-items:center;gap:10px;">
+    <div style="flex:1;"><div style="font-size:13px;font-weight:700;">📏 体測（メジャーで測る）</div><div style="font-size:11px;color:var(--muted);">胸囲・体高・体長を入れて、推定体重と増体（DG）を出します。「記録する」に体測のボタンが出ます</div></div>
+    <button onclick="setMeasure(${on ? 'false' : 'true'})" style="min-width:64px;padding:7px 12px;border-radius:999px;font-weight:900;font-size:12px;cursor:pointer;border:1px solid ${on ? 'var(--accent2)' : 'var(--border)'};background:${on ? 'var(--accent2)' : 'var(--bg2)'};color:${on ? '#000' : 'var(--muted)'};">${on ? 'オン' : 'オフ'}</button>
+  </div>`;
+}
+// 胸囲から推定体重（kg）。和牛（黒毛・褐毛）は熊本県の子牛の式、F1などは福岡県の式（6〜26か月の肥育牛）。どちらも目安
+function estWeight(girth, breed) {
+  const g = +girth; if (!g) return null;
+  const b = String(breed || '');
+  let w = (/F1|交雑|ホル|乳/.test(b) && g >= 130) ? 5.88 * g - 594.2 : 55.256 - 2.114190 * g + 0.024323 * g * g;
+  return w > 0 ? Math.round(w) : null;
+}
+function measureBreed(obj) { try { return obj.dob && !obj.events ? _annCalfBreed(obj) : (obj.breed || ''); } catch (e) { return obj.breed || ''; } }
+// 測った記録（古い順）に推定体重・DGをつける
+function measureRows(obj) {
+  const br = measureBreed(obj);
+  const L = (obj.measures || []).filter(m => m && m.date).slice().sort((a, b) => a.date.localeCompare(b.date)).map(m => ({ ...m, w: estWeight(m.girth, br) }));
+  L.forEach((m, i) => { const p = L[i - 1]; m.dg = p && p.w && m.w && m.date > p.date ? Math.round((m.w - p.w) / diffDays(m.date, p.date) * 100) / 100 : null; m.age = obj.dob ? (diffDays(m.date, obj.dob) / 30.4).toFixed(1) : ''; });
+  return L;
+}
+function measureCardHTML(obj) {
+  if (!measureOn()) return '';
+  const md = d => d ? (+d.slice(5, 7)) + '/' + (+d.slice(8, 10)) : '';
+  const L = measureRows(obj); if (!L.length) return '';
+  const W = L.filter(m => m.w);
+  let svg = '';
+  if (W.length >= 2) {
+    const lo = Math.min(...W.map(m => m.w)), hi = Math.max(...W.map(m => m.w)), d0 = W[0].date, span = Math.max(1, diffDays(W[W.length - 1].date, d0));
+    const X = m => 30 + diffDays(m.date, d0) / span * 300, Y = m => 100 - (hi === lo ? 40 : (m.w - lo) / (hi - lo) * 80);
+    svg = `<svg viewBox="0 0 340 120" width="100%" style="display:block;margin-bottom:6px;"><line x1="26" x2="336" y1="100" y2="100" stroke="#475569"/><text x="22" y="103" font-size="9" fill="#94a3b8" text-anchor="end">${lo}</text><text x="22" y="23" font-size="9" fill="#94a3b8" text-anchor="end">${hi}</text>
+      <polyline points="${W.map(m => X(m) + ',' + Y(m)).join(' ')}" fill="none" stroke="#4ade80" stroke-width="2"/>${W.map(m => `<circle cx="${X(m)}" cy="${Y(m)}" r="4" fill="#4ade80"><title>${md(m.date)} ${m.w}kg</title></circle><text x="${X(m)}" y="114" font-size="9" fill="#94a3b8" text-anchor="middle">${md(m.date)}</text>`).join('')}</svg>`;
+  }
+  return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px;">
+    <div style="font-size:13px;font-weight:800;margin-bottom:6px;">📏 発育（推定体重）</div>${svg}
+    <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <tr style="color:var(--muted);font-size:11px;"><td style="padding:4px 2px;">測った日</td><td style="text-align:right;">月齢</td><td style="text-align:right;">胸囲</td><td style="text-align:right;">体高</td><td style="text-align:right;">体長</td><td style="text-align:right;">推定体重</td><td style="text-align:right;">DG</td></tr>
+      ${L.slice().reverse().map(m => `<tr style="border-top:1px solid rgba(255,255,255,.06);"><td style="padding:5px 2px;">${md(m.date)}</td><td style="text-align:right;">${m.age}</td><td style="text-align:right;">${m.girth || '—'}</td><td style="text-align:right;">${m.height || '—'}</td><td style="text-align:right;">${m.length || '—'}</td><td style="text-align:right;font-weight:800;">${m.w != null ? m.w + 'kg' : '—'}</td><td style="text-align:right;color:${m.dg == null ? 'var(--muted)' : m.dg < 0.6 ? '#f59e0b' : '#4ade80'};font-weight:700;">${m.dg == null ? '' : m.dg.toFixed(2)}</td></tr>`).join('')}
+    </table></div>
+    <div style="font-size:10px;color:var(--muted);margin-top:4px;">推定体重は胸囲からの目安です（和牛は熊本県・F1は福岡県の式）。</div></div>`;
+}
+// 牛舎ごとの体測のまとめ：平均DG・伸びが悪い牛（DG 0.6未満）・60日以上測っていない牛
+function barnMeasureTxt(l) {
+  if (!measureOn()) return '';
+  const R = l.map(x => measureRows(x.c)).filter(L => L.length);
+  if (!R.length) return '';
+  const dgs = R.map(L => L[L.length - 1].dg).filter(v => v != null);
+  const poor = dgs.filter(v => v < 0.6).length, stale = R.filter(L => diffDays(today(), L[L.length - 1].date) >= 60).length;
+  return [dgs.length ? `📏 平均DG ${(dgs.reduce((a, b) => a + b, 0) / dgs.length).toFixed(2)}` : '📏 体測あり', poor ? `<span style="color:#f59e0b;font-weight:800;">⚠ 伸びが悪い ${poor}頭</span>` : '', stale ? `60日以上測っていない ${stale}頭` : ''].filter(Boolean).join('　');
+}
 function renderAdvisorSetting() {
+  try { renderMeasureSetting(); } catch (e) {}
   const el = document.getElementById('advisor-setting');
   if (!el) return;
   const on = advisorOn();
@@ -11815,15 +11893,27 @@ function barnBulkMove(opt) {
   armUndo(`${_barnSel.size}頭の移動を記録しました`);
   const toStory = opt ? !!opt.story : !!(document.getElementById('barn-mv-story') || { checked: true }).checked;
   const extra = toStory ? {} : { init: true };   // init：所在の設定だけ（ストーリーには出さない）
+  // ★ 2026/11/20：子牛を体格の節目（育成舎①・育成舎②・出荷）へ移すときは、1頭ずつ体格を聞く（牛群リストの「移動」と同じ）
+  if (!opt && toStory && SCORE_STAGES.includes(to)) {
+    const calfIds = [..._barnSel].filter(k => k.startsWith('calf:')).map(k => k.slice(5));
+    if (calfIds.length) {
+      [..._barnSel].filter(k => k.startsWith('calf:')).forEach(k => _barnSel.delete(k));
+      if (_barnSel.size) barnBulkMove({ to, date, story: toStory });   // 親牛は先にまとめて
+      window._bulkMoveQueue = calfIds.slice(); window._bulkLastTo = to;
+      window._bulkMoveNext = () => { const id = (window._bulkMoveQueue || []).shift(); if (id) openMoveDialog('calf', id, to); };
+      window._bulkMoveNext(); return;
+    }
+  }
   let n = 0;
   _barnSel.forEach(k => {
     const [kind, id] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)];
     if (kind === 'cow') {
       const c = cows.find(x => x.id === id); if (!c || to === '出荷' || cowLocation(c) === to) return;   // 親牛の出荷は廃用の画面から
       c.events = c.events || []; c.events.push(Object.assign({ type: 'move', date, to, memo: toStory ? '牛舎別からまとめて移動' : '所在の設定' }, extra)); n++;
+      if (to === '産室') tasks.forEach(t => { if (t.cowId === c.id && !t.done && t.action === '🏠 産室移動') { t.done = true; t.doneAt = new Date().toISOString(); } });
     } else {
       const c = calves.find(x => x.id === id); if (!c || calfLocation(c) === to) return;
-      c.moves = c.moves || []; c.moves.push(Object.assign({ date, to, memo: toStory ? '牛舎別からまとめて移動' : '所在の設定' }, extra)); if (to === '出荷') c.shipDate = date;
+      c.moves = c.moves || []; c.moves.push(Object.assign({ date, to, memo: toStory ? '牛舎別からまとめて移動' : '所在の設定' }, extra, opt && opt.scores && opt.scores[id] ? { score: opt.scores[id] } : {})); if (to === '出荷') c.shipDate = date;
       // ★ 育成などの牛舎へ移したら離乳済（移動済み）にする。子牛牛舎を決めている農場は今までどおり牛舎で自動
       if (!(window.FARM_CFG && FARM_CFG.calfBarn) && weanBarn(to) && ['active', 'kept'].includes(c.status || 'active')) { if (c.status === 'kept') c.isBreedingCandidate = true; c.status = 'moved'; }
       n++;
@@ -11939,7 +12029,7 @@ function renderBarnBoard() {
     </div>` : `<div style="padding:6px 12px;font-size:11px;color:var(--muted);">牛舎を開いて□にチェック → まとめて別の牛舎へ移せます</div>`}
     ${names.map(b => { const l = m[b] || [], open = _barnOpen === b;
       return `<div onclick="_barnOpen=${open ? 'null' : `'${E(b)}'`};renderBarnBoard();" style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-top:1px solid var(--border);cursor:pointer;${open ? 'background:rgba(96,165,250,.08);' : ''}">
-          <span style="font-size:14px;">${open ? '▾' : '▸'} ${b ? E(b) : '<span style="color:var(--muted);">牛群なし</span>'}${(() => { const n = l.filter(x => x.kind === 'calf' && calfWeanLate(x.c)).length; return n ? ` <span style="font-size:11px;font-weight:800;color:#f59e0b;">⚠ 離乳まだ ${n}頭</span>` : ''; })()}</span>
+          <span style="font-size:14px;">${open ? '▾' : '▸'} ${b ? E(b) : '<span style="color:var(--muted);">牛群なし</span>'}${(() => { const n = l.filter(x => x.kind === 'calf' && calfWeanLate(x.c)).length; return n ? ` <span style="font-size:11px;font-weight:800;color:#f59e0b;">⚠ 離乳まだ ${n}頭</span>` : ''; })()}${(() => { const t = barnMeasureTxt(l); return t ? `<div style="font-size:11px;font-weight:400;color:var(--muted);margin-top:2px;">${t}</div>` : ''; })()}</span>
           <span style="display:flex;align-items:center;gap:8px;">${barnCountTxt(l) ? `<span style="font-size:11px;color:var(--muted);">${barnCountTxt(l)}</span>` : ''}<span style="min-width:30px;text-align:center;font-size:12px;font-weight:800;padding:2px 9px;border-radius:12px;background:${l.length ? '#65a30d' : 'var(--bg3)'};color:${l.length ? '#fff' : 'var(--muted)'};">${l.length}</span></span></div>
         ${open ? `<div style="padding:0 12px 6px;">${l.length ? `<div style="text-align:right;padding:6px 0 2px;"><button onclick="_barnSelAll('${E(b)}', ${barnVisible(b, l).every(x => _barnSel.has(x.kind + ':' + x.c.id)) ? 'false' : 'true'})" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;">${barnVisible(b, l).every(x => _barnSel.has(x.kind + ':' + x.c.id)) ? '選択をはずす' : (barnKindOf(b, l) ? (barnKindOf(b, l) === 'cow' ? '親牛を全部選ぶ' : '子牛を全部選ぶ') : 'この牛舎を全部選ぶ')}</button></div>` : ''}${l.length ? barnGroupHTML(l, row, b, k => `_barnKind['${E(b)}']='${k}';renderBarnBoard();`) : '<div style="font-size:12px;color:var(--muted);padding:8px 0;">いません</div>'}</div>` : ''}`; }).join('')}
     ${emptyN && (hideEmpty || window._barnShowEmpty) ? `<div onclick="window._barnShowEmpty=!window._barnShowEmpty;renderBarnBoard()" style="padding:8px 12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);cursor:pointer;">${hideEmpty ? `▸ 0頭の牛舎 ${emptyN}か所を隠しています（タップで出す）` : '▴ 0頭の牛舎を隠す'}</div>` : ''}
@@ -26851,6 +26941,7 @@ function showCalfStory(calfId) {
         ${v && v.bad ? `<div style="color:${v.final ? '#ef4444' : '#f59e0b'};margin-top:3px;">${v.final ? '🚫 出荷時の体格が' + v.score + '。母 ' + esc(calf.damId || '') + ' × ' + esc(calf.sire || '') + ' は相性が悪いとみなします' : '⚠ ' + esc(v.stage) + 'で体格' + v.score + '（途中の評価）'}${v.ill ? '（治療歴あり：病気の影響かも）' : ''}</div>` : ''}
         ${v && v.declining && !v.bad ? '<div style="color:var(--warn);margin-top:3px;">伸びが悪い（だんだん下がっている）</div>' : ''}
       </div>`; })()}
+    ${measureCardHTML(calf)}
     <div style="display:flex;align-items:center;flex-wrap:wrap;gap:2px;margin-bottom:10px;">
       ${(calf.tags || []).map(t => `<span class="herd-tag">${esc(t)}</span>`).join('')}
       <button class="herd-tagbtn" style="color:var(--muted);" onclick="openTagEditor('calf','${esc(calf.id)}')">🏷 ${(calf.tags || []).length ? '編集' : 'タグを付ける'}</button>
@@ -33575,7 +33666,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112002';
+const APP_BUILD = '2026112004';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -34684,6 +34775,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
           ${tile('note', '📝', 'メモ・処置', 'ワクチン・削蹄・除角など', 'nui-b', true)}
           ${tile('tag', '🏷', 'タグ', 'まとめてタグを付ける', 'nui-p', true)}
           ${tile('ship', '🚚', '出荷', nCow ? '繁殖牛は先に廃用にしてください' : '子牛・肥育牛', 'nui-o', !nCow)}
+          ${measureOn() ? tile('measure', '📏', '体測', T.length > 1 ? T.length + '頭を順番に測る' : '胸囲・体高・体長', 'nui-y', true) : ''}
           ${tile('death', '💀', '死亡', T.length === 1 && nCalf === 1 ? '子牛の死亡を記録' : nCow ? '親牛は1頭ずつ「廃用・死亡」から' : '子牛を1頭だけ選んでください', 'nui-r', T.length === 1 && nCalf === 1)}
         </div>
         <div style="text-align:center;margin-top:16px;"><button class="nui-chip" onclick="nuiMultiBack()">‹ 選ぶ牛を直す</button></div>
@@ -34695,6 +34787,56 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     h.insertAdjacentHTML('beforeend', `<div id="vet-queue" style="background:#1a1f2e;border:1px solid #3a3f5c;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px;">まとめて記録の続き（あと${Q.length}頭）：${Q.map(id => `<button class="st-act" style="margin:3px 4px 0 0;" onclick="window._vetQueue=(window._vetQueue||[]).filter(x=>x!=='${jsq(id)}');openVetTab('${jsq(id)}');nuiVetQ()">${esc(id)}</button>`).join('')}</div>`);
   }
   window.nuiVetQ = vetQueueHint;
+  // ---------- 📏 体測（1頭ずつ順番に。保存して次の牛へ） ----------
+  let MS = null;
+  window.nuiMeasureStart = function (L) { if (!L || !L.length) return; MS = { L, i: 0, day: 0, date: today() }; vMeasure(); };
+  function msObj(x) { return x.kind === 'cow' ? cows.find(c => c.id === x.id) : calves.find(c => c.id === x.id); }
+  function vMeasure() {
+    const x = MS.L[MS.i], o = msObj(x); if (!o) return msNext();
+    const T0 = today(), isCow = x.kind === 'cow', tag = isCow ? o.id : (o.earTagId || '耳標なし');
+    const R = measureRows(o), last = R[R.length - 1];
+    let nid = ''; try { nid = String((isCow ? ((getMasterCow(o.id) || {}).nationalId || o.nationalId) : o.nationalId) || '').replace(/\D/g, ''); } catch (e) {}
+    const br = measureBreed(o), mo = o.dob ? (diffDays(T0, o.dob) / 30.4).toFixed(1) + 'か月' : '';
+    const loc = isCow ? cowLocation(o) : calfLocation(o);
+    const days = [['今日 ' + md(T0), 0], ['昨日 ' + md(addDays(T0, -1)), 1], ['📅 ' + (MS.day === 2 ? md(MS.date) : '日付'), 2]];
+    const fld = (k, l) => `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);"><label for="ms-${k}" style="width:56px;font-size:16px;font-weight:800;color:#e2e8f0;margin:0;">${l}</label>
+        <input id="ms-${k}" inputmode="decimal" enterkeyhint="next" oninput="nuiMsCalc()" style="flex:1;min-width:0;height:54px;font-size:24px;font-weight:800;text-align:right;font-family:'JetBrains Mono',monospace;margin:0;"><span style="width:28px;color:#94a3b8;">cm</span></div>`;
+    scrShow(`${backBtn('nuiMsQuit()', '閉じる')}<span style="font-size:17px;font-weight:900;">📏 体測</span>${MS.L.length > 1 ? `<span style="font-size:13px;color:#fbbf24;font-weight:700;">${loc ? esc(loc) + ' ' : ''}${MS.i + 1}／${MS.L.length}頭目</span>` : ''}`,
+      `<div style="padding:12px 14px 30px;">
+        <div class="nui-card" style="padding:10px 14px;"><span class="nui-mono" style="font-weight:900;font-size:20px;color:#4ade80;">${esc(tag)}</span>${nid.length >= 5 ? ` <span class="nui-nid">${esc(nid.slice(-5, -1) + '-' + nid.slice(-1))}</span>` : ''} <b>${esc([br, isCow ? (nm(o.id) || '') : (o.sex === '雄' ? '♂' : o.sex === '雌' ? '♀' : '')].filter(Boolean).join(' '))}</b>
+          <div style="font-size:12px;color:#94a3b8;margin-top:3px;">${[mo, last ? `前回 ${md(last.date)}（${diffDays(T0, last.date)}日前）` : 'はじめて測る', last && last.w ? `前回の推定 ${last.w}kg` : ''].filter(Boolean).join('・')}</div></div>
+        <div style="display:flex;gap:6px;margin:12px 0 6px;">${days.map(([l, i]) => `<button class="nui-ch${MS.day === i ? ' on' : ''}" onclick="nuiMsDay(${i})">${l}</button>`).join('')}</div>
+        ${MS.day === 2 ? `<input type="date" value="${MS.date}" max="${T0}" onchange="MS_date(this.value)" style="height:44px;font-size:16px;margin-bottom:6px;">` : ''}
+        <div class="nui-card" style="padding:4px 14px;">${fld('girth', '胸囲')}${fld('height', '体高')}${fld('length', '体長')}</div>
+        <div class="nui-card" style="padding:12px 14px;margin-top:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font-size:12px;color:#94a3b8;">推定体重（胸囲から）</span><span id="ms-w" class="nui-mono" style="font-size:26px;font-weight:900;">—</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;"><span style="font-size:12px;color:#94a3b8;">${last ? `前回から（${diffDays(MS.date, last.date)}日）` : '前回から'}</span><span id="ms-dg" class="nui-mono" style="font-size:17px;font-weight:900;color:#4ade80;"></span></div>
+          <div style="font-size:11px;color:#64748b;margin-top:6px;">胸囲だけでも推定体重は出ます。体高・体長は発育の記録として残します。推定は目安です。</div></div>
+      </div>`,
+      `<div style="display:flex;gap:8px;">${MS.L.length > 1 ? `<button onclick="msNext()" style="flex:0 0 30%;height:54px;border-radius:12px;border:1px solid #3a3f5c;background:#1e2130;color:#cbd5e1;font-size:14px;font-weight:700;">とばす</button>` : ''}
+        <button onclick="nuiMsSave()" style="flex:1;height:54px;border-radius:12px;border:none;background:#22c55e;color:#000;font-size:16px;font-weight:900;">💾 ${MS.i < MS.L.length - 1 ? '保存して次の牛へ' : '保存する'}</button></div>`);
+    setTimeout(() => { const g = $('ms-girth'); if (g) g.focus(); }, 50);
+  }
+  window.nuiMsDay = function (i) { MS.day = i; MS.date = i === 0 ? today() : i === 1 ? addDays(today(), -1) : MS.date; vMeasure(); };
+  window.MS_date = function (v) { MS.date = v || today(); vMeasure(); };
+  const msNum = id => { const v = String(($(id) || {}).value || '').replace(/[０-９．]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).trim(); const n = parseFloat(v); return isNaN(n) ? null : n; };
+  window.nuiMsCalc = function () {
+    const x = MS.L[MS.i], o = msObj(x); if (!o) return;
+    const g = msNum('ms-girth'), w = estWeight(g, measureBreed(o));
+    const R = measureRows(o), last = R[R.length - 1];
+    const we = $('ms-w'); if (we) we.innerHTML = w ? `${w}<span style="font-size:13px;">kg</span>` : '—';
+    const de = $('ms-dg'); if (de) { if (w && last && last.w && MS.date > last.date) { const d = diffDays(MS.date, last.date), dw = w - last.w, dg = dw / d; de.style.color = dg < 0.6 ? '#f59e0b' : '#4ade80'; de.textContent = `${dw >= 0 ? '＋' : ''}${dw}kg　DG ${dg.toFixed(2)}`; } else de.textContent = ''; }
+  };
+  window.nuiMsSave = function () {
+    const x = MS.L[MS.i], o = msObj(x); if (!o) return msNext();
+    const m = { date: MS.date || today(), girth: msNum('ms-girth'), height: msNum('ms-height'), length: msNum('ms-length') };
+    if (!m.girth && !m.height && !m.length) { appAlert('どれか1つは入れてください（とばすときは「とばす」）'); return; }
+    if (m.girth && (m.girth < 50 || m.girth > 300)) { appAlert('胸囲が ' + m.girth + 'cm になっています。もう一度確かめてください'); return; }
+    o.measures = (o.measures || []).filter(y => y.date !== m.date); o.measures.push(m);
+    save(); msNext();
+  };
+  window.msNext = function () { MS.i++; if (MS.i >= MS.L.length) { const n = MS.L.length; MS = null; scrClose(); try { renderAll(); } catch (e) {} if (n > 1) appAlert(`📏 ${n}頭の体測が終わりました`); return; } vMeasure(); };
+  window.nuiMsQuit = function () { MS = null; scrClose(); try { renderAll(); } catch (e) {} };
   window.nuiMultiBack = function () { S.v = 'cow'; render(); };
   // 選んだ牛を、牛群リストのまとめて記録（メモ・タグ）と同じ形にして渡す
   function bpTargets() {
@@ -34712,6 +34854,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       BP.sel.clear(); return nuiShip(keys);
     }
     if (a === 'note') { bpUseHerdSel(); BP.sel.clear(); scrClose(); return herdBulkNote(); }
+    if (a === 'measure') { const L = bpTargets().map(t => ({ kind: t.kind, id: t.obj.id })); BP.sel.clear(); return nuiMeasureStart(L); }
     if (a === 'death') { const k = keys[0]; if (keys.length !== 1 || !k.startsWith('calf:')) return; BP.sel.clear(); scrClose(); return recordCalfDeath(k.slice(5)); }
     if (a === 'med') {
       const ids = bpTargets().map(t => t.kind === 'cow' ? t.obj.id : (t.obj.earTagId || String(t.obj.nationalId || ''))).filter(Boolean);
@@ -34732,27 +34875,35 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const allNone = T.every(t => !(t.kind === 'cow' ? cowLocation(t.obj) : calfLocation(t.obj)));
     if (BM.story === null) BM.story = !allNone;
     const barns = getBarns().concat(T.every(t => t.kind === 'calf') ? ['出荷'] : []);
+    BM.sc = BM.sc || {};
+    const needScore = !!BM.to && BM.story !== false && SCORE_STAGES.includes(BM.to) && T.some(t => t.kind === 'calf');
+    const scoredAll = !needScore || T.filter(t => t.kind === 'calf').every(t => BM.sc[t.obj.id]);
     scrShow(`${backBtn("BMback()")}<span style="font-size:17px;font-weight:900;">🏠 ${T.length}頭をまとめて移動</span>`,
       `<div style="padding:12px 14px 30px;">
         <div style="font-size:12px;color:#94a3b8;margin-bottom:10px;">${T.slice(0, 30).map(t => esc(t.id)).join('・')}${T.length > 30 ? ' ほか' : ''}</div>
         <div style="font-size:12px;font-weight:700;color:#94a3b8;margin-bottom:6px;">移動先</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">${barns.map(b => `<button class="nui-ch${BM.to === b ? ' on' : ''}" onclick="BMset('to','${jsq(b)}')">${esc(b)}</button>`).join('')}</div>
         ${BM.to && weanBarn(BM.to) && T.some(t => t.kind === 'calf' && (t.obj.status || 'active') === 'active') ? '<div style="font-size:12px;color:#4ade80;margin-top:8px;">✓ 子牛は「離乳済」になります</div>' : ''}
+        ${needScore ? `<div style="font-size:12px;font-weight:700;color:#94a3b8;margin:14px 0 6px;">子牛の体格（1小〜5大）を1頭ずつ <span style="color:${scoredAll ? '#4ade80' : '#f59e0b'};">${T.filter(t => t.kind === 'calf' && BM.sc[t.obj.id]).length}／${T.filter(t => t.kind === 'calf').length}頭</span></div>
+          <div class="nui-card" style="padding:0 12px;">${T.filter(t => t.kind === 'calf').map(t => `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);">
+            <span style="flex:1;min-width:0;"><b class="nui-mono">${esc(t.id)}</b> <span style="font-size:11px;color:#94a3b8;">${t.obj.dob ? Math.floor(diffDays(today(), t.obj.dob) / 30.4) + 'か月' : ''}</span></span>
+            ${[1, 2, 3, 4, 5].map(n => `<button onclick="BMsc('${jsq(t.obj.id)}',${n})" style="width:38px;height:38px;border-radius:9px;border:1px solid ${BM.sc[t.obj.id] === n ? '#22c55e' : '#3a3f5c'};background:${BM.sc[t.obj.id] === n ? '#22c55e' : 'transparent'};color:${BM.sc[t.obj.id] === n ? '#000' : '#e2e8f0'};font-weight:900;font-size:15px;">${n}</button>`).join('')}</div>`).join('')}</div>` : ''}
         <div style="font-size:12px;font-weight:700;color:#94a3b8;margin:14px 0 6px;">移動した日</div>
         <input type="date" value="${BM.date}" max="${T0}" onchange="BMset('date',this.value||'${T0}')" style="height:46px;font-size:16px;">
         <label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:14px;"><input type="checkbox" ${BM.story ? 'checked' : ''} onchange="BMset('story',this.checked)" style="width:20px;height:20px;"> ストーリーに「移動」として残す</label>
         <div style="font-size:11px;color:#64748b;margin-top:4px;">はじめて所在を決めるだけのときは外してください</div>
       </div>`,
-      `<button onclick="BMsave()" ${BM.to ? '' : 'disabled'} style="width:100%;height:54px;border-radius:12px;border:none;background:#22c55e;color:#000;font-size:17px;font-weight:900;opacity:${BM.to ? 1 : .45};">${BM.to ? `🏠 ${T.length}頭を「${esc(BM.to)}」へ移す` : '移動先を選んでください'}</button>`);
+      `<button onclick="BMsave()" ${BM.to && scoredAll ? '' : 'disabled'} style="width:100%;height:54px;border-radius:12px;border:none;background:#22c55e;color:#000;font-size:17px;font-weight:900;opacity:${BM.to && scoredAll ? 1 : .45};">${!BM.to ? '移動先を選んでください' : !scoredAll ? '子牛の体格を全部入れてください' : `🏠 ${T.length}頭を「${esc(BM.to)}」へ移す`}</button>`);
   }
   window.BMback = function () { BM = null; S.v = BP.sel.size ? 'multi' : 'cow'; render(); };
   window.BMset = function (k, v) { BM[k] = v; vBulkMove(); };
+  window.BMsc = function (id, n) { BM.sc = BM.sc || {}; BM.sc[id] = BM.sc[id] === n ? 0 : n; const sb = document.querySelector('#nui-scr .sb'), top = sb ? sb.scrollTop : 0; vBulkMove(); const sb2 = document.querySelector('#nui-scr .sb'); if (sb2) sb2.scrollTop = top; };
   window.BMsave = function () {
     if (!BM || !BM.to) return;
     const to = BM.to;
     _barnSel.clear(); [...BP.sel].forEach(k => _barnSel.add(k));
     // 牛群リストの「まとめて移動」をそのまま使う
-    const opt = { to, date: BM.date, story: !!BM.story };
+    const opt = { to, date: BM.date, story: !!BM.story, scores: BM.sc || {} };
     BM = null; BP.sel.clear(); scrClose();
     barnBulkMove(opt);
   };
@@ -35209,7 +35360,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     ai: ['💉', '種付け・移植', 'nui-g', 'AI・ET・自然交配'], preg: ['🔍', '妊鑑', 'nui-b', ''], et: ['🧬', '移植ET', 'nui-p', ''], calv: ['🍼', '分娩', 'nui-p', ''],
     estrus: ['🔥', '発情', 'nui-o', ''], med: ['💊', '治療', 'nui-b', ''], prog: ['📅', 'プログラム', 'nui-g', ''], move: ['🏠', '移動', 'nui-y', ''],
     still: ['💔', '流死産', 'nui-r', ''], memo: ['📝', 'メモ', 'nui-y', ''],
-    retire: ['🚫', '廃用・死亡', 'nui-r', '売却・死亡・廃棄も'], ship: ['🚚', '出荷', 'nui-y', '']
+    retire: ['🚫', '廃用・死亡', 'nui-r', '売却・死亡・廃棄も'], measure: ['📏', '体測', 'nui-y', '胸囲・体高・体長'], ship: ['🚚', '出荷', 'nui-y', '']
   };
   window.nuiAIet = function () { const id = S.cow; scrClose(); addEventForCow(id, 'et_done'); };
   window.nuiAct = function (k) {
@@ -35226,6 +35377,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     if (k === 'still') { openStillbirthWizard(); try { selectSbWizCow(id, nm(id)); } catch (e) {} return; }
     if (k === 'memo') return openCowNote(id);
     if (k === 'retire') return openRetireModal(id);
+    if (k === 'measure') return nuiMeasureStart([{ kind: 'cow', id }]);
     if (k === 'ship') { openRetireModal(id); try { setRetireExit('ship'); } catch (e) {} return; }   // 繁殖牛の出荷＝出荷・販売で廃用
   };
   function vAct() {
@@ -35234,7 +35386,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const FAV = { wait: ['preg', 'ai'], preg: ['calv', 'med'], program: ['ai', 'med'], donor: ['ai', 'med'], fresh: ['ai', 'med'], open: ['ai', 'estrus'] }[k] || ['ai', 'med'];
     const favSub = { preg: nextPreg ? (String(nextPreg.detail || '').match(/\d+日/) || [''])[0] ? '妊娠' + String(nextPreg.detail).match(/(\d+)日/)[1] + '日の予定' : '妊鑑の予定 ' + md(nextPreg.date) : '最後の授精の結果', ai: 'AI・ET・自然交配', calv: c.dueDate ? '予定 ' + md(c.dueDate) : '', med: '薬・処置', estrus: '発情・見送り', et: '受精卵' };
     // ★ 2026/11/20：ボタンの色はぜんぶ同じにする（よく使う2つだけ緑の枠）
-    const rest = ['calv', 'estrus', 'med', 'prog', 'move', 'still', 'memo', 'retire', 'ship', 'ai', 'preg'].filter(x => !FAV.includes(x)).slice(0, 9);
+    const rest = ['calv', 'estrus', 'med', 'prog', 'move', 'still', 'memo', ...(measureOn() ? ['measure'] : []), 'retire', 'ship', 'ai', 'preg'].filter(x => !FAV.includes(x)).slice(0, measureOn() ? 10 : 9);
     scrShow(`${backBtn("nuiRec(null,null)")}<span style="font-size:17px;font-weight:900;">➕ 記録する</span>`,
       `<div style="margin:12px 14px 0;" class="nui-card"><div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
         <div style="min-width:0;"><span class="nui-mono" style="font-weight:900;font-size:20px;color:#4ade80;">${esc(c.id)}</span> <span style="font-size:16px;font-weight:700;">${esc(nm(c.id))}</span><div style="font-size:12px;color:#94a3b8;">${esc(li ? insLabel(li) + ' ・ ' + diffDays(today(), li.date) + '日前' : cowSub(c))}</div></div>${stTag(c)}</div></div>
@@ -35530,6 +35682,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const dt = document.createElement('details'); dt.className = 'nui-more-met';
     dt.innerHTML = '<summary>▼ くわしい数字</summary>';
     met.parentNode.insertBefore(dt, met); dt.appendChild(met);
+    try { const mh = measureCardHTML(c); if (mh) { const mc = document.createElement('div'); mc.innerHTML = mh; dt.parentNode.insertBefore(mc, dt); } } catch (e) {}
     if (lin) lin.style.display = 'none';
     // 今後の予定をカードにして上へ
     const secs = [...box.querySelectorAll(':scope > .st-sec')];
