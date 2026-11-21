@@ -7696,7 +7696,7 @@ function buildCowStory(cowId) {
       const stopped = e._retired && DONOR_PROG_TYPES.includes(e.type);
       if (stopped) kv.push([(e.stoppedAt ? fmtDate(e.stoppedAt) + ' ' : '') + (e.stopMemo ? _stEsc(e.stopMemo) : ''), '🛑 採卵中止']);
       items.push({ date: e.date, cat: 'treat', color: e.type === 'pg_rescue' ? '#ef4444' : '#94a3b8', title: '▶ ' + progLabel[e.type] + (e.protocol === 'takahashi' ? '（高橋式）' : '') + (stopped ? '（中止）' : ''), badge: null, desc: '', kv, memo: donor ? '' : e.memo,
-        acts: stopped && !isRetired ? [`<button class="st-act" onclick="undoStopDonor('${_stEsc(cowId)}',${e._idx})">↩ 中止を取り消す</button>`] : [] });
+        acts: isRetired || e.type === 'pg_rescue' ? [] : [...(stopped ? [`<button class="st-act" onclick="undoStopDonor('${_stEsc(cowId)}',${e._idx})">↩ 中止を取り消す</button>`] : []), `<button class="st-act del" onclick="deleteProgStart('${_stEsc(cowId)}',${e._idx})">🗑 なかったことにする</button>`] });
     } else if (e.type === 'open') {
       items.push({ date: e.date, cat: 'breed', color: '#94a3b8', title: '空胎に戻す', badge: null, desc: '', kv: [], memo: e.memo, acts: [] });
     }
@@ -8963,6 +8963,30 @@ function saveCowNote(cowId, evIdx) {
   try { const mc = document.getElementById('modal-cow'); if (mc && mc.classList.contains('open')) showCowDetail(cowId); } catch (e) {}
 }
 // ストーリーからメモ・発情（見送り）の記録を消す
+// ▶ プログラム開始を「なかったことにする」：開始の記録と、そのプログラムのまだ済んでいない予定を消す（済んだ予定・授精などの記録は残す）
+async function deleteProgStart(cowId, evIdx) {
+  const cow = cows.find(c => c.id === cowId);
+  const e = cow && (cow.events || [])[evIdx];
+  if (!e || typeof PROG_START_TYPES === 'undefined' || !PROG_START_TYPES.includes(e.type)) return;
+  const P = { cidr_ai_start: 'cidr_ai', et_recipient: e.protocol === 'takahashi' ? 'et_cidr_takahashi' : 'et_cidr', estrus_et: 'estrus_et', estrus_ai: 'estrus_ai', donor_et_start: 'donor_et', donor_et_pretreat_start: 'donor_et_pretreat', donor_et_takahashi_start: 'donor_et_takahashi' }[e.type];
+  let keys = new Set();
+  try { if (P && PROTOCOLS[P]) generateSchedule(P, e.date, cowId).forEach(x => keys.add(x.date + '|' + x.action)); } catch (er) {}
+  let left = tasks.filter(t => t.cowId === cowId && !t.done && keys.has(t.date + '|' + t.action));
+  try { if (DONOR_PROG_TYPES.includes(e.type)) left = [...new Set([...left, ...donorProgramTasks(cowId, e.date).filter(t => !t.done)])]; } catch (er) {}
+  const label = (e.type === 'et_recipient' && e.protocol === 'takahashi' ? 'ETレシピエント（高橋式）' : '') || { cidr_ai_start: 'CIDRプログラム（AI）', et_recipient: 'ETレシピエント', estrus_et: '自然発情→ET', estrus_ai: '発情→AI', donor_et_start: '採卵（自然発情）', donor_et_pretreat_start: '採卵（前処置）', donor_et_takahashi_start: '採卵（高橋式）' }[e.type] || 'プログラム';
+  if (!await appConfirm(`${fmtDate(e.date)} に始めた「${label}」のプログラムを、なかったことにします。\n\n・ストーリーの「▶ プログラム開始」${e._retired ? 'と「🛑 採卵中止」' : ''}を消します\n・まだ済んでいない、このプログラムの予定 ${left.length}件 を消します\n・済んだ予定や、授精・移植の記録は消しません`)) return;
+  try { armUndo('プログラムをなかったことにしました'); } catch (er) {}
+  const ids = new Set(left);
+  tasks = tasks.filter(t => !ids.has(t));
+  cow.events.splice(evIdx, 1);
+  if (e.type === 'estrus_et' || e.type === 'estrus_ai') cow.events = cow.events.filter(x => !(x.type === 'estrus' && x.date === e.date && !x.skip));
+  if (cow.status === 'program' || cow.status === 'donor') { cow.status = 'open'; }
+  try { if (typeof reconcileCow === 'function') reconcileCow(cow); } catch (er) {}
+  _rptCache = null;
+  save();
+  try { renderAll(); } catch (er) {}
+  showCowDetail(cowId);
+}
 async function deleteStoryEvent(cowId, evIdx) {
   const cow = cows.find(c => c.id === cowId);
   const e = cow && (cow.events || [])[evIdx];
@@ -14821,6 +14845,31 @@ function quickReg(cowId, event) {
     onQrEventChange();
   }, 50);
 }
+// プログラム開始日から計算した授精・移植の予定日（未来なら、使う精液・受精卵の欄は出さない）
+function _qrInsemPlan(ev0, date) {
+  const P = { cidr_ai_start: 'cidr_ai', estrus_et: 'estrus_et', et_recipient: 'et_cidr', et_recipient_takahashi: 'et_cidr_takahashi' }[ev0];
+  if (!P || !date || typeof PROTOCOLS === 'undefined' || !PROTOCOLS[P]) return null;
+  const it = PROTOCOLS[P](date).find(x => /人工授精|AI実施|胚移植/.test(x.action || ''));
+  return it ? { date: addDays(date, it.day), et: /胚移植/.test(it.action) } : null;
+}
+function _qrFutureSemen() {
+  const ev0 = (document.getElementById('qr-event') || {}).value || '';
+  const date = (document.getElementById('qr-date') || {}).value || '';
+  const g = document.getElementById('qr-semen-embryo-group'); if (!g) return;
+  let note = document.getElementById('qr-future-note');
+  if (!note) { note = document.createElement('div'); note.id = 'qr-future-note'; note.style.cssText = 'display:none;font-size:12px;color:var(--muted);background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px;line-height:1.6;'; g.parentNode.insertBefore(note, g); }
+  const pl = _qrInsemPlan(ev0, date);
+  if (pl && pl.date > today()) {
+    g.style.display = 'none';
+    ['qr-semen-select', 'qr-semen-name-input', 'qr-embryo-select', 'qr-embryo-name-input', 'qr-embryo-dam-input'].forEach(id => { const x = document.getElementById(id); if (x) x.value = ''; });
+    note.style.display = '';
+    note.innerHTML = `${pl.et ? '移植' : '授精'}の予定日は <b>${fmtDate(pl.date)}</b> です。使う${pl.et ? '受精卵' : '精液'}は、その日に${pl.et ? '移植' : '授精'}を記録するときに入れてください。`;
+  } else {
+    note.style.display = 'none';
+    const ev = ev0 === 'et_recipient_takahashi' ? 'et_recipient' : ev0;
+    g.style.display = ['ai_done', 'estrus_ai', 'cidr_ai_start', 'et_done', 'et_recipient', 'estrus_et'].includes(ev) ? '' : 'none';
+  }
+}
 function onQrEventChange() {
   const ev0 = document.getElementById('qr-event').value;
   const ev = ev0 === 'et_recipient_takahashi' ? 'et_recipient' : ev0;
@@ -14834,6 +14883,7 @@ function onQrEventChange() {
   if (opGroup) opGroup.style.display = (isAI || isET) ? '' : 'none';
   const semEmbGroup = document.getElementById('qr-semen-embryo-group');
   if (semEmbGroup) semEmbGroup.style.display = (isAI || isET) ? '' : 'none';
+  try { _qrFutureSemen(); } catch (e) {}
   document.getElementById('qr-date-label').textContent =
     ev === 'calving' ? '分娩日' :
     ev === 'cidr_ai_start' || ev === 'et_recipient' || ev === 'donor_et_start' ? 'プログラム開始日（D0）' :
@@ -14910,9 +14960,11 @@ function switchDonorToNormalAI() {
   if (sel) sel.innerHTML = buildSemenOptions(qrCowId);
   setQrPreg('pending');
   onQrDateChange();
+  try { _qrFutureSemen(); } catch (e) {}
 }
 
 function onQrDateChange() {
+  try { _qrFutureSemen(); } catch (e) {}
   const ev = document.getElementById('qr-event').value;
   const date = document.getElementById('qr-date').value;
   if (!date || (ev !== 'ai_done' && ev !== 'et_done')) return;
@@ -33923,7 +33975,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112107';
+const APP_BUILD = '2026112109';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -36267,7 +36319,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       const card = document.createElement('div'); card.className = 'nui-sched';
       card.innerHTML = `<div class="h">${esc(sch.textContent.trim())}</div>`;
       let n = sch.nextElementSibling; const rows = [];
-      while (n && n.classList.contains('st-row')) { rows.push(n); n = n.nextElementSibling; }
+      // ★ 2026/11/21：5件目からの「残り○件を見る」（たたんである分とボタン）も一緒にカードに入れる。前は置き去りで、残りが見られなかった
+      while (n && (n.classList.contains('st-row') || n.id === 'st-pend-more' || (n.tagName === 'BUTTON' && /st-pend-more/.test(n.getAttribute('onclick') || '')))) { rows.push(n); n = n.nextElementSibling; }
       rows.forEach(x => card.appendChild(x));
       sch.replaceWith(card);
       dt.parentNode.insertBefore(card, dt.nextSibling);
