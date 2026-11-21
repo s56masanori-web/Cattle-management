@@ -1318,16 +1318,17 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
     </div>
 
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;">③ 日付</div>
-    <input type="date" id="sb-wiz-date" style="font-size:14px;margin-bottom:14px;">
+    <input type="date" id="sb-wiz-date" style="font-size:14px;margin-bottom:14px;" onchange="_sbSuggest()">
+    <div id="sb-wiz-hint" style="display:none;font-size:12px;line-height:1.6;margin:-6px 0 14px;padding:8px 10px;border-radius:8px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.35);color:#fde68a;"></div>
     <input type="hidden" id="sb-wiz-cowid" value="">
-    <input type="hidden" id="sb-wiz-type" value="stillbirth">
+    <input type="hidden" id="sb-wiz-type" value="">
     <div id="sb-wiz-cause-wrap" style="display:none;margin-bottom:14px;">
       <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px;">流産の原因</div>
       <select id="sb-wiz-cause" style="font-size:14px;width:100%;"></select>
-      <div style="font-size:10px;color:var(--muted);margin-top:3px;">「早期胚死滅」にすると、年間まとめ・経営指標の流産には数えません</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:3px;">「早期胚死滅」にすると、成績の流産には数えません</div>
     </div>
 
-    <button class="btn btn-danger" onclick="sbWizNext()" style="width:100%;font-size:14px;font-weight:700;padding:12px;">記録する →</button>
+    <button class="btn btn-danger" id="sb-wiz-go" onclick="sbWizNext()" style="width:100%;font-size:14px;font-weight:700;padding:12px;">記録する →</button>
   </div>
 </div>
 
@@ -8193,7 +8194,7 @@ function annualItems(year) {
   it.still = CV.filter(c => _annIsStill(c) && inY(c.deathDate || c.dob)).map(c => ({ breed: _annCalfBreed(c), date: c.deathDate || c.dob, label: calfLabel(c), sex: c.sex,
     cause: _annStillCause(c), calfId: c.id, sub: sexT(c.sex) }));
   const _misRec = a => (typeof miscarriageRecords !== 'undefined' ? miscarriageRecords : []).find(r => r.cowId === a.cowId && Math.abs(diffDays(r.date, a.date)) <= 7);
-  it.abort = annAbortions().filter(a => inY(a.date) && a.counted).map(a => { const mr = _misRec(a); return { breed: a.breed, date: a.date, label: `${a.cowId} ${_annName(a.cowId)}`, misId: mr ? mr.id : null, sub: (a.days != null ? `妊娠${a.days}日ごろ` : '') + '　原因：' + ((mr && abortionCauseText(mr)) || '未入力') + (a.memo && a.memo !== '流産' ? '　' + a.memo : '') }; });
+  it.abort = annAbortions().filter(a => inY(a.date) && a.counted).map(a => { const mr = _misRec(a); return { breed: a.breed, date: a.date, cowId: a.cowId, gDays: a.days, cause: (mr && abortionCauseText(mr)) || '', label: `${a.cowId} ${_annName(a.cowId)}`, misId: mr ? mr.id : null, sub: (a.days != null ? `妊娠${a.days}日（約${Math.round(a.days / 30.4)}か月）` : '') + '　原因：' + ((mr && abortionCauseText(mr)) || '未入力') + (a.memo && a.memo !== '流産' ? '　' + a.memo : '') }; });
   it._abortExcl = annAbortions().filter(a => inY(a.date) && !a.counted);
   // 子牛・育成・肥育の死亡：死亡時の月齢で分ける（〜4か月＝子牛、5〜12か月＝育成、13か月〜＝肥育）
   const FD = (typeof fattenDeaths !== 'undefined' ? fattenDeaths : []);
@@ -8259,14 +8260,15 @@ function renderAnnual() {
   const body = document.getElementById('ann-body');
   const t0 = performance.now();
   try {
-    if (_annTab === 'preg') renderPregRate(body, _annYear);
+    if (window.nuiAnnBody && nuiAnnBody(body, _annTab, _annYear)) {}
+    else if (_annTab === 'preg') renderPregRate(body, _annYear);
     else if (_annTab === 'first') renderFirstAI(body);
     else if (_annTab === 'kpi') renderKPI(body, _annYear);
     else if (_annTab === 'dis') renderDisease(body, _annYear);
     else if (_annTab === 'drug') renderDrugCost(body, _annYear);
     else _renderAnnualSummary(body);
   } catch (e) { console.error(e); body.innerHTML = '<div style="color:var(--danger);font-size:12px;">表示できませんでした：' + _stEsc(e.message) + '</div>'; }
-  if (_annTab !== 'first' && _annTab !== 'drug') { try { const adv = advisorHTML(_annTab, _annYear); if (adv) body.insertAdjacentHTML('afterbegin', adv); } catch (e) { console.error(e); } }
+  if (window.nuiAnnBody ? _annTab === 'sum' : (_annTab !== 'first' && _annTab !== 'drug')) { try { const adv = advisorHTML(window.nuiAnnBody ? 'all' : _annTab, _annYear); if (adv) body.insertAdjacentHTML('afterbegin', adv); } catch (e) { console.error(e); } }
   window._annRenderMs = Math.round(performance.now() - t0);
 }
 function _renderAnnualSummary(el) {
@@ -8276,7 +8278,8 @@ function _renderAnnualSummary(el) {
   const Y = _annYear;
   const it = annualItems(Y), prev = annualItems(Y - 1);
   const BREEDS = ['黒毛', '褐毛'];
-  const anyOther = ANN_ROWS.some(([k]) => it[k].some(x => !BREEDS.includes(x.breed)));
+  const ROWS = window._annRowsOnly ? ANN_ROWS.filter(r => window._annRowsOnly.includes(r[0])) : ANN_ROWS;
+  const anyOther = ROWS.some(([k]) => it[k].some(x => !BREEDS.includes(x.breed)));
   const cols = anyOther ? [...BREEDS, 'その他'] : BREEDS;
   const cnt = (list, b) => b === 'その他' ? list.filter(x => !BREEDS.includes(x.breed)).length : list.filter(x => x.breed === b).length;
   const fmtN = n => n ? n : '<span style="color:var(--muted);">0</span>';
@@ -8334,8 +8337,9 @@ function _renderAnnualSummary(el) {
   const bornN = it.born.length, stillN = it.still.length, dCalfN = it.dCalf.length;
   const pct = (a, b) => b ? (a / b * 100).toFixed(1) + '%' : '—';
   const rates = `<div class="ann-rates">
-    <div><span>子牛の事故率</span><b>${pct(stillN + dCalfN, bornN)}</b><small>（死産＋子牛死亡）÷生まれた子牛</small></div>
+    <div><span>流産率</span><b>${pct(it.abort.length, bornN + it.abort.length)}</b><small>流産÷（生まれた子牛＋流産）</small></div>
     <div><span>死産率</span><b>${pct(stillN, bornN)}</b><small>死産÷生まれた子牛</small></div>
+    <div><span>子牛の死亡率</span><b>${pct(dCalfN, bornN - stillN)}</b><small>〜4か月の死亡÷生きて生まれた子牛（死産は入れない）</small></div>
     <div><span>ET産仔の割合</span><b>${pct(it.et.length, bornN)}</b><small>ET産仔÷生まれた子牛</small></div>
     <div><span>保留割合</span><b>${pct(it.kept.length, bornN)}</b><small>保留÷生まれた子牛</small></div>
   </div>`;
@@ -8343,23 +8347,25 @@ function _renderAnnualSummary(el) {
   // 月別
   const months = Array.from({ length: 12 }, (_, i) => `${Y}-${String(i + 1).padStart(2, '0')}`);
   const mCnt = (keys, ym) => keys.reduce((s, k) => s + it[k].filter(x => x.date.startsWith(ym)).length, 0);
-  const MCOLS = [['生まれた', ['born']], ['死亡・死産', ['still', 'dCalf', 'dRear', 'dFat', 'dCow']], ['流産', ['abort']], ['廃用', ['retire']], ['肥育出荷', ['ship']]];
+  const _rk = new Set(ROWS.map(r => r[0]));
+  const MCOLS = [['生まれた', ['born']], ['死産', ['still']], ['流産', ['abort']], ['死亡', ['dCalf', 'dRear', 'dFat', 'dCow']], ['廃用', ['retire']], ['肥育出荷', ['ship']]].map(([l, ks]) => [l, ks.filter(k => _rk.has(k))]).filter(([, ks]) => ks.length);
+  const _hasBorn = _rk.has('born');
   const mMax = Math.max(1, ...months.map(ym => mCnt(['born'], ym)));
-  const monthly = `<table class="ann-table ann-month"><thead><tr><th>月</th>${MCOLS.map(([l]) => `<th>${l}</th>`).join('')}</tr></thead><tbody>
+  const monthly = !MCOLS.length ? '' : `<table class="ann-table ann-month"><thead><tr><th>月</th>${MCOLS.map(([l]) => `<th>${l}</th>`).join('')}</tr></thead><tbody>
     ${months.map((ym, i) => { const b = mCnt(['born'], ym); return `<tr${ym > today().slice(0, 7) ? ' style="opacity:.45;"' : ''}><td>${i + 1}月</td>
-      <td class="ann-n" style="background:linear-gradient(90deg,rgba(34,197,94,.22) ${b / mMax * 100}%,transparent 0);">${fmtN(b)}</td>
-      ${MCOLS.slice(1).map(([, ks]) => `<td class="ann-n">${fmtN(mCnt(ks, ym))}</td>`).join('')}</tr>`; }).join('')}
+      ${_hasBorn ? `<td class="ann-n" style="background:linear-gradient(90deg,rgba(34,197,94,.22) ${b / mMax * 100}%,transparent 0);">${fmtN(b)}</td>` : ''}
+      ${MCOLS.slice(_hasBorn ? 1 : 0).map(([, ks]) => `<td class="ann-n">${fmtN(mCnt(ks, ym))}</td>`).join('')}</tr>`; }).join('')}
   </tbody></table>`;
 
   el.innerHTML = `
     <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">${Y}年1月〜12月の集計${Y === thisY ? '（今日まで）' : ''}。行をタップすると、どの牛かが見られます。</div>
     <div class="herd-wrap"><table class="ann-table">
       <thead><tr><th style="text-align:left;">項目</th>${cols.map(b => `<th>${b}</th>`).join('')}<th>合計</th><th>前年</th></tr></thead>
-      <tbody>${ANN_ROWS.map(rowHTML).join('')}</tbody>
+      <tbody>${ROWS.map(rowHTML).join('')}</tbody>
     </table></div>
-    ${rates}
-    <div class="st-sec" style="margin-top:16px;color:var(--muted);">📅 ${Y}年 月別</div>
-    <div class="herd-wrap">${monthly}</div>
+    ${ROWS.some(r => r[0] === 'born') ? rates : ''}
+    ${monthly ? `<div class="st-sec" style="margin-top:16px;color:var(--muted);">📅 ${Y}年 月別</div>
+    <div class="herd-wrap">${monthly}</div>` : ''}
     <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.6;">
       ※ 子牛の品種は子牛の登録（無ければ父牛の品種）で分けています。流産・廃用・死亡は母牛の品種です。<br>
       ※ 肥育出荷は「肥育成績」に登録された枝肉成績（${FARM.name}分）から数えています。<br>
@@ -9295,21 +9301,28 @@ function kpiYear(Y) {
     if (p === 'parous') { const br = {}; cyc.forEach(c => c.skip.forEach(x => { br[x.reason] = (br[x.reason] || 0) + 1; })); R._skipReasons = br; }
   });
   const it = annualItems(Y);
-  R.abort_still = (it.born.length + it.abort.length) ? pct(it.abort.length + it.still.length, it.born.length + it.abort.length) : null;
+  // ★ 2026/11/21：流産と死産、廃用と死亡は別のものなので、合わせた率は出さない
+  R.abort_r = (it.born.length + it.abort.length) ? pct(it.abort.length, it.born.length + it.abort.length) : null;   // 流産率＝流産÷（生まれた子牛＋流産）
+  R.still_r = it.born.length ? pct(it.still.length, it.born.length) : null;                                           // 死産率＝死産÷生まれた子牛
+  R.abort_n = it.abort.length; R.still_n = it.still.length;
   const RC = typeof retiredCows !== 'undefined' ? retiredCows : [];
   const jan1 = `${Y}-01-01`;
   const herdStart = [...cows, ...RC].filter(c => !c.retireDateUnknown && (!c.dob || c.dob < jan1) && (!c.retireDate || c.retireDate >= jan1) && (!c.introDate || c.introDate < jan1)).length;
-  R.replace = herdStart ? pct(it.retire.length + it.dCow.length, herdStart) : null;
+  R.retire_r = herdStart ? pct(it.retire.length, herdStart) : null;   // 廃用率＝廃用÷年初の親牛
+  R.dcow_r = herdStart ? pct(it.dCow.length, herdStart) : null;       // 親牛の死亡率＝死亡÷年初の親牛
+  R.retire_n = it.retire.length; R.dcow_n = it.dCow.length;
   R.intro = it.intro.length;
   // --- 子牛 ---
   R.born = it.born.length; R.born_et = it.born.length ? pct(it.et.length, it.born.length) : null;
-  R.calf_acc = it.born.length ? pct(it.still.length + it.dCalf.length, it.born.length) : null;
+  const _live = it.born.length - it.still.length;
+  R.calf_d = _live > 0 ? pct(it.dCalf.length, _live) : null;   // 子牛の死亡率＝〜4か月の死亡÷生きて生まれた子牛（死産は入れない）
+  R.dcalf_n = it.dCalf.length;
   R.keep = it.born.length ? pct(it.kept.length, it.born.length) : null;
   R.d_rear = it.dRear.length; R.d_fat = it.dFat.length;
   // 妊鑑の結果がほとんど記録されていない年（このツールを使い始める前）は、繁殖・子牛の数字を出さない
   if (explicitN < 5) {
-    ['calv_int', 'ins_conc', 'ins_conc_h', 'ins_conc_med', 'ins_le2', 'ins_conc_ai', 'ins_conc_et', 'ins_le2_ai', 'ins_le2_et', 'conc_all', 'conc_ai', 'conc_et', 'conc_h', 'conc_first', 'hdr_parous', 'pr_parous', 'hdr_heifer', 'pr_heifer', 'det_parous', 'det_heifer', 'abort_still', 'first_age', 'replace'].forEach(k => R[k] = null);
-    if (!R.born) ['born', 'born_et', 'calf_acc', 'keep', 'd_rear', 'd_fat', 'intro'].forEach(k => R[k] = null);
+    ['calv_int', 'ins_conc', 'ins_conc_h', 'ins_conc_med', 'ins_le2', 'ins_conc_ai', 'ins_conc_et', 'ins_le2_ai', 'ins_le2_et', 'conc_all', 'conc_ai', 'conc_et', 'conc_h', 'conc_first', 'hdr_parous', 'pr_parous', 'hdr_heifer', 'pr_heifer', 'det_parous', 'det_heifer', 'abort_r', 'first_age', 'retire_r', 'dcow_r'].forEach(k => R[k] = null);
+    if (!R.born) ['born', 'born_et', 'calf_d', 'still_r', 'keep', 'd_rear', 'd_fat', 'intro'].forEach(k => R[k] = null);
   }
   return R;
 }
@@ -9349,14 +9362,18 @@ const KPI_DEF = [
   ['hdr_heifer', '21日授精率（未経産）', '%', 1, 1],
   ['pr_heifer', '妊娠率（未経産）', '%', 1, 1],
   ['det_heifer', '発情発見率（未経産・記録ベース）', '%', 1, 1],
-  ['abort_still', '流産・死産率', '%', 1, -1],
+  ['abort_r', '流産率（流産÷生まれた子牛＋流産）', '%', 1, -1],
+  ['still_r', '死産率（死産÷生まれた子牛）', '%', 1, -1],
   ['first_age', '初産月齢', 'か月', 1, -1],
-  ['replace', '更新率（廃用・死亡÷年初の頭数）', '%', 1, 0],
+  ['retire_n', '廃用した親牛', '頭', 0, 0],
+  ['retire_r', '　廃用率（÷年初の親牛）', '%', 1, 0],
+  ['dcow_n', '死亡した親牛', '頭', 0, -1],
+  ['dcow_r', '　親牛の死亡率（÷年初の親牛）', '%', 1, -1],
   ['intro', '導入頭数', '頭', 0, 0],
   ['sec', '🍼 子牛'],
   ['born', '生まれた子牛', '頭', 0, 1],
   ['born_et', 'ET産仔の割合', '%', 1, 0],
-  ['calf_acc', '子牛事故率（死産＋〜4か月の死亡）', '%', 1, -1],
+  ['calf_d', '子牛の死亡率（〜4か月・死産は入れない）', '%', 1, -1],
   ['keep', '保留割合', '%', 1, 0],
   ['d_rear', '育成牛の死亡', '頭', 0, -1],
   ['d_fat', '肥育牛の死亡', '頭', 0, -1],
@@ -9368,7 +9385,9 @@ function renderKPI(el, Y) {
   const fmt = (v, d, div) => v == null || isNaN(v) ? '<span style="color:var(--muted);">—</span>' : (div ? v / div : v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
   const good = (v, t, dir, div) => (v == null || t == null || t === '' || !dir) ? '' : ((dir > 0 ? (div ? v / div : v) >= Number(t) : (div ? v / div : v) <= Number(t)) ? 'color:var(--accent);' : 'color:var(--danger);');
   const BR = [['褐毛', '褐毛'], ['黒毛', '黒毛'], ['all', '計']];
-  const rows = KPI_DEF.map(d => {
+  let _sec = '';
+  const DEF = window._kpiSecOnly ? KPI_DEF.filter(d => { if (d[0] === 'sec') _sec = d[1]; return window._kpiSecOnly.some(x => _sec.includes(x)); }) : KPI_DEF;
+  const rows = DEF.map(d => {
     if (d[0] === 'sec') return `<tr><td colspan="5" class="kpi-sec">${d[1]}</td></tr>`;
     const [k, name, unit, dec, dir, byBreed, div] = d;
     const subs = byBreed ? BR.map(([b, bl]) => [k + '_' + b, bl]) : [[k, '']];
@@ -9382,7 +9401,7 @@ function renderKPI(el, Y) {
     }).join('');
   }).join('');
   el.innerHTML = `
-    <div class="st-chips" style="flex-wrap:wrap;overflow:visible;margin-bottom:8px;">
+    <div class="st-chips" style="flex-wrap:wrap;overflow:visible;margin-bottom:8px;${DEF.some(d => d[0] === 'sec' && /出荷/.test(d[1])) ? '' : 'display:none;'}">
       ${[['all', '出荷：全部'], ['去勢', '去勢'], ['メス', 'メス']].map(([k, l]) => `<button class="st-chip ${_kpiSex === k ? 'on' : ''}" onclick="_kpiSex='${k}';renderAnnual()">${l}</button>`).join('')}
     </div>
     <div class="herd-wrap"><table class="ann-table kpi-table">
@@ -9684,8 +9703,9 @@ const ADV_BASE = {
   calv_int: { good: 12.5, bad: 13.5, dir: -1 }, // 380日≒12.5か月
   dfs: { good: 70, bad: 90, dir: -1 },          // 分娩〜初回授精（日）
   first_age: { good: 24, bad: 27, dir: -1 },
-  abort_still: { good: 3, bad: 6, dir: -1 },
-  calf_acc: { good: 3, bad: 6, dir: -1 },
+  abort_r: { good: 3, bad: 6, dir: -1 },
+  still_r: { good: 3, bad: 6, dir: -1 },
+  calf_d: { good: 3, bad: 6, dir: -1 },
 };
 // 一般的な参考値（出典つき）
 const ADV_REF = {
@@ -9695,12 +9715,13 @@ const ADV_REF = {
   conc_et: { refAvg: 54.8, name: 'ETの受胎率', unit: '%', ref: '全農ET研究所 2024年度 新鮮胚57.2%・凍結胚52.2%（全体54.8%・受卵牛は乳牛・F1を含む）／体外受精卵 41.4%（2024年度・家畜改良センター集計）' },
   conc_first: { refAvg: 55, name: '初回授精の受胎率', unit: '%', ref: '黒毛和種の全国の初回受胎率 55.0%（2014年・家畜改良事業団）' },
   ins_conc: { name: '受胎までの授精回数（経産）', unit: '回', ref: '一般的な目標 1.5〜1.8回' },
-  ins_le2: { name: '2回以内で受胎した割合（経産）', unit: '%', ref: 'この農場の目安 70%以上（経営指標の「目標」欄で変えられます）。平均回数は何回も繰り返した一部の牛で大きく動くため、こちらで判定しています' },
+  ins_le2: { name: '2回以内で受胎した割合（経産）', unit: '%', ref: 'この農場の目安 70%以上（年の表の「目標」欄で変えられます）。平均回数は何回も繰り返した一部の牛で大きく動くため、こちらで判定しています' },
   calv_int: { refAvg: 13.2, name: '平均分娩間隔', unit: 'か月', ref: '黒毛和種の全国 13.2か月／国の目標 12.5か月（令和12年度・農水省）' },
   dfs: { name: '分娩〜初回授精', unit: '日', ref: '待機期間50日＋20日＝70日（和歌山県の上位農家が70日）' },
   first_age: { refAvg: 24.5, name: '初産月齢', unit: 'か月', ref: '黒毛和種の全国 24.5か月／国の目標 23.5か月（令和12年度・農水省）' },
-  abort_still: { name: '流産・死産率', unit: '%', ref: '一般的な目標 3%以下' },
-  calf_acc: { name: '子牛の事故率', unit: '%', ref: '一般的な目標 3%以下' },
+  abort_r: { name: '流産率', unit: '%', ref: 'この農場の目安 3%以下（年の表の「目標」欄で変えられます）' },
+  still_r: { name: '死産率', unit: '%', ref: 'この農場の目安 3%以下（年の表の「目標」欄で変えられます）' },
+  calf_d: { name: '子牛の死亡率（〜4か月）', unit: '%', ref: 'この農場の目安 3%以下（年の表の「目標」欄で変えられます）' },
 };
 function advisorOn() { return !(typeof farmTargets !== 'undefined' && farmTargets._advisor === 0); }
 function setAdvisor(on) { farmTargets._advisor = on ? 1 : 0; save(); try { renderAnnual(); } catch (e) {} try { renderAdvisorSetting(); } catch (e) {} }
@@ -9857,6 +9878,7 @@ function _advCountLevel(key, k, n) {
   return { lv: p < 0.025 ? 'bad' : p < 0.10 ? 'warn' : 'good', k, n, exp, p, target: t };
 }
 function buildAdvice(tab, Y) {
+  if (tab === 'all') { const seen = new Set(); return [...buildAdvice('kpi', Y), ...buildAdvice('preg', Y), ...buildAdvice('dis', Y)].filter(a => !seen.has(a.title) && seen.add(a.title)); }
   const out = [];
   const R = kpiYear(Y), P = kpiYear(Y - 1);
   const add = (lv, title, why, actions, cowsList, cowLabel) => out.push({ lv, title, why, actions, cows: cowsList || [], cowLabel });
@@ -9965,33 +9987,41 @@ function buildAdvice(tab, Y) {
     ], H ? H.heiferLate.map(x => x.id) : [], '授精開始月齢を2か月以上過ぎて未受胎の未経産');
   }
   if (tab === 'kpi' || tab === 'sum') {
-    const itAb = annualItems(Y);
-    const ab = (itAb.born.length + itAb.abort.length) ? _advCountLevel('abort_still', itAb.abort.length + itAb.still.length, itAb.born.length + itAb.abort.length) : null;
+    // ★ 流産・死産・子牛の死亡は、それぞれ別に見る
+    const it = annualItems(Y);
+    const live = it.born.length - it.still.length;
+    const ab = (it.born.length + it.abort.length) ? _advCountLevel('abort_r', it.abort.length, it.born.length + it.abort.length) : null;
     if (ab && ab.lv !== 'good') {
-      const it = itAb;
-      const causes = {}; it.still.forEach(x => { const c = x.cause || '原因未記入'; causes[c] = (causes[c] || 0) + 1; });
-      addK('abort_still', ab.lv, `流産・死産が ${ab.k}件（${ab.n}件中・${_r1(R.abort_still)}%）と多め`, `目安 ${ab.target}%なら${ab.n}件中${_r1(ab.exp)}件くらいまでは起こりうる範囲で、${ab.k}件は偶然では説明しにくい多さです。流産${it.abort.length}件・死産${it.still.length}件${Object.keys(causes).length ? '（死産の原因：' + Object.entries(causes).map(([c, n]) => c + n).join('、') + '）' : ''}。`, [
+      const D = it.abort.map(x => x.gDays).filter(v => v != null);
+      addK('abort_r', ab.lv, `流産が ${ab.k}件（${ab.n}件中・${_r1(R.abort_r)}%）と多め`, `目安 ${ab.target}%なら${ab.n}件中${_r1(ab.exp)}件くらいまでは起こりうる範囲で、${ab.k}件は偶然では説明しにくい多さです。${D.length ? `流産した時期は妊娠${D.sort((p, q) => p - q).map(d => d + '日').join('・')}。` : ''}`, [
         '流産が続く場合は、BVD・ネオスポラ・IBRなどの検査と、母牛のワクチン歴を確認する',
         '妊娠後期の移動・群替え・暑熱を減らす',
-        '死産は原因を必ず記録する（逆子・難産が多ければ分娩監視と分娩介助の体制、虚弱なら妊娠末期の栄養）',
+        '流産した時期（妊娠何日目）がそろっていないか見る。早い時期に多ければ受胎後の管理、後期に多ければ感染症を疑う',
       ]);
     }
-  }
-  if (tab === 'sum' || tab === 'kpi') {
-    const itCl = annualItems(Y);
-    const cl = itCl.born.length ? _advCountLevel('calf_acc', itCl.still.length + itCl.dCalf.length, itCl.born.length) : null;
-    if (cl && cl.lv !== 'good') {
-      const it = itCl;
-      addK('calf_acc', cl.lv, `子牛の事故が ${cl.k}頭（${cl.n}頭中・${_r1(R.calf_acc)}%）と多め`, `目安 ${cl.target}%なら${cl.n}頭中${_r1(cl.exp)}頭くらいまでは起こりうる範囲で、${cl.k}頭は偶然では説明しにくい多さです。死産${it.still.length}頭・生後4か月までの死亡${it.dCalf.length}頭（${it.dCalf.map(x => x.sub.split('　').pop()).join('、')}）。`, [
+    const st = it.born.length ? _advCountLevel('still_r', it.still.length, it.born.length) : null;
+    if (st && st.lv !== 'good') {
+      const causes = {}; it.still.forEach(x => { const c = x.cause || '原因未記入'; causes[c] = (causes[c] || 0) + 1; });
+      addK('still_r', st.lv, `死産が ${st.k}頭（${st.n}頭中・${_r1(R.still_r)}%）と多め`, `目安 ${st.target}%なら${st.n}頭中${_r1(st.exp)}頭くらいまでは起こりうる範囲で、${st.k}頭は偶然では説明しにくい多さです。原因：${Object.entries(causes).map(([k, n]) => k + ' ' + n).join('・')}。`, [
+        '死産は原因を必ず記録する',
+        '逆子・難産が多ければ、分娩監視と分娩介助の体制を見直す',
+        '虚弱が多ければ、妊娠末期の栄養（ビタミン・ミネラル）を見直す',
+      ]);
+    }
+    const cd = live > 0 ? _advCountLevel('calf_d', it.dCalf.length, live) : null;
+    if (cd && cd.lv !== 'good') {
+      addK('calf_d', cd.lv, `子牛の死亡が ${cd.k}頭（生きて生まれた${cd.n}頭中・${_r1(R.calf_d)}%）と多め`, `目安 ${cd.target}%なら${cd.n}頭中${_r1(cd.exp)}頭くらいまでは起こりうる範囲で、${cd.k}頭は偶然では説明しにくい多さです（死産は入れていません）。`, [
         '初乳：生後できるだけ早く（6時間以内）、十分な量を飲めているか確認する。飲めない子は初乳製剤を使う',
         '下痢・肺炎が多い時期の前に、母牛へのワクチン（下痢症）と子牛舎の換気・敷料交換を前倒しする',
         '「🩺 疾病」で子牛の病気が多い月を確認し、その月の前から対策する',
       ]);
     }
+  }
+  if (tab === 'sum' || tab === 'kpi') {
     const it = annualItems(Y);
     if (it.retire.length + it.dCow.length > 0 && R.keep != null && isNow) {
       const out = it.retire.length + it.dCow.length;
-      if (it.kept.length < out) add('warn', `廃用・死亡（${out}頭）に対して、保留（${it.kept.length}頭）が少なめ`, '頭数を維持するには、出ていく頭数と同じくらいの保留・導入が必要です。', [
+      if (it.kept.length < out) add('warn', `出ていった親牛（廃用${it.retire.length}頭・死亡${it.dCow.length}頭）に対して、保留（${it.kept.length}頭）が少なめ`, '頭数を維持するには、出ていく頭数と同じくらいの保留・導入が必要です。', [
         '保留候補（子牛タブの⭐繁殖候補）を早めに決め、育成計画に入れる',
         '廃用予定の牛は、受胎していれば分娩まで待つか、ET受卵牛として使えないか検討する',
       ]);
@@ -10034,19 +10064,20 @@ function buildAdvice(tab, Y) {
     ]);
   }
   // 目安を満たしている項目（🟢良好）も並べる
-  const TABKEYS = { preg: ['hdr_parous', 'pr_parous'], kpi: ['hdr_parous', 'pr_parous', 'conc_ai', 'conc_et', 'conc_first', 'ins_le2', 'dfs', 'calv_int', 'first_age', 'abort_still', 'calf_acc'], sum: ['abort_still', 'calf_acc'] };
+  const TABKEYS = { preg: ['hdr_parous', 'pr_parous'], kpi: ['hdr_parous', 'pr_parous', 'conc_ai', 'conc_et', 'conc_first', 'ins_le2', 'dfs', 'calv_int', 'first_age', 'abort_r', 'still_r', 'calf_d'], sum: ['abort_r', 'still_r', 'calf_d'] };
   const dfsV = (TABKEYS[tab] || []).includes('dfs') ? _advDFS(Y) : null;
   (TABKEYS[tab] || []).forEach(k => {
     if (out.some(o => o.key === k)) return;
     const v = k === 'dfs' ? (dfsV ? dfsV.avg : null) : R[k];
     const d = ADV_REF[k];
-    if (k === 'calf_acc' || k === 'abort_still') {
+    if (k === 'abort_r' || k === 'still_r' || k === 'calf_d') {
       const it = annualItems(Y);
-      const C = k === 'calf_acc' ? _advCountLevel(k, it.still.length + it.dCalf.length, it.born.length) : _advCountLevel(k, it.abort.length + it.still.length, it.born.length + it.abort.length);
+      const CN = k === 'abort_r' ? { k: it.abort.length, n: it.born.length + it.abort.length, u: '件', label: '流産' } : k === 'still_r' ? { k: it.still.length, n: it.born.length, u: '頭', label: '死産' } : { k: it.dCalf.length, n: it.born.length - it.still.length, u: '頭', label: '子牛の死亡' };
+      const C = _advCountLevel(k, CN.k, CN.n);
       if (!C || C.lv !== 'good') return;
-      const u = k === 'calf_acc' ? '頭' : '件';
+      const u = CN.u;
       let warnAt = C.k + 1; while (_poisTail(warnAt, C.exp) >= 0.10 && warnAt < 100) warnAt++;
-      addK(k, 'good', `${k === 'calf_acc' ? '子牛の事故' : '流産・死産'} ${C.k}${u}（${C.n}${u}中・${_r1(v)}%）`, `%は目安（${C.target}%）を超えていますが、目安の率でも${C.n}${u}中${_r1(C.exp)}${u}くらいは起こるので、偶然の範囲内です。この頭数だと${warnAt}${u}から注意を出します（頭数が少ないので、1${u}で%が大きく動きます）。`, []);
+      addK(k, 'good', `${CN.label} ${C.k}${u}（${C.n}${u}中・${_r1(v)}%）`, `%は目安（${C.target}%）を超えていますが、目安の率でも${C.n}${u}中${_r1(C.exp)}${u}くらいは起こるので、偶然の範囲内です。この頭数だと${warnAt}${u}から注意を出します（頭数が少ないので、1${u}で%が大きく動きます）。`, []);
       return;
     }
     const L = _advLevel(k, v);
@@ -10097,7 +10128,7 @@ function advisorHTML(tab, Y) {
       <span style="font-size:11px;color:var(--muted);font-weight:400;">${nBad ? `<span style="color:var(--danger);">要改善${nBad}</span> ` : ''}${nWarn ? `<span style="color:var(--warn);">注意${nWarn}</span> ` : ''}${list.some(x => x.lv === 'good') ? `<span style="color:var(--accent);">良好${list.filter(x => x.lv === 'good').length}</span> ` : ''}${_advOpen ? '▲' : '▼'}</span>
     </div>
     ${body}
-    ${_advOpen ? '<div style="font-size:9px;color:var(--muted);margin-top:6px;">記録から自動で判定した目安です。目標値（経営指標の「目標」欄）を入れると、その値で判定します。設定でOFFにできます。</div>' : ''}
+    ${_advOpen ? '<div style="font-size:9px;color:var(--muted);margin-top:6px;">記録から自動で判定した目安です。目標値（年の表の「目標」欄）を入れると、その値で判定します。設定でOFFにできます。</div>' : ''}
   </div>`;
 }
 
@@ -14187,7 +14218,7 @@ function renderDataCheck() {
       const seen = new Set();
       const L = [...buildAdvice('kpi', Y), ...buildAdvice('sum', Y), ...buildAdvice('preg', Y)].filter(a => (a.lv === 'bad' || a.lv === 'warn') && !seen.has(a.title) && seen.add(a.title));
       advCount = L.length;
-      advHTML = L.length ? L.map(a => `<div class="chk-item" onclick="_annTab='${a.key && /dCalf|calf_acc|abort/.test(a.key) ? 'sum' : 'kpi'}';switchTab('annual')">
+      advHTML = L.length ? L.map(a => `<div class="chk-item" onclick="_annTab='${a.key && /dCalf|calf_d|still_r|abort/.test(a.key) ? 'sum' : 'kpi'}';switchTab('annual')">
           <div style="font-size:13px;font-weight:700;">${a.lv === 'bad' ? '🔴' : '🟡'} ${a.title}</div>
           <div style="font-size:11px;color:var(--info);margin-top:3px;">→ 年間まとめで改善策を見る</div></div>`).join('') : '<div style="color:var(--accent);font-size:13px;padding:6px 0;">✓ 目安から外れている成績はありません</div>';
     } catch (e) { console.error(e); }
@@ -31814,7 +31845,9 @@ function openStillbirthWizard() {
   document.getElementById('sb-wiz-cow-preview').style.display = 'none';
   document.getElementById('sb-wiz-ac-list').style.display = 'none';
   document.getElementById('sb-wiz-date').value = today();
-  selectSbType('stillbirth');
+  window._sbTypeByHand = false;
+  selectSbType('');   // ★ 2026/11/21：前は「死産」が最初から選ばれていて、流産のつもりで押すと分娩の画面になった → 何も選ばない状態から始める
+  const h = document.getElementById('sb-wiz-hint'); if (h) h.style.display = 'none';
   openModal('modal-stillbirth-wizard');
   setTimeout(() => document.getElementById('sb-wiz-cow-input').focus(), 200);
 }
@@ -31848,15 +31881,46 @@ function selectSbWizCow(cowId, name) {
   preview.innerHTML = `<span style="font-family:'JetBrains Mono',monospace;font-weight:900;color:var(--accent);">${cowId}</span> <strong>${name}</strong>` +
     (cow?.dueDate ? `<span style="font-size:11px;color:var(--muted);margin-left:8px;">予定日: ${fmtDate(cow.dueDate)}</span>` : '') +
     (cow?.lactation ? `<span style="font-size:11px;color:var(--muted);margin-left:8px;">${cow.lactation}産</span>` : '');
+  _sbSuggest();
+}
+// 分娩予定日から、流産か死産かを教える（予定日より30日以上早い → 流産を選んでおく）
+function _sbEarly() {
+  const cow = cows.find(c => c.id === document.getElementById('sb-wiz-cowid').value);
+  const date = document.getElementById('sb-wiz-date').value;
+  if (!cow || !cow.dueDate || !date) return null;
+  return diffDays(cow.dueDate, date);   // 予定日より何日早いか
+}
+function _sbGest() {   // 妊娠何日目か（流産の前のいちばん新しい授精から。移植は移植日の7日前から）
+  const cow = cows.find(c => c.id === document.getElementById('sb-wiz-cowid').value);
+  const date = document.getElementById('sb-wiz-date').value;
+  if (!cow || !date) return null;
+  const ins = (cow.events || []).filter(e => _annInsTypes.includes(e.type) && e.date <= date && !e.donorAI).sort((a, b) => b.date.localeCompare(a.date))[0];
+  if (!ins) return null;
+  return diffDays(date, ins.type === 'et_done' ? addDays(ins.date, -7) : ins.date);
+}
+function _sbSuggest() {
+  const hint = document.getElementById('sb-wiz-hint'); if (!hint) return;
+  const e = _sbEarly(), g = _sbGest();
+  const gs = g != null && g >= 0 ? `妊娠 <b>${g}日目</b>（約${Math.round(g / 30.4)}か月）です。` : '';
+  if (e != null && e >= 30) {
+    if (!window._sbTypeByHand) selectSbType('abortion', true);
+    hint.style.display = ''; hint.innerHTML = `${gs}分娩予定日より <b>${e}日早い</b> ので、<b>流産</b>を選んでおきました。予定日の近くで死んで生まれたときだけ「死産」にしてください。`;
+  } else if (gs) { hint.style.display = ''; hint.innerHTML = gs; }
+  else hint.style.display = 'none';
 }
 
-function selectSbType(type) {
+function selectSbType(type, auto) {
+  if (!auto && type) window._sbTypeByHand = true;
   document.getElementById('sb-wiz-type').value = type;
+  const go = document.getElementById('sb-wiz-go');
+  if (go) go.textContent = type === 'stillbirth' ? '死産を記録する（分娩の記録へ進む）→' : type === 'abortion' ? '流産を記録する' : '② の種別を選んでください';
   const cw = document.getElementById('sb-wiz-cause-wrap');
-  if (cw) { cw.style.display = type === 'stillbirth' ? 'none' : ''; const sel = document.getElementById('sb-wiz-cause'); if (sel && !sel.options.length) sel.innerHTML = ABORT_CAUSES.map(c => `<option>${c}</option>`).join(''); }
+  if (cw) { cw.style.display = type === 'abortion' ? '' : 'none'; const sel = document.getElementById('sb-wiz-cause'); if (sel && !sel.options.length) sel.innerHTML = ABORT_CAUSES.map(c => `<option>${c}</option>`).join(''); }
   const stillBtn = document.getElementById('sb-type-still-btn');
   const abortBtn = document.getElementById('sb-type-abort-btn');
-  if (type === 'stillbirth') {
+  if (!type) {
+    [stillBtn, abortBtn].forEach(b => { b.style.borderColor = 'var(--border)'; b.style.background = 'var(--bg3)'; b.style.color = 'var(--muted)'; });
+  } else if (type === 'stillbirth') {
     stillBtn.style.borderColor = 'var(--danger)'; stillBtn.style.background = 'rgba(239,68,68,.1)'; stillBtn.style.color = '#fca5a5';
     abortBtn.style.borderColor = 'var(--border)';  abortBtn.style.background = 'var(--bg3)';         abortBtn.style.color = 'var(--muted)';
   } else {
@@ -31870,10 +31934,12 @@ function sbWizNext() {
   const date  = document.getElementById('sb-wiz-date').value;
   const type  = document.getElementById('sb-wiz-type').value;
   if (!cowId) { alert('牛を選択してください'); return; }
+  if (!type) { alert('② の種別（死産か流産か）を選んでください'); return; }
   if (!date)  { alert('日付を入力してください'); return; }
 
   const cow = cows.find(c=>c.id===cowId);
   if (!cow) return;
+  if (type === 'stillbirth') { const e = _sbEarly(); if (e != null && e >= 30 && !confirm(`分娩予定日より ${e}日早いです。\n\n「死産」は分娩として記録します（分娩の画面へ進みます）。\n流産なら「キャンセル」を押して「流産」を選んでください。\n\n死産で進めますか？`)) return; }
 
   closeModal('modal-stillbirth-wizard');
 
@@ -31884,6 +31950,7 @@ function sbWizNext() {
 
   } else {
     // ── 流産：スケジュール削除・空胎に戻す・45日後アラート
+    try { armUndo('流産を記録しました'); } catch (e) {}
     // 未完了タスクを全削除
     tasks = tasks.filter(t => !(t.cowId===cowId && !t.done));
     // 状態をリセット
@@ -32245,7 +32312,7 @@ function openMiscarriageForm(editId) {
       <div class="form-group" style="margin-bottom:10px;"><label>原因</label>
         <select id="mis-cause" style="font-size:13px;width:100%;">${(() => { const cur = rec ? abortionCauseText(rec) : ''; const hit = ABORT_CAUSES.find(c => c !== '不明' && (cur === c || cur.includes(c.replace(/（.*$/, '')))) || (rec && rec.cause) || '不明';
           return ABORT_CAUSES.map(c => `<option ${c === hit ? 'selected' : ''}>${c}</option>`).join(''); })()}</select>
-        <div style="font-size:10px;color:var(--muted);margin-top:3px;">「早期胚死滅」にすると、年間まとめ・経営指標の流産には数えません</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px;">「早期胚死滅」にすると、成績の流産には数えません</div>
       </div>
       <div class="form-group" style="margin-bottom:16px;"><label>メモ</label>
         <textarea id="mis-memo" style="font-size:13px;width:100%;height:60px;resize:vertical;">${rec?rec.memo||'':''}</textarea>
@@ -33476,6 +33543,36 @@ let currentUser = null;
 let dbRef = null;
 let isSyncing = false;
 let syncTimer = null;
+// ★ 2026/11/21：同じ端末で、このツールを2つ以上の画面（タブ・ウィンドウ）で開いていると、
+//   古い方の画面が「自分が覚えている古い中身」で保存して、新しい方で入れた記録を消してしまう（頼んだ・お産などが戻った原因）。
+//   いちばん新しく開いた画面だけが記録できるようにし、ほかの画面は止める。
+//   また、新しい版が出ているのに古い版の画面のままのときも、記録できないようにする（古い作りで上書きしないため）
+const _TAB_ID = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+window._tabStopped = '';
+function _tabClaim() { try { localStorage.setItem('_tabLeader', _TAB_ID); } catch (e) {} }
+function _tabStop(kind) {
+  if (window._tabStopped) return;
+  window._tabStopped = kind || 'tab';
+  _tabShowStop();
+}
+function _tabShowStop() {
+  if (!window._tabStopped || document.getElementById('tab-stop')) return;
+  const old = window._tabStopped === 'build';
+  const d = document.createElement('div'); d.id = 'tab-stop';
+  d.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(10,12,18,.94);display:flex;align-items:center;justify-content:center;padding:24px;';
+  d.innerHTML = `<div style="max-width:420px;background:#1a1f2e;border:1px solid #2a3050;border-radius:16px;padding:22px;color:#e2e8f0;font-family:inherit;line-height:1.7;">
+    <div style="font-size:18px;font-weight:900;margin-bottom:10px;">${old ? '🔄 新しい版があります' : '⏸ この画面は止めました'}</div>
+    <div style="font-size:14px;color:#cbd5e1;">${old
+      ? 'この画面は古い版です。古い版のまま記録すると、ほかの端末で入れた記録を消してしまうことがあるので、記録できないようにしました。開き直してください。'
+      : 'この端末の別の画面（タブ・ウィンドウ）で、このツールが開かれました。同じ端末で2つの画面から記録すると記録が消えることがあるので、いちばん新しく開いた画面だけで記録できるようにしています。'}</div>
+    <button onclick="try{localStorage.setItem('_tabLeader','${_TAB_ID}')}catch(e){};location.reload()" style="margin-top:16px;width:100%;height:50px;border-radius:12px;border:none;background:#16a34a;color:#fff;font-size:16px;font-weight:900;cursor:pointer;font-family:inherit;">${old ? '開き直す' : 'この画面で続ける（開き直す）'}</button>
+    ${old ? '' : '<div style="font-size:12px;color:#94a3b8;margin-top:10px;">押すと、この画面が最新の記録で開き直されて、もう一つの画面の方が止まります。</div>'}
+  </div>`;
+  (document.body || document.documentElement).appendChild(d);
+}
+_tabClaim();
+window.addEventListener('storage', e => { if (e.key === '_tabLeader' && e.newValue && e.newValue !== _TAB_ID) _tabStop('tab'); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { let l = null; try { l = localStorage.getItem('_tabLeader'); } catch (e) {} if (l && l !== _TAB_ID) _tabStop('tab'); } });
 
 // ===== ログイン（メールアドレス＋パスワード） =====
 // 以前は匿名で自動ログインしていたため、URLを知っていれば誰でもデータを見られた。
@@ -33805,7 +33902,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112015';
+const APP_BUILD = '2026112104';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -33817,6 +33914,7 @@ function _checkAppBuild(remote, dbRef) {
       location.reload();
       return true;
     }
+    _tabStop('build');
     if (!document.getElementById('build-banner')) {
       const d = document.createElement('div'); d.id = 'build-banner';
       d.style.cssText = 'position:fixed;left:8px;right:8px;top:8px;z-index:99999;background:#78350f;color:#fff;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5;';
@@ -33880,6 +33978,7 @@ function initFirebaseSync() {
 
     // リアルタイムリスナー：ほかの端末の変更を、手元のまだ送っていない変更とまとめて取り込む（無視しない）
     dbRef.on('value', snapshot => {
+      if (window._tabStopped) return;   // 止めた画面は、端末の中身を書きかえない（動いている画面がやる）
       const remote = snapshot.val();
       if (!remote) return;
       if (_checkAppBuild(remote, dbRef) && document.getElementById('build-banner') == null) return;
@@ -33904,6 +34003,7 @@ function initFirebaseSync() {
 
 function saveToFirebase() {
   if (!dbRef || !currentUser) return;
+  if (window._tabStopped) { _tabShowStop(); return; }
   isSyncing = true;
   _lastSaveTime = Date.now();
   if (typeof window._notifyFirebaseSave === 'function') window._notifyFirebaseSave();
@@ -33954,6 +34054,7 @@ function saveToFirebase() {
 if (typeof save === 'function') {
   const _localSave = save;
   window.save = function() {
+    if (window._tabStopped) { _tabShowStop(); return; }   // 止めた画面からは保存しない（端末の中身も変えない）
     _localSave();
     saveToFirebase();
   };
@@ -34588,6 +34689,12 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
 .nui-fold:not(.open){padding-bottom:12px !important;}
 .nui-fold:not(.open) > .stats-title{margin-bottom:0 !important;}
 .nui-fold-a{font-size:11px;font-weight:700;color:#64748b;margin-left:6px;}
+.nui-st7{display:grid !important;grid-template-columns:repeat(4,1fr);gap:4px;overflow:visible !important;}
+.nui-st7 button{white-space:nowrap;font-size:12px !important;padding:8px 0 !important;margin:0 !important;}
+.nui-stchips{display:flex;gap:6px;overflow-x:auto;margin:8px 0 4px;padding-bottom:2px;scrollbar-width:none;}
+.nui-stchips::-webkit-scrollbar{display:none;}
+.nui-stchips button{white-space:nowrap;font-size:12px;font-weight:700;padding:7px 12px;border-radius:999px;background:#1e2333;border:1px solid #2a3050;color:#cbd5e1;cursor:pointer;font-family:inherit;}
+.nui-stchips button.on{border-color:#22c55e;color:#4ade80;background:#14532d;}
 @media print{#nui-side,#nui-scr,.nui-ibbar,.nui-ibfoot{display:none !important;} html.nui body{padding-left:0 !important;}}
 </style>
 <script>
@@ -36186,22 +36293,133 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   // ---------- 繁殖成績（年間まとめ＋詳細成績を1つに・4×2のタブ） ----------
   const STATS_SUB = { conc: /受胎率|詳細成績|移植胚|採卵|群ステータス|空胎日数/, calv: /産子・死亡|産仔/ };
   window._nuiStatsSub = window._nuiStatsSub || 'conc';
+  // ---- 牧場の成績：テーマごとのタブ（まとめ＝目次） ----
+  // グループ：タブの中で小さいボタンで切り替える。stats＝受胎率などの画面、それ以外は年の画面
+  const ST_GROUPS = [
+    ['sum', '📒 まとめ', [['sum', 'まとめ']]],
+    ['breed', '💉 繁殖', [['conc', '受胎率・移植'], ['preg', '妊娠率'], ['first', '初回授精'], ['ci', '分娩間隔']]],
+    ['calvg', '🐮 分娩・子牛', [['calvlist', '生まれた・事故'], ['calv', '種雄牛別の産子']]],
+    ['ship', '🥩 出荷', [['ship', '出荷']]],
+    ['move', '🐄 出入り', [['move', '出入り']]],
+    ['dis', '💊 病気・薬', [['dis', '病気・薬']]],
+    ['kpi', '📋 年の表', [['kpi', '年の表']]],
+  ];
+  const stGroupOf = k => ST_GROUPS.find(g => g[2].some(m => m[0] === (k === 'drug' ? 'dis' : k))) || ST_GROUPS[0];
+  const _stLast = {};
+  window.nuiStGo = function (k) {
+    const fromStats = $('page-stats') && $('page-stats').classList.contains('active');
+    const sy = $('stats-year');
+    if (STATS_SUB[k]) {
+      if (!fromStats && sy && _annYear) { const v = 'R' + (_annYear - 2018); if ([...sy.options].some(o => o.value === v)) sy.value = v; }
+      _nuiStatsSub = k; switchTab('stats');
+    } else {
+      if (fromStats && sy && /^R\d+$/.test(sy.value)) _annYear = +sy.value.slice(1) + 2018;
+      _annTab = k; _annOpenKey = null; switchTab('annual');
+    }
+    try { window.scrollTo(0, 0); } catch (e) {}
+  };
+  window.nuiStGrp = function (g) { const G = ST_GROUPS.find(x => x[0] === g); if (!G) return; nuiStGo(_stLast[g] || G[2][0][0]); };
   function statsHead(active) {
     const thisY = +today().slice(0, 4);
+    if (active === 'drug') active = 'dis';
     const isStats = !!STATS_SUB[active];
+    const G = stGroupOf(active); _stLast[G[0]] = active;
     let pills;
     if (isStats) {
       const v = ($('stats-year') || {}).value || 'R' + (thisY - 2018);
       pills = [[thisY + '', 'R' + (thisY - 2018)], [thisY - 1 + '', 'R' + (thisY - 2019)], ['全期間', 'all']].map(([l, k]) => `<button class="nui-yp${v === k ? ' on' : ''}" onclick="nuiYear('${k}')">${l}</button>`).join('');
     } else if (active === 'first') pills = '';
     else pills = [thisY, thisY - 1, thisY - 2].map(y => `<button class="nui-yp${(_annYear || thisY) === y ? ' on' : ''}" onclick="_annYear=${y};_annOpenKey=null;try{_prState.sel=null;_disState.open=null;}catch(e){};renderAnnual()">${y}</button>`).join('');
-    const T = [['sum', '📒 まとめ'], ['conc', '🎯 受胎率'], ['preg', '📈 妊娠率'], ['first', '⏱ 初回授精'], ['calv', '🐮 分娩・子牛'], ['kpi', '📊 経営指標'], ['dis', '🩺 疾病'], ['drug', '💊 薬代']];
+    const chips = G[2].length > 1 ? `<div class="nui-stchips">${G[2].map(([k, l]) => `<button class="${active === k ? 'on' : ''}" onclick="nuiStGo('${k}')">${l}</button>`).join('')}</div>` : '';
     return `<div class="nui-hd">${backBtn("switchTab('more')")}<span class="t" style="color:#fb923c;">📊 牧場の成績</span><div style="display:flex;gap:4px;">${pills}</div></div>
-      <div class="ann-tabs nui-ann">${T.map(([k, l]) => `<button class="${active === k ? 'on' : ''}" onclick="${STATS_SUB[k] ? `_nuiStatsSub='${k}';switchTab('stats')` : `_annTab='${k}';switchTab('annual')`}">${l}</button>`).join('')}</div>`;
+      <div class="ann-tabs nui-ann nui-st7">${ST_GROUPS.map(([g, l]) => `<button class="${G[0] === g ? 'on' : ''}" onclick="nuiStGrp('${g}')">${l}</button>`).join('')}</div>${chips}`;
+  }
+  // 年の画面の中身（新しいタブ）。true を返したら、元の画面は描かない
+  window.nuiAnnBody = function (body, T, Y) {
+    const sub = (fn) => { const d = document.createElement('div'); body.appendChild(d); fn(d); return d; };
+    const rowsOnly = (keys, el) => { window._annRowsOnly = keys; try { _renderAnnualSummary(el); } finally { window._annRowsOnly = null; } };
+    const kpiOnly = (secs, el) => { window._kpiSecOnly = secs; try { renderKPI(el, Y); } finally { window._kpiSecOnly = null; } };
+    const h = t => `<div class="st-sec" style="margin:18px 0 8px;color:#94a3b8;">${t}</div>`;
+    if (T === 'sum') { if (!window._nuiAdvInit) { window._nuiAdvInit = true; try { _advOpen = false; } catch (e) {} } body.innerHTML = stIndexHTML(Y); return true; }
+    if (T === 'ci') { body.innerHTML = ''; calvIntCard(body, Y); return true; }
+    if (T === 'calvlist') { body.innerHTML = ''; sub(d => rowsOnly(['born', 'et', 'still', 'abort', 'dCalf'], d)); body.insertAdjacentHTML('beforeend', abortTimingHTML(Y)); return true; }
+    if (T === 'ship') { body.innerHTML = ''; sub(d => rowsOnly(['ship', 'retShip'], d)); body.insertAdjacentHTML('beforeend', h('📊 出荷の成績（3年くらべる）')); sub(d => kpiOnly(['出荷', '廃用肥育'], d)); return true; }
+    if (T === 'move') { body.innerHTML = ''; sub(d => rowsOnly(['kept', 'retire', 'dRear', 'dFat', 'dCow', 'intro'], d)); return true; }
+    if (T === 'dis' || T === 'drug') { body.innerHTML = ''; sub(d => renderDisease(d, Y)); body.insertAdjacentHTML('beforeend', h('💊 薬代')); sub(d => renderDrugCost(d, Y)); return true; }
+    return false;
+  };
+  // 🌀 流産した時期（妊娠何日目か）
+  function abortTimingHTML(Y) {
+    let A = []; try { A = annualItems(Y).abort; } catch (e) {}
+    const head = `<div class="st-sec" style="margin:18px 0 8px;color:#94a3b8;">🌀 ${Y}年 流産した時期（妊娠何日目か）</div>`;
+    if (!A.length) return head + '<div style="font-size:13px;color:#64748b;padding:6px 2px;">この年の流産はありません</div>';
+    const BINS = [['〜60日', 0, 60], ['61〜120日', 61, 120], ['121〜180日', 121, 180], ['181〜240日', 181, 240], ['241日〜', 241, 9999]];
+    const D = A.filter(a => a.gDays != null);
+    const cnt = BINS.map(([l, lo, hi]) => [l, D.filter(a => a.gDays >= lo && a.gDays <= hi).length]);
+    const mx = Math.max(1, ...cnt.map(c => c[1]));
+    const avg = D.length ? Math.round(D.reduce((t, a) => t + a.gDays, 0) / D.length) : null;
+    return head + `<div style="background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;padding:12px;">
+      ${cnt.map(([l, n]) => `<div style="display:flex;align-items:center;gap:8px;margin:4px 0;font-size:13px;"><span style="width:84px;color:#cbd5e1;">${l}</span><span style="flex:1;height:14px;background:#0f1117;border-radius:4px;overflow:hidden;"><span style="display:block;height:100%;width:${n / mx * 100}%;background:#64748b;"></span></span><b class="nui-mono" style="width:34px;text-align:right;">${n}件</b></div>`).join('')}
+      <div style="font-size:12px;color:#94a3b8;margin-top:6px;">平均 妊娠${avg != null ? avg + '日' : '—'}${A.length > D.length ? `・授精の記録がなくて日数が分からないもの ${A.length - D.length}件` : ''}</div>
+      <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);">${A.slice().sort((a, b) => b.date.localeCompare(a.date)).map(a => `<div class="nui-a" onclick="showCowDetail('${jsq(a.cowId || '')}')" style="display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px;cursor:pointer;"><span>${esc(a.label)}<br><span style="font-size:11px;color:#64748b;">${esc(md(a.date))}${a.cause ? '・' + esc(a.cause) : ''}</span></span><b class="nui-mono" style="white-space:nowrap;">${a.gDays != null ? `妊娠${a.gDays}日<br><span style="font-size:11px;color:#94a3b8;font-weight:400;">約${Math.round(a.gDays / 30.4)}か月</span>` : '—'}</b></div>`).join('')}</div>
+      <div style="font-size:11px;color:#64748b;margin-top:6px;">妊娠日数は、流産の前のいちばん新しい授精の日から数えています（移植は移植日の7日前から）。</div>
+    </div>`;
+  }
+  // 📒 まとめ＝目次：全部の成績を1行ずつ。押すとその場所へ
+  function stIndexHTML(Y) {
+    let R = {}, P = {}, it = null;
+    try { R = kpiYear(Y); P = kpiYear(Y - 1); } catch (e) {}
+    try { it = annualItems(Y); } catch (e) {}
+    let et = null, etP = null; try { et = etRateCalc(Y + '-01-01', Y + '-12-31'); etP = etRateCalc((Y - 1) + '-01-01', (Y - 1) + '-12-31'); } catch (e) {}
+    const f = (v, d, u, div) => v == null || isNaN(v) ? '—' : (div ? v / div : v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) + (u || '');
+    const row = (name, v, p, go, cls) => `<div class="nui-a" onclick="nuiStGo('${go}')" style="display:flex;align-items:center;padding:11px 12px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;">
+      <span style="flex:1;font-size:14px;">${name}</span><b class="nui-mono" style="font-size:16px;${cls || ''}">${v}</b><span style="width:62px;text-align:right;font-size:11px;color:#64748b;">${p}</span><span style="color:#475569;margin-left:6px;">›</span></div>`;
+    const grp = (t, rows) => `<div style="font-size:12px;font-weight:900;color:#94a3b8;margin:16px 2px 6px;">${t}</div><div style="background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;overflow:hidden;">${rows.join('')}</div>`;
+    const K = (k, d, u, div) => [f(R[k], d, u, div), f(P[k], d, u, div)];
+    const n = k => it && it[k] ? it[k].length : 0;
+    const bad = (v, lim, dir) => v != null && (dir < 0 ? v > lim : v < lim) ? 'color:#fbbf24;' : '';
+    return `<div style="font-size:12px;color:#94a3b8;margin:12px 2px 0;">${Y}年の成績です。行を押すと、くわしいところへ行きます。</div>
+      <div style="display:flex;font-size:11px;color:#64748b;padding:8px 12px 0;"><span style="flex:1;"></span><span>${Y}年</span><span style="width:68px;text-align:right;">前年</span></div>
+      ${grp('💉 繁殖', [
+        row('受胎率（全体）', ...K('conc_all', 1, '%'), 'conc'),
+        row('　受胎率 AI ／ ET', `${f(R.conc_ai, 0, '')}／${f(R.conc_et, 0, '%')}`, `${f(P.conc_ai, 0, '')}／${f(P.conc_et, 0, '%')}`, 'conc'),
+        row('初回授精の受胎率', ...K('conc_first', 1, '%'), 'conc'),
+        row('移植率', et && et.tr != null ? et.tr + '%' : '—', etP && etP.tr != null ? etP.tr + '%' : '—', 'conc'),
+        row('妊娠率（経産）', ...K('pr_parous', 1, '%'), 'preg'),
+        row('21日授精率（経産）', ...K('hdr_parous', 1, '%'), 'preg'),
+        row('発情発見率（経産）', ...K('det_parous', 1, '%'), 'preg'),
+        row('2回以内で受胎した割合', ...K('ins_le2', 1, '%'), 'kpi'),
+        row('分娩〜初回授精・分娩〜受胎', '', '', 'first'),
+        row('平均分娩間隔', ...K('calv_int', 1, 'か月'), 'ci', bad(R.calv_int, 12.5, -1)),
+        row('初産月齢', ...K('first_age', 1, 'か月'), 'kpi'),
+      ])}
+      ${grp('🐮 分娩・子牛', [
+        row(`生まれた子牛${it ? `<span style="font-size:11px;color:#94a3b8;">（うちET ${n('et')}頭）</span>` : ''}`, ...K('born', 0, '頭'), 'calvlist'),
+        row(`流産率<span style="font-size:11px;color:#94a3b8;">（${R.abort_n != null ? R.abort_n : 0}件）</span>`, ...K('abort_r', 1, '%'), 'calvlist', bad(R.abort_r, 3, -1)),
+        row(`死産率<span style="font-size:11px;color:#94a3b8;">（${R.still_n != null ? R.still_n : 0}頭）</span>`, ...K('still_r', 1, '%'), 'calvlist', bad(R.still_r, 3, -1)),
+        row(`子牛の死亡率<span style="font-size:11px;color:#94a3b8;">（〜4か月・${R.dcalf_n != null ? R.dcalf_n : 0}頭）</span>`, ...K('calf_d', 1, '%'), 'calvlist', bad(R.calf_d, 3, -1)),
+        row('種雄牛別の産子（体格・難産）', '', '', 'calv'),
+      ])}
+      ${grp('🥩 出荷', [
+        row('肥育出荷', ...K('ship_n_all', 0, '頭'), 'ship'),
+        row('平均出荷金額', ...K('ship_avg_all', 1, '万', 10000), 'ship'),
+        row('A4以上の割合', ...K('ship_a4_all', 1, '%'), 'ship'),
+        row('BMS平均', ...K('ship_bms_all', 1, ''), 'ship'),
+        row('廃用肥育の売値（1頭）', ...K('ret_avg_all', 1, '万', 10000), 'ship'),
+      ])}
+      ${grp('🐄 出入り', [
+        row('廃用した親牛', ...K('retire_n', 0, '頭'), 'move'),
+        row('死亡した親牛', ...K('dcow_n', 0, '頭'), 'move'),
+        row('死亡した育成牛・肥育牛', `${n('dRear')}頭・${n('dFat')}頭`, '', 'move'),
+        row('保留（その年生まれ）', `${n('kept')}頭`, '', 'move'),
+        row('導入', ...K('intro', 0, '頭'), 'move'),
+      ])}
+      ${grp('💊 病気・薬', [row('病気の記録・薬代', '', '', 'dis')])}
+      <div style="font-size:11px;color:#64748b;margin:12px 2px 0;line-height:1.6;">3年ぶんをくらべる表と目標の設定は「📋 年の表」にあります。</div>`;
   }
   // 📒 まとめ のいちばん上に平均分娩間隔
   const _rann = window.renderAnnual;
-  if (typeof _rann === 'function') window.renderAnnual = function () { const r = _rann.apply(this, arguments); try { if ((_annTab || 'sum') === 'sum') { const b = $('ann-body'); if (b) calvIntCard(b, _annYear || +today().slice(0, 4)); } } catch (e) { console.error('nuiCI', e); } return r; };
+  if (typeof _rann === 'function') window.renderAnnual = function () { if (_annTab === 'drug') _annTab = 'dis'; return _rann.apply(this, arguments); };
   window.nuiYear = function (k) { const s = $('stats-year'); if (s) { s.value = k; s.dataset.userChanged = '1'; } renderStats(); };
   window.annTabsHTML = function (active) { return statsHead(active === 'stats' ? (window._nuiStatsSub || 'conc') : active); };
   // 🐮 分娩・子牛のタブ：平均分娩間隔（その年に分娩した牛の、前の分娩からの日数）
@@ -36351,11 +36569,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     });
   }
   // 🧬 移植の成績：受け牛を準備した数 → 移植できた数（移植率）→ 受胎した数
-  function etRateCard(box) {
-    box.querySelectorAll('.nui-etr-card').forEach(x => x.remove());
-    const yv = ($('stats-year') || {}).value || 'all';
-    let from = '2025-01-01', to = '9999-12-31';
-    if (yv !== 'all') { const fy = parseInt(String(yv).replace(/\D/g, '')); if (fy) { from = (fy + 2018) + '-01-01'; to = (fy + 2018) + '-12-31'; } }
+  function etRateCalc(from, to) {
     const T = today(), wait = addDays(T, -25);
     const all = [...cows, ...(typeof retiredCows !== 'undefined' ? retiredCows : [])];
     const prep = [];
@@ -36375,7 +36589,15 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     let O = []; try { O = _insemOutcomes(from, to).filter(o => o.isET && !o.excluded); } catch (e) {}
     const pos = O.filter(o => o.pos).length;
     const pct = (a, b) => b ? Math.round(a / b * 100) : null;
-    const tr = pct(D.length, P.length), cr = pct(pos, O.length), pr = pct(D.filter(p => O.some(o => o.cowId === p.id && o.pos && o.rec && (o.rec.date || o.rec.d) === p.done)).length, P.length);
+    return { prep, P, D, N, O, pos, tr: pct(D.length, P.length), cr: pct(pos, O.length) };
+  }
+  window.etRateCalc = etRateCalc;
+  function etRateCard(box) {
+    box.querySelectorAll('.nui-etr-card').forEach(x => x.remove());
+    const yv = ($('stats-year') || {}).value || 'all';
+    let from = '2025-01-01', to = '9999-12-31';
+    if (yv !== 'all') { const fy = parseInt(String(yv).replace(/\D/g, '')); if (fy) { from = (fy + 2018) + '-01-01'; to = (fy + 2018) + '-12-31'; } }
+    const { prep, P, D, N, O, pos, tr, cr } = etRateCalc(from, to);
     const col = v => v == null ? '#64748b' : '#e2e8f0';
     const el = document.createElement('div'); el.className = 'stats-card nui-etr-card'; el.dataset.nuiSub = 'conc'; el.dataset.nuiOrd = '0';
     el.style.cssText = 'background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;padding:14px;margin-bottom:12px;order:0;';
