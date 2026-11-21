@@ -3280,11 +3280,42 @@ const _store = (() => {
       }
     } catch (e) {}
   };
+  // ★ 2026/11/21b：「消した印」（delMarks）。この端末で記録を消したとき（自分の操作・この版の自動の片づけ）だけ印を付ける。
+  //   同期では、印のない記録は消さない（古い版の画面や、まとめちがいで記録が消えることをなくす）
+  const TK = ['cows', 'retiredCows', 'calves', 'calvingRecords', 'tasks', 'miscarriageRecords', 'transferBook', 'collectionRecordsNew'];
+  const SUBF = ['events', 'moves'];
+  const hh = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(36); };
+  const ik = x => (x && typeof x === 'object' && x.id != null) ? 'i:' + x.id : 'h:' + hh(JSON.stringify(x));
+  const tombRec = (k, oldS, newS) => {
+    try {
+      if (!oldS || oldS === newS) return;
+      const O = JSON.parse(oldS), N = JSON.parse(newS); if (!Array.isArray(O) || !Array.isArray(N)) return;
+      let T; try { T = JSON.parse(ls.getItem('delMarks') || '{}') || {}; } catch (e) { T = {}; }
+      const now = Date.now(); let ch = false;
+      const om = new Map(), nm = new Map();
+      O.forEach(x => om.set(ik(x), x)); N.forEach(x => nm.set(ik(x), x));
+      const subH = (x, f) => new Set(((x && x[f]) || []).map(e => hh(JSON.stringify(e))));
+      om.forEach((o, key) => {
+        const n = nm.get(key);
+        if (n === undefined) { T[k + '|' + key] = now; ch = true; return; }
+        if (o && n && typeof o === 'object' && typeof n === 'object' && JSON.stringify(o) !== JSON.stringify(n)) SUBF.forEach(f => {
+          if (!Array.isArray(o[f])) return; const ns = subH(n, f), os = subH(o, f);
+          os.forEach(h => { if (!ns.has(h)) { T[k + '|' + key + '|' + f + '|' + h] = now; ch = true; } });
+          ns.forEach(h => { const tk = k + '|' + key + '|' + f + '|' + h; if (!os.has(h) && T[tk]) { delete T[tk]; ch = true; } });
+        });
+      });
+      nm.forEach((n, key) => { if (!om.has(key) && T[k + '|' + key]) { delete T[k + '|' + key]; ch = true; } });   // 戻した（足し直した）ものの印は消す
+      if (!ch) return;
+      const lim = now - 45 * 86400000; Object.keys(T).forEach(x => { if (T[x] < lim) delete T[x]; });
+      ls.setItem('delMarks', JSON.stringify(T));
+    } catch (e) { console.error('delMarks', e); }
+  };
   const st = {
     getItem: k => ls.getItem(k),
     removeItem: k => ls.removeItem(k),
     setItem(k, v) {
       if (k === 'tasks' || k === 'cows') watchLost(k, ls.getItem(k), v);
+      if (!window._syncWriting && TK.includes(k)) tombRec(k, ls.getItem(k), v);
       if (k === 'changeLog') v = _histCapStr(v);
       try { ls.setItem(k, v); return; } catch (e) { if (!isQuota(e)) throw e; }
       free(k);
@@ -12864,6 +12895,8 @@ function _histOnSave() {
   const lim = new Date(Date.now() - 90 * 86400000).toISOString();
   const L = _histLoad().filter(e => e.t >= lim).concat(add);
   _store.setItem('changeLog', JSON.stringify(L.slice(-1500)));
+  // ★ 2026/11/21b：この端末だけの控え（4日分・同期しない）。クラウドの履歴が書きかえられても、ここから取り戻せる
+  try { const l4 = new Date(Date.now() - 4 * 86400000).toISOString(); let H = JSON.parse(localStorage.getItem('histLocal') || '[]') || []; H = H.filter(e => e && e.t >= l4).concat(add.filter(e => e.k === 'cows' || e.k === 'calves' || e.k === 'calvingRecords')); localStorage.setItem('histLocal', JSON.stringify(H.slice(-600))); } catch (e) {}
 }
 const _HIST_EV = { calving: '分娩', ai_done: 'AI', et_done: 'ET', estrus_ai: '発情・AI', estrus_et: '発情（ET用）', preg_positive: '妊鑑＋', preg_negative: '妊鑑−', abortion: '流産', miscarriage: '流産', treatment: '処置', cidr_ai_start: 'CIDRプログラム', donor_et_start: 'ドナー', estrus: '発情' };
 const _HIST_FIELD = { status: '状態', calvingDate: '最終分娩日', dueDate: '分娩予定日', lactation: '産次', name: '名前', memo: 'メモ', breed: '品種', nationalId: '個体識別番号', role: '役割', tags: 'タグ', genomic: 'ゲノミック', sex: '性別', dob: '生年月日', sire: '父', damId: '母', earTagId: '耳標', authCertIssued: '証明書発行', isBreedingCandidate: '繁殖候補', location: '場所', date: '日付', twin: '双子', insemDate: '授精日', insemType: '授精種別' };
@@ -13252,6 +13285,7 @@ async function openSyncDiag() {
       L.push(`${k}: ${rv === lv ? '✓ 同じ' : '× ちがう'}（${note}）・base ${(() => { const b = window._syncBaseOf ? window._syncBaseOf(k) : null; return b ? (b.f ? 'あり(欄ごと)' : 'あり') : 'なし'; })()}`);
     }
   } catch (e) { L.push('クラウドを読めませんでした'); }
+  try { const W = (await window._fbDb.ref(window._DATA_PATH + '/_w').once('value')).val() || {}; L.push('--- 書いた端末'); Object.keys(W).map(k => W[k]).sort((a, b) => (b.t || 0) - (a.t || 0)).slice(0, 8).forEach(w => L.push(`${new Date(w.t || 0).toLocaleString('ja-JP')} ${w.d || '?'} 版${w.b || '?'}${w.b && w.b < window.APP_BUILD ? ' ⚠古い' : ''}`)); } catch (e) {}
   try { const LL = JSON.parse(localStorage.getItem('syncLostLog') || '[]').slice(-12); L.push('--- 消えかけた記録 ' + LL.length + '件'); LL.forEach(e => L.push(`${String(e.t).slice(5, 19).replace('T', ' ')} ${e.k} ${e.step} ${e.n || e.kept || e.lost || ''} ${(e.ids || []).join(',')} ${e.stk || ''}${e.lvSame != null ? ' lvSame=' + e.lvSame : ''}`)); } catch (e) {}
   try { closeModal('modal-confirm'); } catch (e) {}
   document.getElementById('diag-modal')?.remove();
@@ -13271,7 +13305,9 @@ let _lostData = null;
 async function openLostRecover() {
   const from = new Date(Date.now() - 3 * 86400000).toISOString();
   const srcCows = [], srcCalves = [], srcTasks = [], srcRecs = [];
-  try { _histLoad().filter(e => e && e.t >= from && e.after).forEach(e => { if (e.k === 'cows') srcCows.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); if (e.k === 'calvingRecords') srcRecs.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); if (e.k === 'calves') srcCalves.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); }); } catch (e) {}
+  let _hsrc = []; try { _hsrc = _histLoad(); } catch (e) {}
+  try { const seenH = new Set(_hsrc.map(e => e && e.id)); (JSON.parse(localStorage.getItem('histLocal') || '[]') || []).forEach(e => { if (e && !seenH.has(e.id)) _hsrc.push(e); }); } catch (e) {}
+  try { _hsrc.filter(e => e && e.t >= from && e.after).forEach(e => { if (e.k === 'cows') srcCows.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); if (e.k === 'calvingRecords') srcRecs.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); if (e.k === 'calves') srcCalves.push({ o: e.after, from: '変更履歴 ' + (e.dev || '') }); }); } catch (e) {}
   const db = window._fbDb, key = String(window._DATA_PATH || '').split('/').pop();
   if (db && key) {
     appAlert('バックアップを調べています…');
@@ -13742,8 +13778,9 @@ function checkDataConsistency() {
     let det = e.embryoDetails; try { if (!det || !det.length) det = getSheet2DetailsForLot(e.lot); } catch (er) {}
     const dup = _dupEmbryoUses(e, det); if (!dup.length) return;
     out.push({ kind: 'status', cowId: '', title: `受精卵 ${e.dam ? e.dam + '×' : ''}${e.sire || ''}（${e.lot || ''}）：同じ胚番号を2回使った記録がある`,
-      detail: `${dup.join('・')} の「使った」記録が2回ずつあり、在庫が${dup.length}本多くへっています`,
-      fix: '移植の画面でこのロットを選ぶと出る「🔧 重なっている記録を1つにして、在庫を直す」で直せます' });
+      detail: `${dup.join('・')} の「使った」記録が2回入っていて、在庫が${dup.length}本多くへっています（今の在庫 ${Number(e.stock) || 0}本）`,
+      fix: '下のボタンで直せます（在庫が0本のロットでも直せます）',
+      buttons: `<button type="button" class="st-act" style="position:relative;z-index:2;" onclick="event.stopPropagation();nuiEtFixDup('${_stEsc(e.id)}')">🔧 重なっている記録を1つにして、在庫を直す</button>` });
   });
   // ★ 2026/11/21：「プログラム中」なのに、まだ済んでいない予定がひとつもない牛
   cows.forEach(c => {
@@ -19159,7 +19196,7 @@ function renderEmbryoDetails(details, usedNos) {
     // どのタイプで使われたか判定（後で渡せる場合はそちらを使う）
     return `<tr style="background:${isUsed?'rgba(0,0,0,0.3)':i%2===0?'var(--bg2)':'var(--bg3)'};opacity:${isUsed?'0.5':'1'};">
     <td style="padding:3px 5px;font-size:10px;color:var(--muted);text-align:center;">${i+1}</td>
-    <td style="padding:3px 5px;font-size:10px;font-family:'JetBrains Mono',monospace;color:${isUsed?'var(--muted)':'var(--info)'};">${d.no||'—'}${isUsed?`<span style="font-size:9px;color:var(--danger);margin-left:4px;">${(usedNos._dates&&usedNos._dates[d.no])?fmtDateShort(usedNos._dates[d.no])+' ':''} ${(usedNos._types&&usedNos._types[d.no])==='discard'?'廃棄':(usedNos._types&&usedNos._types[d.no])==='transfer'?'譲渡':'使用済'}</span>`:''}</td>
+    <td style="padding:3px 5px;font-size:10px;font-family:'JetBrains Mono',monospace;color:${isUsed?'var(--muted)':'var(--info)'};">${d.no||'—'}${isUsed?`<span style="font-size:9px;color:var(--danger);margin-left:6px;white-space:nowrap;">（${(usedNos._dates&&usedNos._dates[d.no])?fmtDate(usedNos._dates[d.no])+' ':''} ${(usedNos._types&&usedNos._types[d.no])==='discard'?'廃棄':(usedNos._types&&usedNos._types[d.no])==='transfer'?'譲渡':'使用済'}）</span>`:''}</td>
     <td style="padding:3px 5px;font-size:10px;color:var(--muted);">${d.cane||'—'}</td>
     <td style="padding:3px 5px;font-size:10px;text-align:center;color:var(--text);">${stageBadge(d.stage)}</td>
     <td style="padding:3px 5px;font-size:10px;text-align:center;font-weight:700;color:${d.rank==='A'?'var(--accent)':d.rank==='B'?'var(--warn)':'var(--muted)'};">${d.rank||'—'}</td>
@@ -28364,9 +28401,10 @@ function renderEmbryo() {
   });
   // 品種（褐毛→黒毛→その他）→ドナー名 の順に並べ替え（全品種表示でも品種がまとまるように）
   const breedRank = b => b==='褐毛'?0 : b==='黒毛'?1 : 2;
+  const _embBreed = e => e.breed || (() => { const d = [...cows, ...(typeof retiredCows !== 'undefined' ? retiredCows : [])].find(c => cowDisplayName(c.id) === e.dam || c.name === e.dam); return d ? d.breed || '' : ''; })();
   groupOrder.sort((a,b)=>{
     const ea=groups[a][0], eb=groups[b][0];
-    const r = breedRank(ea.breed||'') - breedRank(eb.breed||'');
+    const r = breedRank(_embBreed(ea)) - breedRank(_embBreed(eb));
     if (r) return r;
     return String(ea.dam||'').localeCompare(String(eb.dam||''),'ja') || String(ea.sire||'').localeCompare(String(eb.sire||''),'ja');
   });
@@ -29502,8 +29540,8 @@ function renderSemen() {
 
   // 品種別グループ化
   const breedGroups = [
+    { breed: '褐毛', label: '🟥 褐毛和種', items: filtered.filter(s => s.breed === '褐毛') },   // ★ 2026/11/21：褐毛を先に
     { breed: '黒毛', label: '⬛ 黒毛和種', items: filtered.filter(s => s.breed === '黒毛' || (!s.breed && s.name)) },
-    { breed: '褐毛', label: '🟥 褐毛和種', items: filtered.filter(s => s.breed === '褐毛') },
     { breed: 'その他', label: '🐄 その他', items: filtered.filter(s => s.breed && s.breed !== '黒毛' && s.breed !== '褐毛') },
   ].filter(g => g.items.length > 0);
 
@@ -32726,7 +32764,7 @@ function renderRetiredList() {
             <span style="font-size:14px;font-weight:700;color:var(--text);margin-left:8px;">${cow.name||''}</span>
             ${pedigree?`<span style="font-size:11px;color:var(--muted);margin-left:8px;">${pedigree}</span>`:''}
           </div>
-          <span style="background:#1a0f00;border:1px solid #b45309;color:#f59e0b;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap;">${(() => { const ex = (typeof RETIRE_EXIT !== 'undefined' && RETIRE_EXIT[cow.retireExit]) || null; if (!ex) return '🚫 廃用'; if (cow.shipDate) return '🚚 出荷済'; return cow.retireExit === 'fatten' ? '🥩 廃用肥育中' : ex.icon + ' ' + ex.label; })()}</span>
+          <span style="background:#1a0f00;border:1px solid #b45309;color:#f59e0b;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap;">${(() => { const ex = (typeof RETIRE_EXIT !== 'undefined' && RETIRE_EXIT[cow.retireExit]) || null; if (!ex || cow.retireExit === 'other') return '🚫 廃用'; if (cow.retireExit === 'dead') return '💀 死亡・廃棄'; if (cow.retireExit === 'fatten') return cow.shipDate ? '🚫 廃用 → 🥩 廃用肥育 → 🚚 出荷済' : '🚫 廃用 → 🥩 廃用肥育中'; return '🚫 廃用 → 🚚 そのまま出荷・販売'; })()}</span>
         </div>
         ${cow.retireExit === 'fatten' && !cow.shipDate ? `<div style="background:#1a0f00;border:1px dashed #b45309;border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:12px;color:var(--text);">廃用肥育 <b style="color:var(--warn);">${diffDays(today(), cow.retireDate)}日目</b>${cow.shipPlan ? `・出荷予定 <b>${fmtDate(cow.shipPlan)}</b>（${diffDays(cow.shipPlan, today()) >= 0 ? 'あと' + diffDays(cow.shipPlan, today()) + '日' : '<span style=\'color:var(--danger);\'>' + (-diffDays(cow.shipPlan, today())) + '日超過</span>'}）` : ''}</div>` : ''}
         ${cow.retireSnapshot ? `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;">廃用時：${[cow.retireSnapshot.ageYears != null ? cow.retireSnapshot.ageYears + '歳' : '', cow.retireSnapshot.lactation != null ? cow.retireSnapshot.lactation + '産' : '', cow.retireSnapshot.openDays != null ? '空胎' + cow.retireSnapshot.openDays + '日' : '', '授精' + cow.retireSnapshot.insemCount + '回', cow.retireSnapshot.rate != null ? '受胎率' + cow.retireSnapshot.rate + '%' : ''].filter(Boolean).join('・')}</div>` : ''}
@@ -33937,10 +33975,10 @@ function setSyncStatus(state) {
 //   ・両方で同じ記録を直した → 直した時刻（_mt）の新しい方（時刻がなければ手元）
 //   送るときは transaction で「クラウドの今の値」とまとめてから書くので、同時に保存しても消えない。
 //   base の指紋は端末に保存するので、電波がない間に入れた記録も、次に開いたときにまとめて送れる。
-const SYNC_KEYS = ['cows','tasks','calves','calvingRecords','retiredCows','semenInventory','embryoInventory',
+const SYNC_KEYS = ['delMarks','cows','tasks','calves','calvingRecords','retiredCows','semenInventory','embryoInventory',
   'collectionRecords','collectionRecordsNew','etRecords','fatteningRecords',
   'insemBookDelLog','insemBookRecords','insemBookEdits','staticDonorAIFlags','donorAIRecords','pendingEtList',
-  'pendingUseRecords','transferBook','lastCalfNatIdPrefix','miscarriageRecords','fattenDeaths','farmTargets','data_version','changeLog'];
+  'pendingUseRecords','transferBook','lastCalfNatIdPrefix','memoChips','miscarriageRecords','fattenDeaths','farmTargets','data_version','changeLog'];
 let _syncedStr = {};     // クラウドとそろっている値（文字列）。この端末が最後に送った／受け取った値
 let _syncBase = (() => { try { return JSON.parse(localStorage.getItem('_syncBase') || '{}') || {}; } catch (e) { return {}; } })();   // { key: 指紋 }
 let _lastSentSnapshot = _syncedStr;   // 昔の名前（ほかの所から参照されていても動くように）
@@ -34112,11 +34150,90 @@ function _syncLegacyMerge(k, rv, lv) {
   return rv;
 }
 // クラウドの値と手元の値をまとめる（base があれば3方向、なければ前からのやり方）
+function _devKey() {
+  let d = ''; try { d = localStorage.getItem('_devKey') || ''; if (!d) { d = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); localStorage.setItem('_devKey', d); } } catch (e) { d = 'dx'; }
+  return d;
+}
+// ★ 2026/11/21b：書いた端末の印（_w）が変わらないまま、牛・予定・授精簿の中身がクラウドで変わった
+//   → この版の印を付けない画面（古い版）が、どこかで書きかえた。記録に残して知らせる（この端末の記録は消さずに残す）
+let _wSig = null, _wSeenAt = 0;
+function _watchUnknownWriter(remote) {
+  const sig = JSON.stringify(remote._w || null);
+  if (sig !== _wSig) { _wSig = sig; _wSeenAt = Date.now(); return; }
+  if (!_wSeenAt || Date.now() - _wSeenAt < 20000) return;
+  const ch = ['cows', 'tasks', 'insemBookRecords', 'calves'].filter(k => {
+    if (!(k in remote) || _syncedStr[k] === undefined) return false;
+    const rv = typeof remote[k] === 'string' ? remote[k] : JSON.stringify(remote[k]);
+    return rv !== _syncedStr[k];
+  });
+  if (!ch.length) return;
+  _syncLostLog({ k: ch.join(','), step: 'unknownWriter', ids: [] });
+  if (document.getElementById('oldwriter-banner')) return;
+  const d = document.createElement('div'); d.id = 'oldwriter-banner';
+  d.style.cssText = 'position:fixed;left:8px;right:8px;top:8px;z-index:99999;background:#78350f;color:#fff;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.6;';
+  d.innerHTML = '⚠ 古い版のこのツールを開いたままの端末が、どこかで記録を書きかえました（' + new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) + '）。この端末の記録は消さずに残しています。ほかのスマホ・PC・タブレットで開いているこのツールを、全部いったん閉じて開き直してください。 <button onclick="this.parentNode.remove()" style="margin-left:6px;background:#fff;color:#78350f;border:none;border-radius:6px;padding:2px 8px;font-weight:700;">閉じる</button>';
+  (document.body || document.documentElement).appendChild(d);
+}
+function _syncPut(k, v) { window._syncWriting = true; try { _store.setItem(k, v); } finally { window._syncWriting = false; } }
 function _syncReconcile(k, rv, lv) {
-  if (k === 'changeLog') { const r = _syncReconcile0(k, rv, lv); return r == null ? r : _histCapStr(r); }
+  if (k === 'changeLog') { const r = _syncHistUnion(rv, lv); return r == null ? r : _histCapStr(r); }
   let m = _syncReconcile0(k, rv, lv);
   try { if (k === 'tasks' || k === 'cows') m = _syncKeepChecks(k, rv, lv, m); } catch (e) { console.error(e); }
+  try { m = _syncNoSilentLoss(k, lv, m); } catch (e) { console.error('noSilentLoss', e); }
   return m;
+}
+// 変更履歴は、どちらかにあるものは全部残す（古いものは _histCapStr で片づける）
+function _syncHistUnion(rv, lv) {
+  if (lv == null) return rv; if (rv == null) return lv;
+  let R, L; try { R = JSON.parse(rv); L = JSON.parse(lv); } catch (e) { return lv; }
+  if (!Array.isArray(R) || !Array.isArray(L)) return lv;
+  const seen = new Set(), out = [];
+  R.concat(L).forEach(e => { const id = e && e.id ? e.id : JSON.stringify(e); if (seen.has(id)) return; seen.add(id); out.push(e); });
+  out.sort((a, b) => String((a && a.t) || '').localeCompare(String((b && b.t) || '')));
+  const s = JSON.stringify(out); return s === rv ? rv : s;
+}
+// ★ 2026/11/21b：まとめた結果で、手元にある記録が「消した印」なしに消える・古い中身に戻るときは、手元の方を残す。
+//   ・手元にある1件（予定・牛・子牛など）がまとめた結果に無い → 消した印が無ければ残す
+//   ・牛の記録（授精・移植・プログラム開始など）や移動が1件消える → 消した印が無ければ残す
+//   ・予定のチェックが外れる → 自分で外した印（_undoneAt）が無ければ残す
+//   ・1件まるごと、手元より1分以上古い中身に戻る → 手元の方
+//   （ここ10日の記録だけ。ずっと開いていなかった端末で、昔消した記録がよみがえらないように）
+const _NOLOSS_KEYS = ['cows', 'retiredCows', 'calves', 'calvingRecords', 'tasks', 'miscarriageRecords', 'transferBook', 'collectionRecordsNew'];
+function _syncNoSilentLoss(k, lv, m) {
+  if (!_NOLOSS_KEYS.includes(k) || m == null || lv == null || m === lv) return m;
+  let L, M; try { L = JSON.parse(lv); M = JSON.parse(m); } catch (e) { return m; }
+  if (!Array.isArray(L) || !Array.isArray(M)) return m;
+  let T = {}; try { T = JSON.parse(_store.getItem('delMarks') || '{}') || {}; } catch (e) {}
+  const now = Date.now(), lim = addDays(today(), -10), limT = now - 10 * 86400000;
+  const isoMs = v => { const t = v ? Date.parse(v) : NaN; return isNaN(t) ? 0 : t; };
+  const recent = x => !!x && typeof x === 'object' && ((x._mt || 0) > limT || isoMs(x.doneAt) > limT || String(x.date || x.dob || '') >= lim);
+  const idx = new Map(); M.forEach((x, i) => idx.set(_syncItemKey(x), i));
+  const kept = [];
+  L.forEach(lx => {
+    const key = _syncItemKey(lx), i = idx.get(key);
+    if (i === undefined) {
+      if (T[k + '|' + key] || !recent(lx)) return;
+      M.push(lx); idx.set(key, M.length - 1); kept.push('+' + key); return;
+    }
+    const mx = M[i];
+    if (!(lx && mx && typeof lx === 'object' && typeof mx === 'object')) return;
+    if ((lx._mt || 0) - (mx._mt || 0) > 60000) { M[i] = lx; kept.push('old ' + key); return; }
+    ['events', 'moves'].forEach(f => {
+      if (!Array.isArray(lx[f])) return;
+      const mh = new Set((mx[f] || []).map(e => _syncHash(JSON.stringify(e))));
+      const miss = lx[f].filter(e => { const h = _syncHash(JSON.stringify(e)); return !mh.has(h) && !T[k + '|' + key + '|' + f + '|' + h] && e && String(e.date || '') >= lim; });
+      if (!miss.length) return;
+      mx[f] = (mx[f] || []).concat(miss).sort((a, b) => String((a && a.date) || '').localeCompare(String((b && b.date) || '')));
+      kept.push(key + ' ' + f + miss.length);
+    });
+    if (k === 'tasks' && lx.done && !mx.done && !(mx._undoneAt && mx._undoneAt > (lx._mt || 0))) {
+      mx.done = lx.done; if (lx.doneAt) mx.doneAt = lx.doneAt; if (lx.skipped) mx.skipped = lx.skipped; if ((lx._mt || 0) > (mx._mt || 0)) mx._mt = lx._mt; delete mx._undoneAt;
+      kept.push('✓' + key);
+    }
+  });
+  if (!kept.length) return m;
+  _syncLostLog({ k, step: 'keep', kept: kept.length, ids: kept.slice(0, 8) });
+  return JSON.stringify(M);
 }
 // ★ 2026/11/18：まとめた結果で、クラウドにある「チェック（済み）」「移動」「タグ」が消えるときは、記録に残す。
 //   タスクのチェックは、手元で自分で外した（_undoneAt が新しい）とき以外は消さない
@@ -34175,7 +34292,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112121';
+const APP_BUILD = '2026112125';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -34226,12 +34343,12 @@ function initFirebaseSync() {
     if (_checkAppBuild(remote, dbRef) && document.getElementById('build-banner') == null) return;   // 古い版 → 開き直す
     let needPush = false;
     if (remote) {
-      Object.keys(remote).sort((a, b) => (a === 'insemBookDelLog' ? -1 : b === 'insemBookDelLog' ? 1 : 0)).forEach(k => {
+      Object.keys(remote).sort((a, b) => { const r = x => x === 'delMarks' ? 0 : x === 'insemBookDelLog' ? 1 : 2; return r(a) - r(b); }).forEach(k => {
         const rv = typeof remote[k] === 'string' ? remote[k] : JSON.stringify(remote[k]);
         if (!SYNC_KEYS.includes(k)) { _store.setItem(k, rv); return; }   // _base など同期の対象外はそのまま
         const lv = _store.getItem(k);
         const merged = _syncReconcile(k, rv, lv);
-        _store.setItem(k, merged);
+        _syncPut(k, merged);
         if (_storeOK(k, merged)) _syncSetBase(k, rv);   // クラウドの値を base にする（まとめた差はこのあと送る）
         else _syncDropBase(k);                           // 端末に保存できなかった → base を進めない
         if (merged !== rv) needPush = true;
@@ -34255,6 +34372,7 @@ function initFirebaseSync() {
       const remote = snapshot.val();
       if (!remote) return;
       if (_checkAppBuild(remote, dbRef) && document.getElementById('build-banner') == null) return;
+      try { _watchUnknownWriter(remote); } catch (e) {}
       let changed = false, push = false;
       SYNC_KEYS.forEach(k => {
         if (!(k in remote)) return;
@@ -34262,7 +34380,7 @@ function initFirebaseSync() {
         if (rv === _syncedStr[k]) return;               // 自分が送った値（エコー）か、変わっていない
         const lv = _store.getItem(k);
         const merged = _syncReconcile(k, rv, lv);
-        if (merged !== lv) { _store.setItem(k, merged); changed = true; }
+        if (merged !== lv) { _syncPut(k, merged); changed = true; }
         if (_storeOK(k, merged)) _syncSetBase(k, rv);   // 手元に保存できたときだけ base を進める
         else { _syncDropBase(k); return; }
         if (merged !== rv) push = true;                 // 手元の変更が残っている → あとで送る
@@ -34286,6 +34404,8 @@ function saveToFirebase() {
   syncTimer = setTimeout(() => {
     const changedKeys = SYNC_KEYS.filter(k => { const v = _store.getItem(k); return v !== null && v !== _syncedStr[k]; });
     if (!changedKeys.length) { setSyncStatus('synced'); isSyncing = false; return; }
+    // ★ 2026/11/21b：どの端末（どの版）が書いたかの印。印なしで中身が変わったら「古い版の画面が書いた」とわかる
+    try { dbRef.child('_w/' + _devKey()).set({ b: APP_BUILD, t: Date.now(), d: _histDevice() }).catch(() => {}); } catch (e) {}
     let pending = changedKeys.length, failed = false, reload = false;
     const done = () => {
       if (--pending > 0) return;
@@ -34306,12 +34426,12 @@ function saveToFirebase() {
         if (err || !committed || !snap) { if (err) { console.error('Firebase update error:', k, err); failed = true; } done(); return; }
         const v = snap.val(), vs = typeof v === 'string' ? v : JSON.stringify(v);
         const now = _store.getItem(k);
-        if (now === lv && vs !== lv) { _store.setItem(k, vs); reload = true; }   // ほかの端末の記録が混ざった → 手元にも入れる
+        if (now === lv && vs !== lv) { _syncPut(k, vs); _syncAfterLocalChange(); }   // ほかの端末の記録が混ざった → 手元にも入れる
         else if (now !== lv && vs !== lv) {
           // ★ 2026/11/18：送っている間に手元がまた変わった。クラウドに混ざったほかの端末の記録（チェック・移動など）を、
           //   手元の新しい中身にもまとめてから base を進める（前は手元に入れないまま base だけ進めて、次に送ったとき消していた）
           const m2 = _syncReconcile(k, vs, now);
-          if (m2 !== now) { _store.setItem(k, m2); reload = true; }
+          if (m2 !== now) { _syncPut(k, m2); _syncAfterLocalChange(); }
           setTimeout(() => { try { saveToFirebase(); } catch (e) {} }, 100);
         }
         else if (now !== lv) setTimeout(() => { try { saveToFirebase(); } catch (e) {} }, 100);   // 送っている間に手元がまた変わった
@@ -35776,7 +35896,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     save(); vCert(true);
   };
   window.nuiCpFill = async function () {
-    const Bl = cpBlank(); if (!Bl.length) return;
+    const Bl = cpBlank().slice().sort((a, b) => String(a.d || '').localeCompare(String(b.d || '')) || String(a.t || '').localeCompare(String(b.t || ''))); if (!Bl.length) return;
     let n = cpNextNo(cpBook());
     const plan = Bl.map(r => ({ r, q: String(n++) }));
     const yes = await appConfirm(`No. が空の ${Bl.length}か所に、今の最後の番号の続きを入れます。\n\n` + plan.slice(0, 15).map(p => `${fmtDate(p.r.d)} ${p.r.t} → ${p.q}`).join('\n') + (plan.length > 15 ? `\n…ほか${plan.length - 15}か所` : '') + '\n\n入れますか？');
@@ -36240,7 +36360,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         <div style="min-width:0;"><span class="nui-mono" style="font-weight:900;font-size:20px;color:#4ade80;">${esc(c.id)}</span> <span style="font-size:16px;font-weight:700;">${esc(nm(c.id))}</span><div style="font-size:12px;color:#94a3b8;">${esc(li ? insLabel(li) + ' ・ ' + diffDays(today(), li.date) + '日前' : cowSub(c))}</div></div>${stTag(c)}</div></div>
       <div style="padding:10px 14px 4px;">${steps(2)}</div>
       <div style="padding:10px 14px 30px;">
-        <div style="font-size:12px;font-weight:700;color:#94a3b8;margin-bottom:6px;">この牛によく使う</div>
+        <div style="font-size:12px;font-weight:700;color:#94a3b8;margin-bottom:6px;">今の状態でよく使う</div>
         <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;">${FAV.map(x => { const a = ACT[x]; return `<div class="nui-tile nui-n" style="border-width:2px;border-color:#22c55e;padding:16px 10px;" onclick="nuiAct('${x}')"><div style="font-size:30px;">${a[0]}</div><div style="font-size:16px;font-weight:900;">${a[1]}</div><div style="font-size:11px;color:#94a3b8;">${esc(favSub[x] || '')}</div></div>`; }).join('')}</div>
         <div style="font-size:12px;font-weight:700;color:#94a3b8;margin:14px 0 6px;">そのほか</div>
         <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;">${rest.map(x => { const a = ACT[x]; return `<div class="nui-tile nui-n" style="padding:12px 2px;" onclick="nuiAct('${x}')"><div class="i">${a[0]}</div><div style="font-size:12px;font-weight:700;">${a[1]}</div></div>`; }).join('')}</div>
@@ -36251,7 +36371,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const c = cowOf(cowId) || {}; let L = semenInventory;
     if (c.breed === '黒毛') L = semenInventory.filter(s => s.breed === '黒毛'); else if (c.breed === '褐毛') L = semenInventory.filter(s => s.breed === '褐毛');
     if (!L.length) L = semenInventory;
-    return L.slice().sort((a, b) => ((b.stock || 0) > 0) - ((a.stock || 0) > 0) || String(a.name).localeCompare(String(b.name), 'ja'));
+    const br = x => x.breed === '褐毛' ? 0 : x.breed === '黒毛' ? 1 : 2;
+    return L.slice().sort((a, b) => ((b.stock || 0) > 0) - ((a.stock || 0) > 0) || br(a) - br(b) || String(a.name).localeCompare(String(b.name), 'ja'));
   }
   function vAI() {
     const c = cowOf(S.cow), T = today();
@@ -36267,7 +36388,6 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const chip = (on) => `nui-ch${on ? ' on' : ''}`;
     const days = [['今日 ' + md(T), 0], ['昨日 ' + md(addDays(T, -1)), 1], ['📅 ' + (A.day === 2 ? md(A.date) : '日付'), 2]];
     const note = A.count > 1 ? `⚠ 授精簿に${A.count}行できます（証明書は1本に1枚）・在庫も${A.count}本へります` : '授精簿に1行・在庫が1本へります';
-    const CH = ['GnRH投与', '角AI', '粘液 透明', '粘液 白っぽい'];
     scrShow(`${backBtn("nuiBackAct()")}<span style="font-size:17px;font-weight:900;color:#4ade80;">💉 種付け・移植</span><span style="font-size:15px;"><span class="nui-mono" style="font-weight:700;">${esc(c.id)}</span> ${esc(nm(c.id))}</span>`,
       `<div style="padding:12px 14px 30px;display:flex;flex-direction:column;gap:14px;">
         <div class="nui-seg"><button class="on">💉 AI・自然交配</button><button onclick="nuiAIet()">🧬 移植（ET）</button></div>
@@ -36295,8 +36415,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         <button onclick="nuiAI({donor:${!A.donor}})" style="display:flex;align-items:flex-start;gap:10px;text-align:left;width:100%;padding:12px;border-radius:12px;border:1.5px solid ${A.donor ? '#f59e0b' : '#2a3050'};background:${A.donor ? '#1a1508' : '#171b26'};color:#e2e8f0;cursor:pointer;font-family:inherit;">
           <span style="flex-shrink:0;width:24px;height:24px;border-radius:6px;border:2px solid ${A.donor ? '#f59e0b' : '#475569'};background:${A.donor ? '#b45309' : 'transparent'};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;">${A.donor ? '✓' : ''}</span>
           <span style="flex:1;"><b style="font-size:14px;">🐄 ドナーAI（採卵のための授精）</b><br><span style="font-size:12px;color:#94a3b8;">妊鑑の予定は作りません。採卵記録のAI日につながります</span></span></button>
-        <details class="nui-box" ${A.chips.length || A.memo ? 'open' : ''}><summary style="cursor:pointer;font-size:13px;font-weight:700;">📝 メモ・ホルモン（なくてもOK） ▼</summary>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${CH.map(x => `<button class="nui-chip${A.chips.includes(x) ? ' on' : ''}" onclick="nuiAIChip('${x}')">${x}</button>`).join('')}</div>
+        <details class="nui-box" ${A.chips.length || A.memo || CHED === 'ai' ? 'open' : ''}><summary style="cursor:pointer;font-size:13px;font-weight:700;">📝 メモ・ホルモン（なくてもOK） ▼</summary>
+          ${chipBlock('ai', A.chips, 'nuiAIChip')}
           <input class="nui-in" style="margin-top:8px;" placeholder="そのほかのメモ" value="${esc(A.memo)}" oninput="S_nuiMemo(this.value)"></details>
       </div>`,
       `<button class="nui-save" onclick="nuiSaveAI()">💾 記録する</button><div style="font-size:11px;color:#94a3b8;text-align:center;margin-top:8px;">再発情の確認と妊鑑（30日・45日）の予定も自動で入ります</div>`);
@@ -36309,6 +36429,32 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const A = S.ai; Object.assign(A, o);
     if ('day' in o) { if (o.day === 0) A.date = today(); if (o.day === 1) A.date = addDays(today(), -1); }
     const sb = document.querySelector('#nui-scr .sb'), y = sb ? sb.scrollTop : 0; vAI(); const sb2 = document.querySelector('#nui-scr .sb'); if (sb2) sb2.scrollTop = y;
+  };
+  // ★ 2026/11/21：メモのワンタッチボタン（足す・名前を直す・消す）。全部の端末で同じになるよう同期する
+  const CHIP_DEF = { ai: ['GnRH投与', '角AI', '粘液 透明', '粘液 白っぽい'], calv: ['介助', '難産', '逆子', '胎盤停滞'] };
+  let CHED = '';
+  function chipList(kind) { try { const o = JSON.parse(_store.getItem('memoChips') || '{}') || {}; if (Array.isArray(o[kind])) return o[kind]; } catch (e) {} return CHIP_DEF[kind].slice(); }
+  function chipSave(kind, L) { let o = {}; try { o = JSON.parse(_store.getItem('memoChips') || '{}') || {}; } catch (e) {} o[kind] = L; _store.setItem('memoChips', JSON.stringify(o)); try { window.save(); } catch (e) {} }
+  const chipRedraw = kind => { if (kind === 'calv') window.nuiCV({}); else window.nuiAI({}); };
+  function chipBlock(kind, sel, fn) {
+    const L = chipList(kind);
+    if (CHED === kind) return `<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;">
+      <div style="font-size:12px;color:#94a3b8;">ボタンの文字を直す・✕で消す・下で足す（ほかの端末にも同じボタンが出ます）</div>
+      ${L.map((x, i) => `<div style="display:flex;gap:6px;"><input class="nui-in" style="flex:1;" value="${esc(x)}" aria-label="ボタン${i + 1}の文字" onchange="nuiChipEd('${kind}',${i},this.value)"><button class="nui-chip" style="flex:none;" aria-label="${esc(x)}を消す" onclick="nuiChipEd('${kind}',${i},null)">✕</button></div>`).join('')}
+      <div style="display:flex;gap:6px;"><input id="nui-chip-new" class="nui-in" style="flex:1;" placeholder="足すボタンの文字（例：CIDR抜去）" onkeydown="if(event.key==='Enter')nuiChipEd('${kind}',-1,this.value)"><button class="nui-chip" style="flex:none;" onclick="nuiChipEd('${kind}',-1,document.getElementById('nui-chip-new').value)">＋ 足す</button></div>
+      <div style="display:flex;gap:6px;"><button class="nui-chip on" style="flex:1;" onclick="nuiChipEdit('')">✓ 終わる</button><button class="nui-chip" style="flex:none;" onclick="nuiChipEd('${kind}',-2,null)">はじめのボタンに戻す</button></div></div>`;
+    return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${L.map(x => `<button class="nui-chip${sel.includes(x) ? ' on' : ''}" onclick="${fn}('${esc(jsq(x))}')">${esc(x)}</button>`).join('')}<button class="nui-chip" style="border-style:dashed;color:#94a3b8;" onclick="nuiChipEdit('${kind}')">✏ ボタンを直す</button></div>`;
+  }
+  window.nuiChipEdit = function (kind) { const was = CHED; CHED = kind; chipRedraw(kind || was); };
+  window.nuiChipEd = function (kind, i, v) {
+    let L = chipList(kind);
+    if (i === -2) L = CHIP_DEF[kind].slice();
+    else { const t = v == null ? null : String(v).trim().slice(0, 20);
+      if (i === -1) { if (!t || L.includes(t)) { chipRedraw(kind); return; } L.push(t); }
+      else if (t == null || t === '') L.splice(i, 1);
+      else if (!L.some((y, j) => y === t && j !== i)) L[i] = t; }
+    chipSave(kind, L); chipRedraw(kind);
+    if (i === -1) setTimeout(() => { const n = document.getElementById('nui-chip-new'); if (n) n.focus(); }, 30);
   };
   window.nuiAIChip = function (x) { const A = S.ai; A.chips = A.chips.includes(x) ? A.chips.filter(y => y !== x) : [...A.chips, x]; nuiAI({}); };
   window.nuiSaveAI = async function () {
@@ -36331,8 +36477,10 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   };
   // ---------- 🧬 移植（ET）：AI と同じつくり ----------
   function etLots() {
+    const all = [...cows, ...(typeof retiredCows !== 'undefined' ? retiredCows : [])];
+    const brOf = e => { const b = e.breed || ((all.find(c => nm(c.id) === e.dam || c.name === e.dam) || {}).breed) || ''; return b === '褐毛' ? 0 : b === '黒毛' ? 1 : 2; };
     return (typeof embryoInventory !== 'undefined' ? embryoInventory : []).filter(e => (Number(e.stock) || 0) > 0)
-      .sort((a, b) => (a.dam || '').localeCompare(b.dam || '', 'ja') || String(b.collectionDate || b.lot || '').localeCompare(String(a.collectionDate || a.lot || '')));
+      .sort((a, b) => brOf(a) - brOf(b) || (a.dam || '').localeCompare(b.dam || '', 'ja') || String(b.collectionDate || b.lot || '').localeCompare(String(a.collectionDate || a.lot || '')));
   }
   function etNos(e) {   // 凍結胚の、まだ使っていない胚番号
     if (!e || e.type !== 'frozen') return [];
@@ -36415,7 +36563,9 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     });
     try { syncStockFromHistory(e); } catch (er) { e.stock = before + dup.length; }
     e._mt = Date.now();
-    save(); nuiET({});
+    save();
+    if (S.et && document.body.classList.contains('nui-scr-open')) nuiET({});
+    else { try { appAlert(`直しました。在庫は ${e.stock}本 になりました。`); } catch (er) {} try { renderAll(); } catch (er) {} try { if (typeof renderDataCheck === 'function') renderDataCheck(); } catch (er) {} }
   };
   window.nuiEtDam = k => { const E = S.et; E.openDam = E.openDam || {}; const was = (E.openDam[k] != null) ? E.openDam[k] : etLots().some(e => (e.dam || '（ドナー未設定）') === k && e.id === E.lot); E.openDam[k] = !was; nuiET({}); };
   window.nuiET = function (o) {
@@ -36458,7 +36608,6 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const kinds = [['生きている', '#22c55e', '#14532d', '#4ade80'], ['死産', '#ef4444', '#7f1d1d', '#f87171'], ['虚弱', '#f59e0b', '#78350f', '#f59e0b']].map(([l, bd, bg, fg], i) => { const on = C.kind === i; return `<button onclick="nuiCV({kind:${i}})" style="flex:1;height:44px;border-radius:8px;font-size:14px;font-weight:700;border:1px solid ${on ? bd : '#2a3050'};background:${on ? bg : '#1e2333'};color:${on ? fg : '#e2e8f0'};cursor:pointer;font-family:inherit;">${l}</button>`; }).join('');
     // ★ 2026/11/20：体格は5段階（1小〜5大）。育成舎・出荷の体格と同じ物差し
     const sizes = [['1', '小'], ['2', ''], ['3', '中'], ['4', ''], ['5', '大']].map(([v, l]) => { const on = C.size === v; return `<button onclick="nuiCV({size:'${v}'})" style="flex:1;height:50px;border-radius:8px;background:${on ? '#14532d' : '#1e2333'};border:1px solid ${on ? '#22c55e' : '#2a3050'};color:${on ? '#4ade80' : '#e2e8f0'};font-weight:800;cursor:pointer;font-family:inherit;line-height:1.1;"><span style="font-size:17px;">${v}</span>${l ? `<br><span style="font-size:10px;font-weight:700;opacity:.8;">${l}</span>` : ''}</button>`; }).join('');
-    const CH = ['介助', '難産', '逆子', '胎盤停滞'];
     const days = [['今日 ' + md(T), 0], ['昨日 ' + md(addDays(T, -1)), 1], ['📅 ' + (C.day === 2 ? md(C.date) : '日付'), 2]];
     scrShow(`${backBtn("nuiBackAct()")}<span style="font-size:17px;font-weight:900;color:#c4a5f5;">🍼 分娩</span><span style="font-size:15px;"><span class="nui-mono" style="font-weight:700;">${esc(c.id)}</span> ${esc(nm(c.id))}</span>`,
       `<div style="margin:12px 14px 0;background:#1c1230;border:1px solid #5b3a8a;border-radius:12px;padding:10px 14px;font-size:13px;color:#c4a5f5;">${c.dueDate ? '予定 ' + md(c.dueDate) + ' ・ ' : ''}${esc(li ? insLabel(li).replace(/ \d+\/\d+/, '') : '授精の記録なし')} ・ 父は授精の記録から自動で入ります</div>
@@ -36472,8 +36621,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
           ${C.twin ? `<div style="font-size:12px;color:#94a3b8;margin:8px 0 6px;">2頭目</div><div style="display:flex;gap:6px;">${sexB('sex2', C.sex2)}</div>` : ''}</div>
         <div class="nui-box"><label for="nui-tag" class="nui-lb">子牛の耳標</label><input id="nui-tag" class="nui-in" placeholder="あとでもOK" value="${esc(C.tag)}" oninput="S_nuiTag(this.value)"></div>
         <div class="nui-box"><div class="nui-lb">体格（1小〜5大）</div><div style="display:flex;gap:6px;">${sizes}</div></div>
-        <details class="nui-box" ${C.chips.length || C.memo ? 'open' : ''}><summary style="cursor:pointer;font-size:13px;font-weight:700;">📝 お産のようす・メモ（なくてもOK） ▼</summary>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${CH.map(x => `<button class="nui-chip${C.chips.includes(x) ? ' on' : ''}" onclick="nuiCVChip('${x}')">${x}</button>`).join('')}</div>
+        <details class="nui-box" ${C.chips.length || C.memo || CHED === 'calv' ? 'open' : ''}><summary style="cursor:pointer;font-size:13px;font-weight:700;">📝 お産のようす・メモ（なくてもOK） ▼</summary>
+          ${chipBlock('calv', C.chips, 'nuiCVChip')}
           <input class="nui-in" style="margin-top:8px;" placeholder="そのほかのメモ" value="${esc(C.memo)}" oninput="S_nuiCMemo(this.value)"></details>
       </div>`,
       `<button class="nui-save" onclick="nuiSaveCalv()">💾 記録する</button><div style="font-size:11px;color:#94a3b8;text-align:center;margin-top:8px;">母牛は「分娩後」、子牛は子牛の一覧へ。🐄 らくちく出生報告の準備もすぐできます</div>`);
@@ -37233,7 +37382,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   window.nuiIbFill = async function () {
     const y = ($('insembook-year') || {}).value; if (!y) return;
     let cert; try { cert = checkCertNumbers(y); } catch (e) { appAlert('調べられませんでした'); return; }
-    const B = (cert.issues.blank || []).slice().sort((a, b) => a.d.localeCompare(b.d));
+    const B = (cert.issues.blank || []).slice().sort((a, b) => a.d.localeCompare(b.d) || String(a.t || '').localeCompare(String(b.t || '')));   // 授精簿の並び（日付→牛）と同じ順
     if (!B.length) { appAlert('No. が入っていない行はありません'); return; }
     const nums = cert.recs.map(r => String(r.q || '').trim()).filter(q => /^\d+$/.test(q)).map(Number).sort((a, b) => a - b);
     const med = nums.length ? nums[Math.floor(nums.length / 2)] : 0;
