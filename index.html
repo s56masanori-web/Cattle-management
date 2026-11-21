@@ -2673,6 +2673,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
         <optgroup label="── ET プログラム ──">
           <option value="estrus_et">自然発情 → ET（AIせず）発情確認日D0</option>
           <option value="et_recipient">ETレシピエント CIDRプログラム D0</option>
+          <option value="et_recipient_takahashi">ETレシピエント CIDRプログラム【高橋式】D0（D19移植）</option>
         </optgroup>
         <optgroup label="── 採卵（ドナー）──">
           <option value="donor_et_start">採卵プログラム開始【小原式・自然発情】発情確認日D0</option>
@@ -4753,6 +4754,7 @@ function registerEvent() {
   // ai_done/et_doneは自前でeventsにpushするので、ここでは汎用イベントのみpush
   if (event !== 'ai_done' && event !== 'et_done') {
     cow.events.push({ type: event, date, memo });
+    if (event === 'et_recipient' && window._etTakahashi) cow.events[cow.events.length - 1].protocol = 'takahashi';
   }
 
   let schedule = [];
@@ -4793,7 +4795,7 @@ function registerEvent() {
     case 'et_recipient':
       cow.status='program'; cow.etStartDate=date;
       tasks = tasks.filter(t => !(t.cowId===cowId && !t.done && (t.action.includes('妊娠鑑定') || t.action.includes('再発情'))));
-      schedule=generateSchedule('et_cidr',date,cowId); break;
+      schedule=generateSchedule(window._etTakahashi ? 'et_cidr_takahashi' : 'et_cidr',date,cowId); window._etTakahashi = false; break;
     case 'ai_done': {
       const implDate = document.getElementById('ai-et-impl-date').value || date;
       const pregResultRaw = document.getElementById('ai-et-preg-result-val').value;
@@ -7693,7 +7695,7 @@ function buildCowStory(cowId) {
       if (donor) kv.push([donor, 'ドナー']);
       const stopped = e._retired && DONOR_PROG_TYPES.includes(e.type);
       if (stopped) kv.push([(e.stoppedAt ? fmtDate(e.stoppedAt) + ' ' : '') + (e.stopMemo ? _stEsc(e.stopMemo) : ''), '🛑 採卵中止']);
-      items.push({ date: e.date, cat: 'treat', color: e.type === 'pg_rescue' ? '#ef4444' : '#94a3b8', title: '▶ ' + progLabel[e.type] + (stopped ? '（中止）' : ''), badge: null, desc: '', kv, memo: donor ? '' : e.memo,
+      items.push({ date: e.date, cat: 'treat', color: e.type === 'pg_rescue' ? '#ef4444' : '#94a3b8', title: '▶ ' + progLabel[e.type] + (e.protocol === 'takahashi' ? '（高橋式）' : '') + (stopped ? '（中止）' : ''), badge: null, desc: '', kv, memo: donor ? '' : e.memo,
         acts: stopped && !isRetired ? [`<button class="st-act" onclick="undoStopDonor('${_stEsc(cowId)}',${e._idx})">↩ 中止を取り消す</button>`] : [] });
     } else if (e.type === 'open') {
       items.push({ date: e.date, cat: 'breed', color: '#94a3b8', title: '空胎に戻す', badge: null, desc: '', kv: [], memo: e.memo, acts: [] });
@@ -9318,6 +9320,9 @@ function kpiYear(Y) {
   R.calf_d = _live > 0 ? pct(it.dCalf.length, _live) : null;   // 子牛の死亡率＝〜4か月の死亡÷生きて生まれた子牛（死産は入れない）
   R.dcalf_n = it.dCalf.length;
   R.keep = it.born.length ? pct(it.kept.length, it.born.length) : null;
+  // 流産した時期（妊娠日数の平均）・移植率
+  { const D = it.abort.map(a => a.gDays).filter(v => v != null); R.abort_days = D.length ? Math.round(D.reduce((t, v) => t + v, 0) / D.length) : null; R.abort_days_n = D.length; }
+  try { if (typeof window.etRateCalc === 'function') { const e = window.etRateCalc(`${Y}-01-01`, `${Y}-12-31`); R.et_rate = e.tr; R.et_prep = e.P.length; R.et_done = e.D.length; } } catch (e) {}
   R.d_rear = it.dRear.length; R.d_fat = it.dFat.length;
   // 妊鑑の結果がほとんど記録されていない年（このツールを使い始める前）は、繁殖・子牛の数字を出さない
   if (explicitN < 5) {
@@ -9356,6 +9361,7 @@ const KPI_DEF = [
   ['conc_et', '　受胎率 ET', '%', 1, 1],
   ['conc_h', '　受胎率 未経産', '%', 1, 1],
   ['conc_first', '初回授精の受胎率', '%', 1, 1],
+  ['et_rate', '移植率（受け牛を準備して移植できた割合）', '%', 0, 1],
   ['hdr_parous', '21日授精率（経産）', '%', 1, 1],
   ['pr_parous', '妊娠率（経産）', '%', 1, 1],
   ['det_parous', '発情発見率（経産・記録ベース）', '%', 1, 1],
@@ -9364,6 +9370,7 @@ const KPI_DEF = [
   ['det_heifer', '発情発見率（未経産・記録ベース）', '%', 1, 1],
   ['abort_r', '流産率（流産÷生まれた子牛＋流産）', '%', 1, -1],
   ['still_r', '死産率（死産÷生まれた子牛）', '%', 1, -1],
+  ['abort_days', '流産した時期（平均・妊娠何日目）', '日', 0, 0],
   ['first_age', '初産月齢', 'か月', 1, -1],
   ['retire_n', '廃用した親牛', '頭', 0, 0],
   ['retire_r', '　廃用率（÷年初の親牛）', '%', 1, 0],
@@ -9394,7 +9401,7 @@ function renderKPI(el, Y) {
     return subs.map(([kk, bl], si) => {
       const t = farmTargets[kk];
       return `<tr class="${si < subs.length - 1 && byBreed ? 'kpi-subrow' : ''}">
-        <td class="kpi-name">${si === 0 ? `<div>${esc(name)}${unit ? `<span class="kpi-unit">（${esc(unit)}）</span>` : ''}</div>` : ''}${bl ? `<div class="kpi-br">${bl}</div>` : ''}</td>
+        <td class="kpi-name">${si === 0 ? `<div>${esc(name)}${unit ? `<span class="kpi-unit">（${esc(unit)}）</span>` : ''}</div>` : ''}${bl ? `<div class="kpi-br">${bl}</div>` : ''}${si === 0 && typeof ADV_REF !== 'undefined' && ADV_REF[k] && ADV_REF[k].refAvg != null ? `<div class="kpi-br" style="color:var(--muted);">一般の平均 ${ADV_REF[k].refAvg}${esc(unit)}</div>` : ''}</td>
         <td class="kpi-t" onclick="kpiSetTarget('${kk}','${esc(name + (bl && bl !== '計' ? '・' + bl : ''))}','${esc(unit)}')">${t != null && t !== '' ? esc(t) : '<span style="color:var(--border);">＋</span>'}</td>
         ${D.map((R, i) => `<td class="kpi-v" style="${i === 0 ? 'font-weight:900;' : 'color:var(--muted);'}${i === 0 ? good(R[kk], t, dir, div) : ''}">${fmt(R[kk], dec, div)}</td>`).join('')}
       </tr>`;
@@ -9709,6 +9716,8 @@ const ADV_BASE = {
 };
 // 一般的な参考値（出典つき）
 const ADV_REF = {
+  et_rate: { refAvg: 80, name: '移植率', unit: '%', ref: '受精卵移植の候補牛のうち移植できた牛 約80%（全国3,215頭中2,577頭・平成5〜7年度の共同試験・岩手県の資料）。古い調査なので目安として' },
+  det_parous: { name: '発情発見率（経産・記録ベース）', unit: '%', ref: '一般的な平均の数字は見つかりませんでした。和歌山県の「発情発見率」31〜50%は「授精した頭数÷授精すべき頭数」なので、このツールでは21日授精率と同じものです' },
   hdr_parous: { refAvg: 40, name: '21日授精率（経産）', unit: '%', ref: '実績の例 31〜50%（和歌山県の繁殖農家。同じ「授精頭数÷対象頭数」で計算）／発情発見率の目標の例 75%超（栃木県）' },
   pr_parous: { refAvg: 21, name: '妊娠率（経産）', unit: '%', ref: '実績の例 19〜23%（和歌山県の繁殖農家）／一般的な目標 20%以上' },
   conc_ai: { refAvg: 48, name: 'AIの受胎率', unit: '%', ref: '黒毛和種 約48%（宮崎県977戸・2005〜10年）／黒毛和種の全国の初回受胎率 55.0%（2014年・家畜改良事業団）' },
@@ -9719,9 +9728,9 @@ const ADV_REF = {
   calv_int: { refAvg: 13.2, name: '平均分娩間隔', unit: 'か月', ref: '黒毛和種の全国 13.2か月／国の目標 12.5か月（令和12年度・農水省）' },
   dfs: { name: '分娩〜初回授精', unit: '日', ref: '待機期間50日＋20日＝70日（和歌山県の上位農家が70日）' },
   first_age: { refAvg: 24.5, name: '初産月齢', unit: 'か月', ref: '黒毛和種の全国 24.5か月／国の目標 23.5か月（令和12年度・農水省）' },
-  abort_r: { name: '流産率', unit: '%', ref: 'この農場の目安 3%以下（年の表の「目標」欄で変えられます）' },
-  still_r: { name: '死産率', unit: '%', ref: 'この農場の目安 3%以下（年の表の「目標」欄で変えられます）' },
-  calf_d: { name: '子牛の死亡率（〜4か月）', unit: '%', ref: 'この農場の目安 3%以下（年の表の「目標」欄で変えられます）' },
+  abort_r: { name: '流産率', unit: '%', ref: '一般の平均・目標の数字は、出どころのはっきりしたものをまだ入れていません。3%はとりあえずの目標です（自分の目標を入れてください）' },
+  still_r: { name: '死産率', unit: '%', ref: '一般の平均・目標の数字は、出どころのはっきりしたものをまだ入れていません。3%はとりあえずの目標です（自分の目標を入れてください）' },
+  calf_d: { name: '子牛の死亡率（〜4か月）', unit: '%', ref: '一般の平均・目標の数字は、出どころのはっきりしたものをまだ入れていません。3%はとりあえずの目標です（自分の目標を入れてください）' },
 };
 function advisorOn() { return !(typeof farmTargets !== 'undefined' && farmTargets._advisor === 0); }
 function setAdvisor(on) { farmTargets._advisor = on ? 1 : 0; save(); try { renderAnnual(); } catch (e) {} try { renderAdvisorSetting(); } catch (e) {} }
@@ -14813,7 +14822,8 @@ function quickReg(cowId, event) {
   }, 50);
 }
 function onQrEventChange() {
-  const ev = document.getElementById('qr-event').value;
+  const ev0 = document.getElementById('qr-event').value;
+  const ev = ev0 === 'et_recipient_takahashi' ? 'et_recipient' : ev0;
   const isAiEt = ev === 'ai_done' || ev === 'et_done';
   const isAI = ['ai_done','estrus_ai','cidr_ai_start'].includes(ev);
   const isET = ['et_done','et_recipient','estrus_et'].includes(ev);
@@ -14943,9 +14953,12 @@ async function submitQuickReg() {
   const cowId = document.getElementById('qr-cowid').value;
   // セレクトが非表示（種付けウィザード経由）の場合はinsem-labelからイベント種別を判断
   const eventGroupHidden = document.getElementById('qr-event-group').style.display === 'none';
-  const event = eventGroupHidden
+  let event = eventGroupHidden
     ? (document.getElementById('qr-insem-label').textContent.includes('ET') ? 'et_done' : 'ai_done')
     : document.getElementById('qr-event').value;
+  // 高橋式の受卵牛プログラムは、記録の種類は「ETレシピエント」のまま、スケジュールだけ高橋式にする
+  window._etTakahashi = event === 'et_recipient_takahashi';
+  if (window._etTakahashi) event = 'et_recipient';
   const date  = document.getElementById('qr-date').value;
   if (!event) { alert('イベント種別を選択してください'); return; }
   if (!date)  { alert('日付を入力してください'); return; }
@@ -15740,9 +15753,17 @@ function deleteAllTasksForCow(cowId) {
   document.getElementById('confirm-ok-btn').textContent = '削除する';
   document.getElementById('confirm-ok-btn').style.cssText = 'background:var(--danger);border-color:var(--danger);color:#fff;';
   document.getElementById('confirm-ok-btn').onclick = () => {
-    tasks = tasks.filter(t=>t.cowId!==cowId);
+    try { armUndo('全予定を削除しました'); } catch (e) {}
     const cow = cows.find(c=>c.id===cowId);
-    if (cow) { cow.status='open'; }
+    // ★ 2026/11/21：まだ始まっていないプログラム（その日から後に済みの予定がひとつもない）の「開始」も消す
+    //   前は予定だけ消えて、ストーリーに「▶ 採卵プログラム開始」などが残っていた
+    if (cow && cow.events) {
+      const doneDates = tasks.filter(t => t.cowId === cowId && t.done).map(t => t.date || '');
+      const startTypes = typeof PROG_START_TYPES !== 'undefined' ? PROG_START_TYPES : ['cidr_ai_start', 'et_recipient', 'donor_et_start', 'donor_et_pretreat_start', 'donor_et_takahashi_start'];
+      cow.events = cow.events.filter(e => !(startTypes.includes(e.type) && e.type !== 'estrus_et' && e.type !== 'estrus_ai' && !doneDates.some(d => d >= e.date)));
+    }
+    tasks = tasks.filter(t=>t.cowId!==cowId);
+    if (cow && cow.status === 'program') { cow.status='open'; }   // 妊娠中などの牛は状態を変えない
     save();
     closeModal('modal-confirm');
     closeModal('modal-cow');
@@ -33902,7 +33923,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112105';
+const APP_BUILD = '2026112107';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -36370,7 +36391,6 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     let R = {}, P = {}, it = null;
     try { R = kpiYear(Y); P = kpiYear(Y - 1); } catch (e) {}
     try { it = annualItems(Y); } catch (e) {}
-    let et = null, etP = null; try { et = etRateCalc(Y + '-01-01', Y + '-12-31'); etP = etRateCalc((Y - 1) + '-01-01', (Y - 1) + '-12-31'); } catch (e) {}
     const f = (v, d, u, div) => v == null || isNaN(v) ? '—' : (div ? v / div : v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) + (u || '');
     const n = k => it && it[k] ? it[k].length : 0;
     const DEF = {}; KPI_DEF.forEach(d => { if (d[0] !== 'sec') DEF[d[0]] = d; });
@@ -36401,8 +36421,9 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       const [col, mk] = mark(key, v, div);
       const V = vtxt != null ? vtxt : key ? f(v, dec, unit, div) : '';
       const Pv = ptxt != null ? ptxt : key ? f(p, dec, unit, div) : '';
+      const RA = key && typeof ADV_REF !== 'undefined' && ADV_REF[key] && ADV_REF[key].refAvg != null ? ADV_REF[key].refAvg : null;
       return `<div class="nui-a" onclick="nuiStGo('${go}')" style="display:flex;align-items:center;padding:9px 8px 9px 12px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;gap:4px;">
-        <span style="flex:1;min-width:0;font-size:14px;">${name}</span>
+        <span style="flex:1;min-width:0;font-size:14px;">${name}${RA != null ? `<div style="font-size:11px;color:#64748b;">一般の平均 ${RA}${unit || ''}</div>` : ''}</span>
         <b class="nui-mono" style="font-size:15px;text-align:right;white-space:nowrap;${col}">${V ? mk + V : ''}</b>
         ${tcell(key, unit)}
         <span class="nui-mono" style="width:50px;text-align:right;font-size:11px;color:#64748b;white-space:nowrap;">${Pv}</span><span style="color:#475569;margin-left:2px;">›</span></div>`;
@@ -36416,7 +36437,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         row('　受胎率 AI', 'conc', 'conc_ai', 1, '%'),
         row('　受胎率 ET', 'conc', 'conc_et', 1, '%'),
         row('初回授精の受胎率', 'conc', 'conc_first', 1, '%'),
-        row('移植率', 'conc', null, 0, '', 0, et && et.tr != null ? et.tr + '%' : '—', etP && etP.tr != null ? etP.tr + '%' : '—'),
+        row(`移植率${sm(`（${R.et_done || 0}/${R.et_prep || 0}頭）`)}`, 'conc', 'et_rate', 0, '%'),
         row('妊娠率（経産）', 'preg', 'pr_parous', 1, '%'),
         row('21日授精率（経産）', 'preg', 'hdr_parous', 1, '%'),
         row('発情発見率（経産）', 'preg', 'det_parous', 1, '%'),
@@ -36428,6 +36449,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       ${grp('🐮 分娩・子牛', [
         row(`生まれた子牛${it ? sm(`（ET ${n('et')}頭）`) : ''}`, 'calvlist', 'born', 0, '頭'),
         row(`流産率${sm(`（${R.abort_n || 0}件）`)}`, 'calvlist', 'abort_r', 1, '%'),
+        row('流産した時期（平均）', 'calvlist', null, 0, '', 0, R.abort_days != null ? `妊娠${R.abort_days}日` : '—', P.abort_days != null ? `${P.abort_days}日` : '—'),
         row(`死産率${sm(`（${R.still_n || 0}頭）`)}`, 'calvlist', 'still_r', 1, '%'),
         row(`子牛の死亡率${sm(`（〜4か月・${R.dcalf_n || 0}頭）`)}`, 'calvlist', 'calf_d', 1, '%'),
         row('種雄牛別の産子（体格・難産）', 'calv'),
@@ -36447,7 +36469,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         row('導入', 'move', 'intro', 0, '頭'),
       ])}
       ${grp('💊 病気・薬', [row('病気の記録・薬代', 'dis')])}
-      <div style="font-size:11px;color:#64748b;margin:12px 2px 0;line-height:1.7;">目標：<b style="color:#e2e8f0;">太い数字</b>＝自分で決めた目標、細い数字＝一般的な目安（決めていないとき）。届いていれば <span style="color:#4ade80;">✓</span>、届いていなければ <span style="color:#fbbf24;">▲</span>。<br>3年ぶんをくらべる表は「📋 年の表」にあります（目標は同じものです）。</div>`;
+      <div style="font-size:11px;color:#64748b;margin:12px 2px 0;line-height:1.7;">・<b style="color:#cbd5e1;">一般の平均</b>：ほかの農家・全国などの実際の平均（項目名の下の小さい字）。<br>・<b style="color:#cbd5e1;">目標</b>：<b style="color:#e2e8f0;">太い数字</b>＝自分で決めた目標、細い数字＝一般的な目標（自分で決めていないとき）。届いていれば <span style="color:#4ade80;">✓</span>、届いていなければ <span style="color:#fbbf24;">▲</span>。<br>3年ぶんをくらべる表は「📋 年の表」にあります（目標は同じものです）。</div>`;
   }
   // 🎯 目標を変える（年の表の目標と同じ farmTargets）
   let TG = null;
@@ -36463,10 +36485,14 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       `<div style="padding:16px 14px 30px;">
         <div style="font-size:17px;font-weight:900;margin-bottom:10px;">${esc(d[1].trim())}</div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <input id="nui-tgt-in" inputmode="decimal" value="${esc(own)}" placeholder="${def != null ? '目安 ' + def : '目標の数字'}" style="flex:1;height:52px;margin:0;border-radius:10px;border:1.5px solid #22c55e;background:#0f1117;color:#e2e8f0;font-size:22px;font-weight:900;padding:0 12px;font-family:inherit;">
+          <input id="nui-tgt-in" inputmode="decimal" value="${esc(own)}" placeholder="${def != null ? '一般的な目標 ' + def : '目標の数字'}" style="flex:1;height:52px;margin:0;border-radius:10px;border:1.5px solid #22c55e;background:#0f1117;color:#e2e8f0;font-size:22px;font-weight:900;padding:0 12px;font-family:inherit;">
           <span style="font-size:15px;color:#94a3b8;white-space:nowrap;">${esc(unit)}${d[4] > 0 ? '以上' : '以下'}</span></div>
-        ${def != null ? `<div style="font-size:12px;color:#94a3b8;margin-top:10px;">自分で決めていないときは、一般的な目安 ${def}${esc(unit)} で見ています。</div>` : ''}
-        ${ref ? `<div style="font-size:12px;color:#94a3b8;margin-top:6px;line-height:1.6;">参考：${esc(ref)}</div>` : ''}
+        ${(() => { const RA = typeof ADV_REF !== 'undefined' && ADV_REF[key] ? ADV_REF[key].refAvg : null;
+          return `<div style="margin-top:14px;background:#1a1f2e;border:1px solid #2a3050;border-radius:10px;overflow:hidden;font-size:13px;">
+            <div style="display:flex;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.06);"><span style="flex:1;color:#94a3b8;">一般の平均</span><b class="nui-mono">${RA != null ? RA + esc(unit) : '—'}</b></div>
+            <div style="display:flex;padding:10px 12px;"><span style="flex:1;color:#94a3b8;">一般的な目標</span><b class="nui-mono">${def != null ? def + esc(unit) + (d[4] > 0 ? '以上' : '以下') : '—'}</b></div></div>
+            ${def != null ? `<div style="font-size:12px;color:#94a3b8;margin-top:8px;">自分で目標を決めていないときは、一般的な目標（${def}${esc(unit)}）と比べます。</div>` : ''}`; })()}
+        ${ref ? `<div style="font-size:12px;color:#94a3b8;margin-top:8px;line-height:1.6;">出どころ：${esc(ref)}</div>` : ''}
         <div style="font-size:12px;color:#64748b;margin-top:10px;line-height:1.6;">ここで決めた目標は「📋 年の表」の目標と同じものです。アドバイスもこの目標で出します。</div>
         ${own ? `<button onclick="nuiTgtSave(true)" style="display:block;margin:18px auto 0;background:none;border:none;color:#94a3b8;font-size:13px;cursor:pointer;font-family:inherit;">目標を消して、一般的な目安に戻す</button>` : ''}
       </div>`,
