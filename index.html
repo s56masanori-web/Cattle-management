@@ -33902,7 +33902,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112104';
+const APP_BUILD = '2026112105';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -36372,51 +36372,115 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     try { it = annualItems(Y); } catch (e) {}
     let et = null, etP = null; try { et = etRateCalc(Y + '-01-01', Y + '-12-31'); etP = etRateCalc((Y - 1) + '-01-01', (Y - 1) + '-12-31'); } catch (e) {}
     const f = (v, d, u, div) => v == null || isNaN(v) ? '—' : (div ? v / div : v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) + (u || '');
-    const row = (name, v, p, go, cls) => `<div class="nui-a" onclick="nuiStGo('${go}')" style="display:flex;align-items:center;padding:11px 12px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;">
-      <span style="flex:1;font-size:14px;">${name}</span><b class="nui-mono" style="font-size:16px;${cls || ''}">${v}</b><span style="width:62px;text-align:right;font-size:11px;color:#64748b;">${p}</span><span style="color:#475569;margin-left:6px;">›</span></div>`;
-    const grp = (t, rows) => `<div style="font-size:12px;font-weight:900;color:#94a3b8;margin:16px 2px 6px;">${t}</div><div style="background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;overflow:hidden;">${rows.join('')}</div>`;
-    const K = (k, d, u, div) => [f(R[k], d, u, div), f(P[k], d, u, div)];
     const n = k => it && it[k] ? it[k].length : 0;
-    const bad = (v, lim, dir) => v != null && (dir < 0 ? v > lim : v < lim) ? 'color:#fbbf24;' : '';
-    return `<div style="font-size:12px;color:#94a3b8;margin:12px 2px 0;">${Y}年の成績です。行を押すと、くわしいところへ行きます。</div>
-      <div style="display:flex;font-size:11px;color:#64748b;padding:8px 12px 0;"><span style="flex:1;"></span><span>${Y}年</span><span style="width:68px;text-align:right;">前年</span></div>
+    const DEF = {}; KPI_DEF.forEach(d => { if (d[0] !== 'sec') DEF[d[0]] = d; });
+    // 目標：自分で決めた目標（太い）＞ 一般的な目安（細い）。向き：KPI_DEF の dir（1＝高いほど良い、-1＝低いほど良い）
+    const tgtOf = key => {
+      const base = key.replace(/_all$/, '');
+      const d = DEF[base]; const dir = d ? d[4] : 0;
+      if (!dir) return null;
+      const own = typeof farmTargets !== 'undefined' && farmTargets[key] != null && farmTargets[key] !== '' ? Number(farmTargets[key]) : null;
+      const def = typeof ADV_BASE !== 'undefined' && ADV_BASE[key] ? ADV_BASE[key].good : null;
+      const t = own != null ? own : def;
+      return { t, own: own != null, dir };
+    };
+    const tcell = (key, unit) => {
+      const T = key ? tgtOf(key) : null;
+      if (!T) return `<span style="width:64px;"></span>`;
+      const txt = T.t == null ? '<span style="color:#64748b;font-size:11px;">＋決める</span>' : `${T.own ? `<b style="color:#e2e8f0;">${T.t}</b>` : T.t}<span style="font-size:10px;">${T.dir > 0 ? '以上' : '以下'}</span>`;
+      return `<button onclick="event.stopPropagation();nuiTgt('${key}')" style="width:64px;text-align:right;background:none;border:none;padding:6px 0;color:#94a3b8;font-size:12px;font-family:inherit;cursor:pointer;" class="nui-mono">${txt}</button>`;
+    };
+    const mark = (key, v, div) => {
+      const T = key ? tgtOf(key) : null; if (!T || T.t == null || v == null || isNaN(v)) return ['', ''];
+      const x = div ? v / div : v; const ok = T.dir > 0 ? x >= T.t : x <= T.t;
+      return ok ? ['color:#4ade80;', '<span style="font-size:11px;margin-right:3px;">✓</span>'] : ['color:#fbbf24;', '<span style="font-size:11px;margin-right:3px;">▲</span>'];
+    };
+    // key があれば R[key] を出して目標と比べる。vtxt/ptxt を渡せばそれを出す
+    const row = (name, go, key, dec, unit, div, vtxt, ptxt) => {
+      const v = key ? R[key] : null, p = key ? P[key] : null;
+      const [col, mk] = mark(key, v, div);
+      const V = vtxt != null ? vtxt : key ? f(v, dec, unit, div) : '';
+      const Pv = ptxt != null ? ptxt : key ? f(p, dec, unit, div) : '';
+      return `<div class="nui-a" onclick="nuiStGo('${go}')" style="display:flex;align-items:center;padding:9px 8px 9px 12px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;gap:4px;">
+        <span style="flex:1;min-width:0;font-size:14px;">${name}</span>
+        <b class="nui-mono" style="font-size:15px;text-align:right;white-space:nowrap;${col}">${V ? mk + V : ''}</b>
+        ${tcell(key, unit)}
+        <span class="nui-mono" style="width:50px;text-align:right;font-size:11px;color:#64748b;white-space:nowrap;">${Pv}</span><span style="color:#475569;margin-left:2px;">›</span></div>`;
+    };
+    const grp = (t, rows) => `<div style="font-size:12px;font-weight:900;color:#94a3b8;margin:16px 2px 6px;">${t}</div><div style="background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;overflow:hidden;">${rows.join('')}</div>`;
+    const sm = t => `<span style="font-size:11px;color:#94a3b8;">${t}</span>`;
+    return `<div style="font-size:12px;color:#94a3b8;margin:12px 2px 0;">${Y}年の成績です。行を押すと、くわしいところへ行きます。目標の数字を押すと、目標を変えられます。</div>
+      <div style="display:flex;font-size:11px;color:#64748b;padding:8px 22px 0 12px;gap:4px;"><span style="flex:1;"></span><span>${Y}年</span><span style="width:64px;text-align:right;">目標</span><span style="width:50px;text-align:right;">前年</span></div>
       ${grp('💉 繁殖', [
-        row('受胎率（全体）', ...K('conc_all', 1, '%'), 'conc'),
-        row('　受胎率 AI ／ ET', `${f(R.conc_ai, 0, '')}／${f(R.conc_et, 0, '%')}`, `${f(P.conc_ai, 0, '')}／${f(P.conc_et, 0, '%')}`, 'conc'),
-        row('初回授精の受胎率', ...K('conc_first', 1, '%'), 'conc'),
-        row('移植率', et && et.tr != null ? et.tr + '%' : '—', etP && etP.tr != null ? etP.tr + '%' : '—', 'conc'),
-        row('妊娠率（経産）', ...K('pr_parous', 1, '%'), 'preg'),
-        row('21日授精率（経産）', ...K('hdr_parous', 1, '%'), 'preg'),
-        row('発情発見率（経産）', ...K('det_parous', 1, '%'), 'preg'),
-        row('2回以内で受胎した割合', ...K('ins_le2', 1, '%'), 'kpi'),
-        row('分娩〜初回授精・分娩〜受胎', '', '', 'first'),
-        row('平均分娩間隔', ...K('calv_int', 1, 'か月'), 'ci', bad(R.calv_int, 12.5, -1)),
-        row('初産月齢', ...K('first_age', 1, 'か月'), 'kpi'),
+        row('受胎率（全体）', 'conc', 'conc_all', 1, '%'),
+        row('　受胎率 AI', 'conc', 'conc_ai', 1, '%'),
+        row('　受胎率 ET', 'conc', 'conc_et', 1, '%'),
+        row('初回授精の受胎率', 'conc', 'conc_first', 1, '%'),
+        row('移植率', 'conc', null, 0, '', 0, et && et.tr != null ? et.tr + '%' : '—', etP && etP.tr != null ? etP.tr + '%' : '—'),
+        row('妊娠率（経産）', 'preg', 'pr_parous', 1, '%'),
+        row('21日授精率（経産）', 'preg', 'hdr_parous', 1, '%'),
+        row('発情発見率（経産）', 'preg', 'det_parous', 1, '%'),
+        row('2回以内で受胎した割合', 'kpi', 'ins_le2', 1, '%'),
+        row('分娩〜初回授精・受胎まで', 'first'),
+        row('平均分娩間隔', 'ci', 'calv_int', 1, 'か月'),
+        row('初産月齢', 'kpi', 'first_age', 1, 'か月'),
       ])}
       ${grp('🐮 分娩・子牛', [
-        row(`生まれた子牛${it ? `<span style="font-size:11px;color:#94a3b8;">（うちET ${n('et')}頭）</span>` : ''}`, ...K('born', 0, '頭'), 'calvlist'),
-        row(`流産率<span style="font-size:11px;color:#94a3b8;">（${R.abort_n != null ? R.abort_n : 0}件）</span>`, ...K('abort_r', 1, '%'), 'calvlist', bad(R.abort_r, 3, -1)),
-        row(`死産率<span style="font-size:11px;color:#94a3b8;">（${R.still_n != null ? R.still_n : 0}頭）</span>`, ...K('still_r', 1, '%'), 'calvlist', bad(R.still_r, 3, -1)),
-        row(`子牛の死亡率<span style="font-size:11px;color:#94a3b8;">（〜4か月・${R.dcalf_n != null ? R.dcalf_n : 0}頭）</span>`, ...K('calf_d', 1, '%'), 'calvlist', bad(R.calf_d, 3, -1)),
-        row('種雄牛別の産子（体格・難産）', '', '', 'calv'),
+        row(`生まれた子牛${it ? sm(`（ET ${n('et')}頭）`) : ''}`, 'calvlist', 'born', 0, '頭'),
+        row(`流産率${sm(`（${R.abort_n || 0}件）`)}`, 'calvlist', 'abort_r', 1, '%'),
+        row(`死産率${sm(`（${R.still_n || 0}頭）`)}`, 'calvlist', 'still_r', 1, '%'),
+        row(`子牛の死亡率${sm(`（〜4か月・${R.dcalf_n || 0}頭）`)}`, 'calvlist', 'calf_d', 1, '%'),
+        row('種雄牛別の産子（体格・難産）', 'calv'),
       ])}
       ${grp('🥩 出荷', [
-        row('肥育出荷', ...K('ship_n_all', 0, '頭'), 'ship'),
-        row('平均出荷金額', ...K('ship_avg_all', 1, '万', 10000), 'ship'),
-        row('A4以上の割合', ...K('ship_a4_all', 1, '%'), 'ship'),
-        row('BMS平均', ...K('ship_bms_all', 1, ''), 'ship'),
-        row('廃用肥育の売値（1頭）', ...K('ret_avg_all', 1, '万', 10000), 'ship'),
+        row('肥育出荷', 'ship', 'ship_n_all', 0, '頭'),
+        row('平均出荷金額', 'ship', 'ship_avg_all', 1, '万', 10000),
+        row('A4以上の割合', 'ship', 'ship_a4_all', 1, '%'),
+        row('BMS平均', 'ship', 'ship_bms_all', 1, ''),
+        row('廃用肥育の売値（1頭）', 'ship', 'ret_avg_all', 1, '万', 10000),
       ])}
       ${grp('🐄 出入り', [
-        row('廃用した親牛', ...K('retire_n', 0, '頭'), 'move'),
-        row('死亡した親牛', ...K('dcow_n', 0, '頭'), 'move'),
-        row('死亡した育成牛・肥育牛', `${n('dRear')}頭・${n('dFat')}頭`, '', 'move'),
-        row('保留（その年生まれ）', `${n('kept')}頭`, '', 'move'),
-        row('導入', ...K('intro', 0, '頭'), 'move'),
+        row('廃用した親牛', 'move', 'retire_n', 0, '頭'),
+        row('死亡した親牛', 'move', 'dcow_n', 0, '頭'),
+        row('死亡した育成牛・肥育牛', 'move', null, 0, '', 0, `${n('dRear')}頭・${n('dFat')}頭`, ''),
+        row('保留（その年生まれ）', 'move', null, 0, '', 0, `${n('kept')}頭`, ''),
+        row('導入', 'move', 'intro', 0, '頭'),
       ])}
-      ${grp('💊 病気・薬', [row('病気の記録・薬代', '', '', 'dis')])}
-      <div style="font-size:11px;color:#64748b;margin:12px 2px 0;line-height:1.6;">3年ぶんをくらべる表と目標の設定は「📋 年の表」にあります。</div>`;
+      ${grp('💊 病気・薬', [row('病気の記録・薬代', 'dis')])}
+      <div style="font-size:11px;color:#64748b;margin:12px 2px 0;line-height:1.7;">目標：<b style="color:#e2e8f0;">太い数字</b>＝自分で決めた目標、細い数字＝一般的な目安（決めていないとき）。届いていれば <span style="color:#4ade80;">✓</span>、届いていなければ <span style="color:#fbbf24;">▲</span>。<br>3年ぶんをくらべる表は「📋 年の表」にあります（目標は同じものです）。</div>`;
   }
+  // 🎯 目標を変える（年の表の目標と同じ farmTargets）
+  let TG = null;
+  window.nuiTgt = function (key) {
+    const base = key.replace(/_all$/, '');
+    const d = KPI_DEF.find(x => x[0] === base); if (!d) return;
+    const own = farmTargets[key] != null && farmTargets[key] !== '' ? String(farmTargets[key]) : '';
+    const def = typeof ADV_BASE !== 'undefined' && ADV_BASE[key] ? ADV_BASE[key].good : null;
+    const ref = typeof ADV_REF !== 'undefined' && ADV_REF[key] ? ADV_REF[key].ref : '';
+    const unit = d[2] === '万円' ? '万円' : d[2];
+    TG = { key };
+    scrShow(`${backBtn('nuiClose()', '閉じる')}<span style="font-size:17px;font-weight:900;">🎯 目標</span>`,
+      `<div style="padding:16px 14px 30px;">
+        <div style="font-size:17px;font-weight:900;margin-bottom:10px;">${esc(d[1].trim())}</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input id="nui-tgt-in" inputmode="decimal" value="${esc(own)}" placeholder="${def != null ? '目安 ' + def : '目標の数字'}" style="flex:1;height:52px;margin:0;border-radius:10px;border:1.5px solid #22c55e;background:#0f1117;color:#e2e8f0;font-size:22px;font-weight:900;padding:0 12px;font-family:inherit;">
+          <span style="font-size:15px;color:#94a3b8;white-space:nowrap;">${esc(unit)}${d[4] > 0 ? '以上' : '以下'}</span></div>
+        ${def != null ? `<div style="font-size:12px;color:#94a3b8;margin-top:10px;">自分で決めていないときは、一般的な目安 ${def}${esc(unit)} で見ています。</div>` : ''}
+        ${ref ? `<div style="font-size:12px;color:#94a3b8;margin-top:6px;line-height:1.6;">参考：${esc(ref)}</div>` : ''}
+        <div style="font-size:12px;color:#64748b;margin-top:10px;line-height:1.6;">ここで決めた目標は「📋 年の表」の目標と同じものです。アドバイスもこの目標で出します。</div>
+        ${own ? `<button onclick="nuiTgtSave(true)" style="display:block;margin:18px auto 0;background:none;border:none;color:#94a3b8;font-size:13px;cursor:pointer;font-family:inherit;">目標を消して、一般的な目安に戻す</button>` : ''}
+      </div>`,
+      `<button onclick="nuiTgtSave(false)" style="width:100%;height:52px;border-radius:12px;border:none;background:#16a34a;color:#fff;font-size:17px;font-weight:900;font-family:inherit;cursor:pointer;">この目標にする</button>`);
+    setTimeout(() => { const i = $('nui-tgt-in'); if (i) i.focus(); }, 100);
+  };
+  window.nuiTgtSave = function (clear) {
+    if (!TG) return;
+    const raw = clear ? '' : String(($('nui-tgt-in') || {}).value || '').trim().replace(/[０-９．]/g, c => c === '．' ? '.' : String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[,，]/g, '');
+    if (raw === '') delete farmTargets[TG.key];
+    else if (isNaN(Number(raw))) { appAlert('数字で入れてください'); return; }
+    else farmTargets[TG.key] = Number(raw);
+    TG = null; save(); nuiClose(); try { renderAnnual(); } catch (e) {}
+  };
   // 📒 まとめ のいちばん上に平均分娩間隔
   const _rann = window.renderAnnual;
   if (typeof _rann === 'function') window.renderAnnual = function () { if (_annTab === 'drug') _annTab = 'dis'; return _rann.apply(this, arguments); };
