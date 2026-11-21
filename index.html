@@ -783,7 +783,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
       <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:4px;">📥 クラウドのバックアップから、消えた授精簿の行を戻す</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">毎日クラウドに取っているバックアップ（8日分）と今の授精簿を比べ、今は無い行だけを戻します。今ある行はそのままです。</div>
       <button onclick="closeModal('modal-settings');openSyncDiag()" style="margin-bottom:6px;background:#0a1a2a;border:1px solid var(--info);color:var(--info);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">🔎 同期のようすを調べる（版・保存場所）</button>
-      <button onclick="closeModal('modal-settings');openLostRecover()" style="margin-bottom:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">🩹 消えた記録を取り戻す（お産・移動・タグ・チェック）</button>
+      <button onclick="closeModal('modal-settings');openLostRecover()" style="margin-bottom:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">🩹 消えた記録を取り戻す（授精・予定・お産・移動・タグ・チェック）</button>
       <button onclick="closeModal('modal-settings');openIbRestore()" style="background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">☁ バックアップを調べる</button>
       <button onclick="closeModal('modal-settings');openInvRestore()" style="margin-top:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">☁ 消えた在庫の記録（使用・入荷など）を戻す</button>
       <button onclick="closeModal('modal-settings');openInvMissing()" style="margin-top:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">📦 在庫に入っていない授精・移植を調べる</button>
@@ -4115,6 +4115,7 @@ function save() {
   try { if (!(window.FARM_CFG && FARM_CFG.autoNegReinsem === false)) autoNegOnReinsem(); } catch (e) { console.error('autoNegOnReinsem', e); }
   try { if (typeof _undoCheckOnSave === 'function') _undoCheckOnSave(); } catch (e) {}
   try { if (typeof _histOnSave === 'function') _histOnSave(); } catch (e) { console.error('history', e); }
+  try { if (typeof _taskJournalOnSave === 'function') _taskJournalOnSave(); } catch (e) { console.error('taskJournal', e); }
   try { stampChangedCows(); } catch (e) { console.error('stampChangedCows', e); }
   try { dedupeInsemDupRows(); } catch (e) { console.error('dedupeInsemDupRows', e); }
   try { ensureInsemIds(); } catch (e) { console.error('ensureInsemIds', e); }
@@ -5481,11 +5482,19 @@ function toggleTask(id) {
   task.done = !task.done;
   task._mt = Date.now();   // ほかの端末とまとめるとき、後からチェックした方を使う
   if (!task.done) task._undoneAt = task._mt; else delete task._undoneAt;   // 自分で外したときだけ、外したことをほかの端末にも伝える
+  if (!task.done) delete task.skipped;
   // 除角・去勢の予定 → その子牛に印を付ける（外したら印も戻す）
   if (task.calfFlag && _CALF_FLAG[task.calfFlag]) {
     const cf = calves.find(c => c.id === task.calfId), f = _CALF_FLAG[task.calfFlag];
     if (cf) { if (task.done) { cf[task.calfFlag] = true; cf[f.date] = cf[f.date] || today(); } else { cf[task.calfFlag] = false; delete cf[f.date]; } }
   }
+  // ★ 2026/11/21：ゲストロン・E2（オバホルモン）は打たないこともあるので、「投与した／しなかった」を選ぶ
+  if (task.done && !task._doseOk && window.nuiDoseChoice && /ゲストロン|E2|オバホルモン|エストラジオール/.test(task.action + ' ' + (task.detail || ''))) {
+    task.done = false; delete task._undoneAt;
+    window.nuiDoseChoice(task.id);
+    return;
+  }
+  delete task._doseOk;
   if (task.done) {
     task.doneAt = new Date().toISOString();
 
@@ -7737,7 +7746,7 @@ function buildCowStory(cowId) {
     const memos = [...new Set(uniq.map(t => t.memo).filter(Boolean))];
     items.push({
       date: d, cat: 'treat', color: '#60a5fa', title: '💊 処置', badge: null,
-      desc: uniq.map(t => _stEsc(t.action)).join('<br>'), descHtml: true, kv: [], memo: memos.join(' / '),
+      desc: uniq.map(t => t.skipped ? `<s style="color:var(--muted);">${_stEsc(t.action)}</s> <b style="color:var(--warn);">🚫 非投与</b>` : _stEsc(t.action)).join('<br>'), descHtml: true, kv: [], memo: memos.join(' / '),
       acts: uniq.map(t => `<button class="st-act del" onclick="deleteSingleTask('${t.id}')">🗑 ${_stEsc(t.action.slice(0, 14))}${t.action.length > 14 ? '…' : ''}</button>`),
     });
   });
@@ -12818,6 +12827,21 @@ function _histDevice() {
   return /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'PC' : 'この端末';
 }
 function _histLoad() { try { return JSON.parse(_store.getItem('changeLog') || '[]') || []; } catch (e) { return []; } }
+// ★ 2026/11/21：予定（タスク）の控え。足した予定・チェックした予定を、この端末に4日分とっておく（消えたときに「消えた記録を取り戻す」で戻せるように）
+let _tjSnap = null;
+function _taskJournalOnSave() {
+  const cur = new Map(); (tasks || []).forEach(t => { if (t && t.id) cur.set(t.id, JSON.stringify(t)); });
+  if (!_tjSnap) { _tjSnap = cur; return; }
+  const add = [];
+  cur.forEach((j, id) => { if (_tjSnap.get(id) !== j) add.push(j); });
+  _tjSnap = cur;
+  if (!add.length || add.length > 300) return;
+  let L = []; try { L = JSON.parse(localStorage.getItem('taskJournal') || '[]') || []; } catch (e) {}
+  const now = new Date().toISOString(), lim = new Date(Date.now() - 4 * 86400000).toISOString();
+  add.forEach(j => L.push({ t: now, o: JSON.parse(j) }));
+  L = L.filter(x => x.t >= lim).slice(-3000);
+  try { localStorage.setItem('taskJournal', JSON.stringify(L)); } catch (e) { try { localStorage.setItem('taskJournal', JSON.stringify(L.slice(-800))); } catch (e2) {} }
+}
 function _histOnSave() {
   if (!_histSnap) { _histReset(); return; }
   if (window._histAuto || window._histRestoring) { _histReset(); return; }
@@ -12904,13 +12928,49 @@ function openCalfHistory(calfId) {
   document.getElementById('hist-body').innerHTML = histListHTML('calf', calfId);
   openModal('modal-hist');
 }
+// ★ 2026/11/21：「元に戻す」は、その操作で変わったところだけを戻す（前は、覚えておいた時点の全部のデータで上書きしていたので、
+//   そのあとに入れた記録や、ほかの端末で入れた記録まで消えていた）。覚えておくのも2分まで
+function _undoKey(x) { return x && typeof x === 'object' && x.id != null ? 'id:' + x.id : JSON.stringify(x); }
+function _undoDiffArr(a, b) {
+  const A = new Map(), B = new Map(); (a || []).forEach(x => A.set(_undoKey(x), x)); (b || []).forEach(x => B.set(_undoKey(x), x));
+  const rem = [], add = [], chg = [];
+  A.forEach((x, k) => { if (!B.has(k)) rem.push(x); else if (JSON.stringify(x) !== JSON.stringify(B.get(k))) chg.push({ k, old: x, neu: B.get(k) }); });
+  B.forEach((x, k) => { if (!A.has(k)) add.push(k); });
+  return { rem, add, chg };
+}
+function _undoApplyArr(cur, d) {
+  const addS = new Set(d.add);
+  const out = (cur || []).filter(x => !addS.has(_undoKey(x)));
+  d.chg.forEach(c => { const i = out.findIndex(x => _undoKey(x) === c.k); if (i >= 0) out[i] = _undoRevertItem(out[i], c.old, c.neu); else out.push(c.old); });
+  d.rem.forEach(x => { if (!out.some(y => _undoKey(y) === _undoKey(x))) out.push(x); });
+  return out;
+}
+function _undoRevertItem(cur, old, neu) {
+  if (!cur || typeof cur !== 'object' || Array.isArray(cur) || !old || typeof old !== 'object' || !neu || typeof neu !== 'object') return old;
+  const o = { ...cur };
+  new Set([...Object.keys(old), ...Object.keys(neu)]).forEach(p => {
+    if (JSON.stringify(old[p]) === JSON.stringify(neu[p])) return;   // この操作で変わっていない欄は、今のまま
+    if ((Array.isArray(old[p]) || old[p] === undefined) && (Array.isArray(neu[p]) || neu[p] === undefined) && (Array.isArray(cur[p]) || cur[p] === undefined)) {
+      o[p] = _undoApplyArr(cur[p] || [], _undoDiffArr(old[p] || [], neu[p] || []));
+      if (old[p] === undefined && !o[p].length) delete o[p];
+    } else if (old[p] === undefined) delete o[p]; else o[p] = old[p];
+  });
+  return o;
+}
 function _undoCheckOnSave() {
   try { _abRiskCache = null; } catch (e) {}
   if (_undoRestoring || !_undoArmed) return;
-  if (Date.now() - _undoArmed.t > 10 * 60 * 1000) { _undoArmed = null; return; }   // 確認画面を開いたまま放置したもの
+  if (Date.now() - _undoArmed.t > 2 * 60 * 1000) { _undoArmed = null; return; }   // 確認画面を開いたまま放置したもの（2分）
   const changed = UNDO_KEYS.filter(k => _undoArmed.snap[k] !== undefined && JSON.stringify(_undoGet(k)) !== _undoArmed.snap[k]);
   if (!changed.length) return;   // まだ変わっていない（確認画面を開いただけ）
-  _undoReady = { label: _undoArmed.label, snap: _undoArmed.snap, keys: changed };
+  const diffs = {};
+  changed.forEach(k => {
+    const old = JSON.parse(_undoArmed.snap[k]), neu = JSON.parse(JSON.stringify(_undoGet(k)));
+    if (Array.isArray(old) && Array.isArray(neu)) diffs[k] = { arr: _undoDiffArr(old, neu) };
+    else if (old && neu && typeof old === 'object' && typeof neu === 'object') { const P = {}; new Set([...Object.keys(old), ...Object.keys(neu)]).forEach(p => { if (JSON.stringify(old[p]) !== JSON.stringify(neu[p])) P[p] = old[p]; }); diffs[k] = { obj: P }; }
+    else diffs[k] = { val: old };
+  });
+  _undoReady = { label: _undoArmed.label, diffs, keys: changed };
   _undoArmed = null;
   setTimeout(showUndoToast, 0);
 }
@@ -12932,7 +12992,12 @@ function doUndo() {
   if (!u) return;
   _undoRestoring = true;
   try {
-    u.keys.forEach(k => _undoSet(k, JSON.parse(u.snap[k])));
+    u.keys.forEach(k => {
+      const d = u.diffs[k]; if (!d) return;
+      if (d.arr) _undoSet(k, _undoApplyArr(_undoGet(k), d.arr));
+      else if (d.obj) { const cur = _undoGet(k) || {}; Object.entries(d.obj).forEach(([p, v]) => { if (v === undefined) delete cur[p]; else cur[p] = v; }); _undoSet(k, cur); }
+      else _undoSet(k, d.val);
+    });
     save(); renderAll();
     // 開いている画面を描き直す
     const act = document.querySelector('.page.active');
@@ -13246,17 +13311,38 @@ async function openLostRecover() {
     (o.moves || []).forEach(m => { if (m && !(c.moves || []).some(x => x.date === m.date && x.to === m.to)) add('calfMove', c.id, `子牛 ${c.earTagId || c.id}　${fmtDate(m.date)} → ${m.to}`, m, from); });
     (o.tags || []).forEach(t => { if (!(c.tags || []).includes(t)) add('calfTag', c.id, `子牛 ${c.earTagId || c.id}　🏷 ${t}`, t, from); });
   });
+  // この端末の予定の控え（4日分）
+  try { (JSON.parse(localStorage.getItem('taskJournal') || '[]') || []).forEach(x => srcTasks.push({ o: x.o, from: 'この端末の控え ' + String(x.t).slice(5, 16).replace('T', ' ') })); } catch (e) {}
   srcTasks.forEach(({ o, from }) => {
     if (!o || !o.done) return; const t = tasks.find(x => x.id === o.id); if (!t || t.done) return;
     add('taskDone', t.id, `${fmtDate(t.date)} ${t.cowId}　${t.action}`, null, from);
   });
+  // ★ 2026/11/21：消えた予定（まだ済んでいないもの・済んだもの）。いま無い予定で、牛がいて、日付が7日前より後のもの
+  { const lim = addDays(today(), -7), seenT = new Set();
+    srcTasks.slice().reverse().forEach(({ o, from }) => {
+      if (!o || !o.id || seenT.has(o.id) || tasks.some(x => x.id === o.id)) return; seenT.add(o.id);
+      if ((o.date || '') < lim || !cows.some(c => c.id === o.cowId)) return;
+      if (tasks.some(x => x.cowId === o.cowId && x.date === o.date && x.action === o.action)) return;
+      add('taskGone', o.id, `${fmtDate(o.date)} ${o.cowId} ${cowDisplayName(o.cowId) || ''}　${o.action}${o.done ? '（済）' : ''}`, o, from);
+    }); }
+  // ★ 2026/11/21：消えた記録（授精・移植・プログラム開始・妊鑑・発情・メモなど）。お産と移動は上で見ている
+  srcCows.forEach(({ o, from }) => {
+    const c = cows.find(x => x.id === o.id); if (!c) return;
+    (o.events || []).forEach(e => {
+      if (!e || !e.type || ['move', 'calving'].includes(e.type)) return;
+      if ((c.events || []).some(x => x.type === e.type && x.date === e.date && (x.memo || '') === (e.memo || ''))) return;
+      if ((c.events || []).some(x => x.type === e.type && x.date === e.date)) return;
+      const lb = (typeof EVENT_LABELS !== 'undefined' && EVENT_LABELS[e.type]) || { ai_done: '💉 AI', et_done: '🧬 移植', preg_positive: '妊鑑 陽性', preg_negative: '妊鑑 陰性', cidr_ai_start: '▶ CIDRプログラム', et_recipient: '▶ ETレシピエント', donor_et_takahashi_start: '▶ 採卵（高橋式）', donor_et_start: '▶ 採卵（自然発情）', donor_et_pretreat_start: '▶ 採卵（前処置）', estrus: '🔥 発情', estrus_et: '🔥 発情→ET', estrus_ai: '🔥 発情→AI', note: '📝 メモ', abortion: '🌀 流産', et_skip: '🚫 移植見送り' }[e.type] || e.type;
+      add('cowEvent', c.id, `${c.id} ${cowDisplayName(c.id) || ''}　${fmtDate(e.date)} ${lb}${e.memo ? '　' + String(e.memo).slice(0, 30) : ''}`, e, from);
+    });
+  });
   _lostData = items;
   document.getElementById('lost-modal')?.remove();
-  const G = [['calving', '🍼 お産（母牛）'], ['calf', '🍼 子牛'], ['calvRec', '📋 分娩記録'], ['cowMove', '🏠 牛舎の移動（親牛）'], ['calfMove', '🏠 牛舎の移動（子牛）'], ['tag', '🏷 タグ（親牛）'], ['calfTag', '🏷 タグ（子牛）'], ['taskDone', '✓ タスクのチェック']];
+  const G = [['cowEvent', '📝 記録（授精・移植・プログラム・妊鑑など）'], ['taskGone', '📅 消えた予定'], ['calving', '🍼 お産（母牛）'], ['calf', '🍼 子牛'], ['calvRec', '📋 分娩記録'], ['cowMove', '🏠 牛舎の移動（親牛）'], ['calfMove', '🏠 牛舎の移動（子牛）'], ['tag', '🏷 タグ（親牛）'], ['calfTag', '🏷 タグ（子牛）'], ['taskDone', '✓ タスクのチェック']];
   const w = document.createElement('div'); w.id = 'lost-modal';
   w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9300;display:flex;align-items:center;justify-content:center;padding:12px;';
   w.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;width:100%;max-width:560px;max-height:92vh;overflow:auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>🩹 消えた記録を取り戻す（お産・移動・タグ・チェック）</b><button class="modal-close" onclick="document.getElementById('lost-modal').remove()">✕</button></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>🩹 消えた記録を取り戻す（授精・予定・お産・移動・タグ・チェック）</b><button class="modal-close" onclick="document.getElementById('lost-modal').remove()">✕</button></div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6;">ここ3日の変更履歴とクラウドのバックアップにあって、今は無いものです。わざと消したものはチェックを外してください。</div>
     ${items.length ? G.map(([k, l]) => { const L = items.map((x, i) => ({ x, i })).filter(o => o.x.kind === k); if (!L.length) return '';
       return `<div style="font-size:13px;font-weight:700;margin:12px 0 4px;">${l}（${L.length}）　<button class="st-act" onclick="document.querySelectorAll('.lost-${k}').forEach(c=>c.checked=true)">全部</button> <button class="st-act" onclick="document.querySelectorAll('.lost-${k}').forEach(c=>c.checked=false)">外す</button></div>
@@ -13283,6 +13369,11 @@ function runLostRecover() {
       else { c.tags = c.tags || []; if (!c.tags.includes(x.data)) c.tags.push(x.data); }
     } else if (x.kind === 'taskDone') {
       const t = tasks.find(o => o.id === x.id); if (t && !t.done) { t.done = true; t._mt = now; }
+    } else if (x.kind === 'taskGone') {
+      if (!tasks.some(o => o.id === x.data.id)) tasks.push({ ...JSON.parse(JSON.stringify(x.data)), _mt: now });
+    } else if (x.kind === 'cowEvent') {
+      const c = cows.find(o => o.id === x.id); if (!c) return; c.events = c.events || [];
+      if (!c.events.some(e => e.type === x.data.type && e.date === x.data.date)) { c.events.push(JSON.parse(JSON.stringify(x.data))); c.events.sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))); c._mt = now; }
     } else if (x.kind === 'calving') {
       const c = cows.find(o => o.id === x.id); if (!c) return; const d = x.data;
       if (!c.calvingDate || d.calvingDate > c.calvingDate) {
@@ -13298,6 +13389,8 @@ function runLostRecover() {
       if (!calvingRecords.some(o => o.id === x.id)) { const o = JSON.parse(JSON.stringify(x.data)); o._mt = now; calvingRecords.push(o); }
     }
   });
+  // 記録を戻した牛は、状態（妊鑑待ち・プログラム中など）を記録に合わせる
+  [...new Set(pick.filter(x => x.kind === 'cowEvent').map(x => x.id))].forEach(id => { const c = cows.find(o => o.id === id); try { if (c && typeof reconcileCow === 'function') reconcileCow(c); } catch (e) {} });
   save(); try { renderAll(); } catch (e) {}
   document.getElementById('lost-modal')?.remove();
   appAlert(`${pick.length}件戻しました`);
@@ -13643,6 +13736,24 @@ function checkDataConsistency() {
         fix: '誤って登録した方の分娩記録を削除してください（子牛データも一緒に消えます）',
         buttons: gs.map(g => calvingEntryButtons(c.id, g.dates)).join('') });
     }
+  });
+  // ★ 2026/11/21：同じ胚番号を2回使った記録がある受精卵（在庫がずれる）
+  (typeof embryoInventory !== 'undefined' ? embryoInventory : []).forEach(e => {
+    let det = e.embryoDetails; try { if (!det || !det.length) det = getSheet2DetailsForLot(e.lot); } catch (er) {}
+    const dup = _dupEmbryoUses(e, det); if (!dup.length) return;
+    out.push({ kind: 'status', cowId: '', title: `受精卵 ${e.dam ? e.dam + '×' : ''}${e.sire || ''}（${e.lot || ''}）：同じ胚番号を2回使った記録がある`,
+      detail: `${dup.join('・')} の「使った」記録が2回ずつあり、在庫が${dup.length}本多くへっています`,
+      fix: '移植の画面でこのロットを選ぶと出る「🔧 重なっている記録を1つにして、在庫を直す」で直せます' });
+  });
+  // ★ 2026/11/21：「プログラム中」なのに、まだ済んでいない予定がひとつもない牛
+  cows.forEach(c => {
+    let k = ''; try { k = cowDisplayStatus(c).key; } catch (e) {}
+    if (k !== 'program' && c.status !== 'program') return;
+    if (tasks.some(t => t.cowId === c.id && !t.done)) return;
+    const st = [...(c.events || [])].filter(e => PROG_START_TYPES.includes(e.type)).sort((a, b) => b.date.localeCompare(a.date))[0];
+    out.push({ kind: 'status', cowId: c.id, title: `${c.id} ${cowDisplayName(c.id) || ''}：プログラム中なのに、予定がひとつもない`,
+      detail: st ? `${fmtDate(st.date)} に始めたプログラムの予定が残っていません` : 'プログラムを始めた記録もありません',
+      fix: '牛の画面で「プログラムを入れ直す」か「空胎に戻す」を選んでください' });
   });
   // 「問題ない」にした項目は出さない
   for (let i = out.length - 1; i >= 0; i--) {
@@ -15020,6 +15131,29 @@ async function submitQuickReg() {
   if (!event) { alert('イベント種別を選択してください'); return; }
   if (!date)  { alert('日付を入力してください'); return; }
   if (!validateDate(date, cowId, event)) return;
+  // ★ 2026/11/21：同じ胚番号の胚を2回使う記録はできないようにする（ほかの牛に使った胚なら止める。同じ牛への同じ記録なら在庫はへらさない）
+  window._embNoSkipStock = false;
+  if (event === 'et_done') {
+    const nv = (document.getElementById('qr-embryo-no-select') || {}).value || '';
+    const no = nv.replace('_fix', '');
+    const u = no ? _embryoNoUse(no) : null;
+    if (u) {
+      const sameCow = u.h.cowId === cowId;
+      if (!sameCow && !nv.endsWith('_fix')) {
+        _submitting = false; const sb0 = document.getElementById('submit-quick-reg-btn'); if (sb0) { sb0.disabled = false; sb0.textContent = '登録してスケジュールを生成 →'; }
+        await appAlert(`胚番号 ${no} は、${u.h.date ? fmtDate(u.h.date) + ' に' : ''}${u.h.cowId ? ' ' + u.h.cowId + ' ' + (cowDisplayName(u.h.cowId) || '') + ' へ' : ''}${u.h.type === 'transfer' ? '譲渡' : u.h.type === 'discard' ? '廃棄' : '移植'}した記録があります。\n\n同じ胚番号の胚は1つしかないので、2回は使えません。胚番号をもう一度確かめてください。\n（前の記録がまちがいのときは、受精卵の在庫でその記録を直してください）`);
+        return;
+      }
+      window._embNoSkipStock = true;   // 同じ牛への記録のし直し・修正：在庫はへらさない
+    }
+  }
+  // ★ 2026/11/21：分娩したあと、授精・移植の記録がないのに「妊娠確定」を入れようとしたら確かめる（前の妊娠の確定を、分娩のあとに押してしまう事故）
+  if (event === 'preg_positive') {
+    const cwP = cows.find(c => c.id === cowId);
+    const lastCalv = cwP && [...(cwP.events || [])].filter(e => e.type === 'calving' && e.date <= date).sort((a, b) => b.date.localeCompare(a.date))[0];
+    const insAfter = lastCalv && (cwP.events || []).some(e => ['ai_done', 'et_done', 'estrus_ai'].includes(e.type) && e.date > lastCalv.date && e.date <= date);
+    if (lastCalv && !insAfter && !(await appConfirm(`${fmtDate(lastCalv.date)} に分娩しています。そのあとに授精・移植の記録がありません。\n\n前の妊娠の「確定」を押していませんか？\n本当に妊娠確定にしますか？`))) { _submitting = false; const sb = document.getElementById('submit-quick-reg-btn'); if (sb) { sb.disabled = false; sb.textContent = '登録してスケジュールを生成 →'; } return; }
+  }
 
   // 妊鑑待ちの牛に新たな種付け・プログラムを組もうとした場合の警告
   // （受胎しているのにPG等を打つと流産させてしまう事故を防ぐ）
@@ -15135,6 +15269,7 @@ async function submitQuickReg() {
         }
         if (edForCane?.cane) parts.push('ケーン:'+edForCane.cane);
       }
+      if (!window._embNoSkipStock) {
       e.stock = (e.stock||0) - embryoCount;
       e.history = e.history||[];
       // histMemoはpartsから胚番号・ケーン・術者を取得して構築
@@ -15143,6 +15278,7 @@ async function submitQuickReg() {
       const histParts = [histEmbryo, histCane, operator?'術者:'+operator:null, free||null].filter(Boolean);
       const histMemo = histParts.length ? histParts.join(' ') : null;
       e.history.push({ date, type: invType, count:embryoCount, usage: isOther ? 'ET委託' : 'ET', cowId: cowId, memo: histMemo });
+      }
     }
   } else if (embryoNameInput || embryoDamInput) {
     const embryoLabel = (embryoDamInput ? embryoDamInput+'×' : '') + (embryoNameInput || '');
@@ -18078,7 +18214,7 @@ async function syncOneInsemRecord(date, cowId, sire, addInventory) {
     if (etLot) {
       const alreadyInInv = (etLot.history||[]).some(h =>
         h.type==='use' && h.date===effectiveDate && h.cowId===cowId && (h.memo||'').includes(embryoNo)
-      );
+      ) || !!_embryoNoUse(embryoNo);   // ★ 同じ胚番号を使った記録がもうあれば、2回目は入れない
       if (!alreadyInInv) {
         etLot.history = etLot.history || [];
         etLot.history.push({ date: effectiveDate, type: 'use', count: 1, cowId, memo: `移植 ${embryoNo}` });
@@ -18509,9 +18645,45 @@ async function recheckPreg(cowId, insemDate) {
   const res = await appConfirm('結果は陽性でしたか？\n\nOK＝✓陽性　／　キャンセル＝✗陰性') ? 'positive' : 'negative';
   recordPregFromInsemBook(cowId, dd, res, null, insemDate);
 }
+// ★ 2026/11/21：授精簿の妊鑑で、選んでいるボタン（陽性・陰性）をもう一度押したら、結果を取り消して「まだ」に戻す
+function _ibCurPreg(cow, key) {
+  const ev = [...(cow.events || [])].filter(e => (e.type === 'preg_positive' || e.type === 'preg_negative') && e.insemDate === key).sort((a, b) => b.date.localeCompare(a.date))[0];
+  if (ev) return ev.type === 'preg_positive' ? 'positive' : 'negative';
+  const recs = [...(typeof INSEM_BOOK_DATA !== 'undefined' ? INSEM_BOOK_DATA.map((r, i) => ({ ...r, ...(insemBookEdits['static_' + i] || {}) })) : []), ...insemBookRecords];
+  const r = recs.find(x => x.t === cow.id && x.d === key && !x._deleted);
+  return r && (r.pregResult === 'positive' || r.pregResult === 'negative') ? r.pregResult : null;
+}
+function clearPregFromInsemBook(cowId, key, triggerEl) {
+  const cow = cows.find(c => c.id === cowId); if (!cow) return;
+  const was = _ibCurPreg(cow, key);
+  try { armUndo('妊鑑の結果を取り消しました'); } catch (e) {}
+  cow.events = (cow.events || []).filter(e => !((e.type === 'preg_positive' || e.type === 'preg_negative') && e.insemDate === key));
+  setBookPregResult(cowId, key, null);
+  const pd = key.replace(/-/g, '/');
+  tasks.forEach(t => {
+    if (t.cowId === cowId && /妊娠鑑定/.test(t.action || '') && t.pregResult && (t.insemDate === key || String(t.detail || '').includes(pd))) {
+      t.done = false; delete t.pregResult; delete t.pregResultDate; t.doneAt = null; t._mt = Date.now(); t._undoneAt = t._mt;
+    }
+  });
+  if (was === 'positive') {
+    // ほかに、この授精より後の妊娠（陽性）があれば、そちらの妊娠のまま（分娩予定・産室移動も残す）
+    const calv = cow.calvingDate || '';
+    const other = (cow.events || []).some(e => e.type === 'preg_positive' && ((e.insemDate && e.insemDate > key) || (!e.insemDate && e.date > key)) && e.date > calv);
+    if (!other) {
+      tasks = tasks.filter(t => !(t.cowId === cowId && !t.done && (t.action === '分娩予定' || t.action === '🏠 産室移動')));
+      if (cow.status === 'pregnant') { cow.status = 'open'; cow.dueDate = null; cow.twin = false; }
+    }
+  }
+  delete cow.dueManual;
+  save();
+  const cell = triggerEl?.closest('.insembook-preg-col');
+  if (cell) { const all = [...INSEM_BOOK_DATA, ...insemBookRecords]; const rec = all.find(r => r.t === cowId && r.d === key); cell.innerHTML = getPregCellHtml(cowId, key, rec?.donorAI || false); }
+  renderAll(); try { renderStats(); } catch (e) {}
+}
 function recordPregFromInsemBook(cowId, date, result, triggerEl, aiDate) {
   const cow = cows.find(c => c.id === cowId);
   if (!cow) return;
+  if (aiDate && _ibCurPreg(cow, aiDate) === result) { clearPregFromInsemBook(cowId, aiDate, triggerEl); return; }
   if (result === 'positive' && typeof checkInsemBeforePreg === 'function' && !checkInsemBeforePreg(cowId)) return;
   const eventType = result === 'positive' ? 'preg_positive' : 'preg_negative';
   cow.events = cow.events || [];
@@ -19536,7 +19708,7 @@ function _doDelivPrint() {
             // 既に記録済みか確認
             var already = (matchInv.history||[]).some(function(h){
               return h.type==='transfer' && (h.memo||'').includes(d.no);
-            });
+            }) || !!_embryoNoUse(d.no);   // ★ 移植・廃棄に使った胚も、2回目の記録は入れない
             if (!already) {
               matchInv.history = matchInv.history||[];
               matchInv.history.push({ date: dateStr, type: 'transfer', count: 1, cowId: null, memo: '胚番号:' + d.no + ' ' + memoBase });
@@ -28001,6 +28173,32 @@ function filterQrEmbryoSelect(q) {
   });
 }
 
+// ★ 2026/11/21：使った胚番号。前は在庫の記録に「胚番号:」と書いてあるものしか数えず、「移植 01L237R8-0004」のような記録を見落として、
+//   使った胚まで「まだ使っていない」に出ていた。在庫の記録に胚番号が書いてあれば、書き方によらず使ったものとする
+function _usedEmbryoNos(e, details) {
+  const nos = (details || []).map(d => d.no).filter(Boolean);
+  const used = new Set();
+  (e.history || []).filter(h => ['use', 'transfer', 'discard'].includes(h.type) && h.memo).forEach(h => {
+    const m = String(h.memo).match(/胚番号:([^\s\/]+)/); if (m) used.add(m[1]);
+    nos.forEach(n => { if (String(h.memo).includes(n)) used.add(n); });
+  });
+  return [...used];
+}
+// ★ 2026/11/21：同じ胚番号の胚は1つしかないので、2回は使えない。すでに使った（移植・譲渡・廃棄）記録を探す
+function _embryoNoUse(no) {
+  if (!no) return null;
+  for (const e of (typeof embryoInventory !== 'undefined' ? embryoInventory : [])) {
+    const h = (e.history || []).find(h => ['use', 'transfer', 'discard'].includes(h.type) && h.memo && new RegExp('(^|[^0-9A-Za-z])' + String(no).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^0-9A-Za-z])').test(String(h.memo)));
+    if (h) return { lot: e, h };
+  }
+  return null;
+}
+// 同じ胚番号を2回使ったことになっている記録（在庫の数がずれる原因）
+function _dupEmbryoUses(e, details) {
+  const nos = (details || []).map(d => d.no).filter(Boolean), cnt = {};
+  (e.history || []).filter(h => ['use', 'transfer', 'discard'].includes(h.type) && h.memo).forEach(h => { nos.forEach(n => { if (String(h.memo).includes(n)) cnt[n] = (cnt[n] || 0) + 1; }); });
+  return Object.entries(cnt).filter(([, c]) => c > 1).map(([n]) => n);
+}
 function onQrEmbryoSelectChange() {
   const selId = document.getElementById('qr-embryo-select').value;
   const infoEl = document.getElementById('qr-embryo-info');
@@ -28020,10 +28218,7 @@ function onQrEmbryoSelectChange() {
       const details = e.embryoDetails || getSheet2DetailsForLot(e.lot);
       if (details && details.length && e.type === 'frozen') {
         // 使用済み胚番号を取得（history.cowIdがある = 使用済み）
-        const usedNos = (e.history||[])
-          .filter(h => (h.type==='use'||h.type==='transfer'||h.type==='discard') && h.memo)
-          .map(h => { const m = h.memo.match(/胚番号:([^\s\/]+)/); return m ? m[1] : null; })
-          .filter(Boolean);
+        const usedNos = _usedEmbryoNos(e, details);
         const available = details.filter(d => d.no && !usedNos.includes(d.no));
         const all = details.filter(d => d.no);
         if (all.length > 0) {
@@ -33980,7 +34175,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112110';
+const APP_BUILD = '2026112121';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -35044,6 +35239,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       if (!cowOf(S.cow)) { S.v = 'cow'; return vCow(); }
       if (S.v === 'act') return vAct();
       if (S.v === 'ai') return vAI();
+      if (S.v === 'et') return vET();
       if (S.v === 'calv') return vCalv();
     } catch (e) { console.error('nuiRec', e); scrClose(); appAlert('画面を開けませんでした：' + e.message); }
   }
@@ -35996,7 +36192,25 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     still: ['💔', '流死産', 'nui-r', ''], memo: ['📝', 'メモ', 'nui-y', ''],
     retire: ['🚫', '廃用・死亡', 'nui-r', '売却・死亡・廃棄も'], measure: ['📏', '体測', 'nui-y', '胸囲・体高・体長'], ship: ['🚚', '出荷', 'nui-y', '']
   };
-  window.nuiAIet = function () { const id = S.cow; scrClose(); addEventForCow(id, 'et_done'); };
+  window.nuiAIet = function () { S.v = 'et'; S.et = null; render(); };
+  // ★ 2026/11/21：予定のチェックやストーリーから「AI・移植を記録」を開いたときも、新しい画面にする（古い画面に行かない）
+  //   呼んだ側があとから入れる日付・メモ（予定の日など）は、すぐあとで新しい画面に写す
+  const _aefc = window.addEventForCow || (typeof addEventForCow === 'function' ? addEventForCow : null);
+  if (_aefc) window.addEventForCow = function (cowId, ev) {
+    if (window._nuiFill || (ev !== 'ai_done' && ev !== 'et_done') || !cowOf(cowId)) return _aefc.apply(this, arguments);
+    const d0 = ($('qr-date') || {}).value, m0 = ($('qr-memo') || {}).value;
+    if ($('qr-date')) $('qr-date').value = ''; if ($('qr-memo')) $('qr-memo').value = '';
+    S.cow = cowId; S.intent = null; S.v = ev === 'et_done' ? 'et' : 'ai'; S.ai = null; S.et = null; render();
+    setTimeout(() => {
+      const d = ($('qr-date') || {}).value, m = ($('qr-memo') || {}).value;
+      const st = S.v === 'et' ? S.et : S.ai; if (!st) return;
+      let ch = false;
+      if (d && d !== today()) { st.date = d; st.day = d === addDays(today(), -1) ? 1 : 2; ch = true; }
+      if (m) { st.memo = m; ch = true; }
+      if (ch) { if (S.v === 'et') nuiET({}); else nuiAI({}); }
+      if ($('qr-date')) $('qr-date').value = d0 || ''; if ($('qr-memo')) $('qr-memo').value = m0 || '';
+    }, 0);
+  };
   window.nuiAct = function (k) {
     const id = S.cow;
     if (k === 'ai') { S.v = 'ai'; S.ai = null; return render(); }
@@ -36045,7 +36259,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       const li = lastIns(c); const L = semenList(c.id).filter(s => (s.stock || 0) > 0);
       let pre = '';
       try { const t = tasks.find(x => x.cowId === c.id && !x.done && x.date <= T && /授精|AI/.test(x.action || '') && x.memo); const m = t && String(t.memo).match(/精液:([^／\s]+)/); if (m) { const s = L.find(x => x.name === m[1]); if (s) pre = s.id; } } catch (e) {}
-      S.ai = { day: 0, date: T, time: new Date().getHours() < 12 ? 0 : 1, semen: pre, manual: '', count: 1, op: '', chips: [], memo: '', showAll: false };
+      S.ai = { day: 0, date: T, time: new Date().getHours() < 12 ? 0 : 1, semen: pre, manual: '', count: 1, op: '', chips: [], memo: '', showAll: false, fb: false, donor: false };
     }
     const A = S.ai;
     const all = semenList(c.id), inStock = all.filter(s => (s.stock || 0) > 0);
@@ -36064,7 +36278,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         <div class="nui-box"><div class="nui-lb">🥚 精液（在庫から ・ この牛の品種だけ）</div>
           <div style="display:flex;flex-direction:column;gap:6px;">${L.map(s => { const on = A.semen === s.id; return `<button onclick="nuiAI({semen:'${jsq(s.id)}',manual:''})" style="display:flex;justify-content:space-between;align-items:center;height:46px;padding:0 12px;border-radius:8px;font-size:15px;font-weight:700;text-align:left;border:1px solid ${on ? '#22c55e' : '#2a3050'};background:${on ? '#14532d' : '#1e2333'};color:${on ? '#4ade80' : '#e2e8f0'};cursor:pointer;font-family:inherit;"><span>${on ? '✓' : '　'} ${esc(s.name)}</span><span style="font-size:12px;font-weight:500;color:${(s.stock || 0) <= 3 ? '#f59e0b' : '#94a3b8'};">のこり ${s.stock || 0}本</span></button>`; }).join('') || '<div style="font-size:12px;color:#94a3b8;">在庫に精液がありません</div>'}</div>
           ${inStock.length < all.length ? `<button class="nui-chip" style="margin-top:8px;" onclick="nuiAI({showAll:${!A.showAll}})">${A.showAll ? '在庫のあるものだけ' : '在庫0本のものも出す'}</button>` : ''}
-          <input class="nui-in" style="margin-top:8px;" placeholder="✏ 在庫にない精液（種雄牛名を手入力）" value="${esc(A.manual)}" oninput="S_nuiManual(this.value)"></div>
+          <div class="nui-lb" style="margin-top:12px;">✏ 在庫にない精液（農家さんの持ち込み・ほかから借りたものなど）</div>
+          <input class="nui-in" placeholder="種雄牛名を手入力（在庫はへりません）" value="${esc(A.manual)}" oninput="S_nuiManual(this.value)"></div>
         <div style="display:flex;gap:10px;">
           <div class="nui-box" style="flex:1;"><div class="nui-lb">本数</div><div style="display:flex;align-items:center;">
             <button aria-label="1本へらす" onclick="nuiAI({count:Math.max(1,${A.count}-1)})" style="width:44px;height:44px;border-radius:10px;border:1px solid #2a3050;background:#1e2333;color:#e2e8f0;font-size:22px;cursor:pointer;">−</button>
@@ -36073,6 +36288,13 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
           <div class="nui-box" style="flex:1;"><label for="nui-op" class="nui-lb">術者</label><input id="nui-op" class="nui-in" placeholder="空欄＝自分" value="${esc(A.op)}" oninput="S_nuiOp(this.value)"></div>
         </div>
         <div style="font-size:12px;color:${A.count > 1 ? '#f59e0b' : '#64748b'};margin-top:-6px;">${note}</div>
+        ${(() => { let why = null; try { why = reproDisorder(c); } catch (e) {}
+          return `<button onclick="nuiAI({fb:${!A.fb}})" style="display:flex;align-items:flex-start;gap:10px;text-align:left;width:100%;padding:12px;border-radius:12px;border:1.5px solid ${A.fb ? '#22d3ee' : '#2a3050'};background:${A.fb ? '#0a1a24' : '#171b26'};color:#e2e8f0;cursor:pointer;font-family:inherit;">
+            <span style="flex-shrink:0;width:24px;height:24px;border-radius:6px;border:2px solid ${A.fb ? '#22d3ee' : '#475569'};background:${A.fb ? '#0e7490' : 'transparent'};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;">${A.fb ? '✓' : ''}</span>
+            <span style="flex:1;"><b style="font-size:14px;">🛡 モディファイド・ファストバックをする</b><br><span style="font-size:12px;color:#94a3b8;">授精後5日目にCIDR挿入、19日目に抜去。21〜23日目に再発情を重点的に確認する予定も入ります</span>${why ? `<br><span style="font-size:12px;color:#fbbf24;font-weight:700;">💡 この牛は ${esc(why)}。ファストバックを考えてみてください</span>` : ''}</span></button>`; })()}
+        <button onclick="nuiAI({donor:${!A.donor}})" style="display:flex;align-items:flex-start;gap:10px;text-align:left;width:100%;padding:12px;border-radius:12px;border:1.5px solid ${A.donor ? '#f59e0b' : '#2a3050'};background:${A.donor ? '#1a1508' : '#171b26'};color:#e2e8f0;cursor:pointer;font-family:inherit;">
+          <span style="flex-shrink:0;width:24px;height:24px;border-radius:6px;border:2px solid ${A.donor ? '#f59e0b' : '#475569'};background:${A.donor ? '#b45309' : 'transparent'};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;">${A.donor ? '✓' : ''}</span>
+          <span style="flex:1;"><b style="font-size:14px;">🐄 ドナーAI（採卵のための授精）</b><br><span style="font-size:12px;color:#94a3b8;">妊鑑の予定は作りません。採卵記録のAI日につながります</span></span></button>
         <details class="nui-box" ${A.chips.length || A.memo ? 'open' : ''}><summary style="cursor:pointer;font-size:13px;font-weight:700;">📝 メモ・ホルモン（なくてもOK） ▼</summary>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${CH.map(x => `<button class="nui-chip${A.chips.includes(x) ? ' on' : ''}" onclick="nuiAIChip('${x}')">${x}</button>`).join('')}</div>
           <input class="nui-in" style="margin-top:8px;" placeholder="そのほかのメモ" value="${esc(A.memo)}" oninput="S_nuiMemo(this.value)"></details>
@@ -36094,13 +36316,135 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     if (!A.semen && !A.manual.trim()) { appAlert('精液を選ぶか、種雄牛名を入れてください'); return; }
     if (!A.date) { appAlert('日付を入れてください'); return; }
     scrClose();
-    addEventForCow(id, 'ai_done');
+    { let n = 0; while (typeof _submitting !== 'undefined' && _submitting && n++ < 30) await new Promise(r => setTimeout(r, 100)); }   // 前の記録の送信中なら少し待つ（2秒の二重送信よけで、黙って記録されないのを防ぐ）
+    window._nuiFill = true; try { addEventForCow(id, 'ai_done'); } finally { window._nuiFill = false; }
     $('qr-date').value = A.date; try { onQrDateChange(); } catch (e) {}
     if (A.semen) { const sel = $('qr-semen-select'); sel.value = A.semen; try { onQrSemenSelectChange(); } catch (e) {} }
     else { $('qr-semen-name-input').value = A.manual.trim(); try { onQrSemenNameInput(); } catch (e) {} }
     $('qr-semen-count').value = A.count;
     $('qr-operator').value = A.op.trim();
     $('qr-memo').value = [A.time === 0 ? 'AM' : 'PM', ...A.chips, A.memo.trim()].filter(Boolean).join(' ');
+    { const fb = $('qr-fastback-flag'); if (fb) fb.checked = !!A.fb; }   // ★ 2026/11/21：新しい画面にもファストバックを
+    { const dn = $('qr-donor-ai-flag'); if (dn) dn.checked = !!A.donor; }
+    await submitQuickReg();
+    if (!$('modal-quick-reg').classList.contains('open')) { try { showCowDetail(id); } catch (e) {} }
+  };
+  // ---------- 🧬 移植（ET）：AI と同じつくり ----------
+  function etLots() {
+    return (typeof embryoInventory !== 'undefined' ? embryoInventory : []).filter(e => (Number(e.stock) || 0) > 0)
+      .sort((a, b) => (a.dam || '').localeCompare(b.dam || '', 'ja') || String(b.collectionDate || b.lot || '').localeCompare(String(a.collectionDate || a.lot || '')));
+  }
+  function etNos(e) {   // 凍結胚の、まだ使っていない胚番号
+    if (!e || e.type !== 'frozen') return [];
+    let details = e.embryoDetails; try { if (!details || !details.length) details = getSheet2DetailsForLot(e.lot); } catch (er) {}
+    const used = _usedEmbryoNos(e, details);
+    return (details || []).filter(d => d.no && !used.includes(d.no));
+  }
+  function vET() {
+    const c = cowOf(S.cow), T = today();
+    if (!S.et) S.et = { day: 0, date: T, time: new Date().getHours() < 12 ? 0 : 1, lot: '', no: '', mDam: '', mSire: '', mNo: '', count: 1, op: '', memo: '', preg: '', ext: false };
+    const E = S.et;
+    const chip = (on) => `nui-ch${on ? ' on' : ''}`;
+    const days = [['今日 ' + md(T), 0], ['昨日 ' + md(addDays(T, -1)), 1], ['📅 ' + (E.day === 2 ? md(E.date) : '日付'), 2]];
+    const L = etLots();
+    const sel = L.find(e => e.id === E.lot);
+    const nos = sel ? etNos(sel) : [];
+    const old = E.date && diffDays(T, E.date) >= 30;   // 30日以上前の移植なら、妊鑑の結果も入れられる
+    const lotBtn = e => { const on = E.lot === e.id; return `<button class="nui-etlot" data-s="${esc([e.dam, e.sire, e.lot, ...etNos(e).map(d => d.no)].join(' ').toLowerCase())}" onclick="nuiET({lot:'${jsq(e.id)}',no:'',ext:false})" style="display:flex;justify-content:space-between;align-items:center;min-height:46px;padding:6px 12px;border-radius:10px;border:1.5px solid ${on ? '#a78bfa' : '#2a3050'};background:${on ? '#1c1230' : '#1e2333'};color:${on ? '#c4b5fd' : '#e2e8f0'};font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left;gap:8px;">
+      <span>${on ? '✓ ' : ''}× ${esc(e.sire || '')}<span style="font-size:12px;color:#94a3b8;font-weight:400;">　${esc(e.lot || '')} ${e.type === 'frozen' ? '凍結' : '新鮮'}</span></span><span style="font-size:12px;color:#94a3b8;white-space:nowrap;">のこり ${e.stock}本</span></button>`; };
+    scrShow(`${backBtn("nuiBackAct()")}<span style="font-size:17px;font-weight:900;color:#4ade80;">💉 種付け・移植</span><span style="font-size:15px;"><span class="nui-mono" style="font-weight:700;">${esc(c.id)}</span> ${esc(nm(c.id))}</span>`,
+      `<div style="padding:12px 14px 30px;display:flex;flex-direction:column;gap:14px;">
+        <div class="nui-seg"><button onclick="nuiAct('ai')">💉 AI・自然交配</button><button class="on">🧬 移植（ET）</button></div>
+        <div class="nui-box"><div class="nui-lb">いつ</div>
+          <div style="display:flex;gap:6px;">${days.map(([l, i]) => `<button class="${chip(E.day === i)}" onclick="nuiET({day:${i}})">${l}</button>`).join('')}</div>
+          ${E.day === 2 ? `<input type="date" class="nui-in" style="margin-top:6px;" value="${E.date}" onchange="nuiET({date:this.value})">` : ''}
+          <div style="display:flex;gap:6px;margin-top:6px;"><button class="${chip(E.time === 0)}" onclick="nuiET({time:0})">☀ 朝</button><button class="${chip(E.time === 1)}" onclick="nuiET({time:1})">🌙 夕</button></div></div>
+        <div class="nui-box"><div class="nui-lb">🧬 受精卵（在庫から）</div>
+          ${L.length > 6 ? `<input class="nui-in" style="margin-bottom:8px;" placeholder="🔍 ドナー・種雄牛・胚番号でさがす" oninput="nuiEtFind(this.value)">` : ''}
+          ${L.length ? (() => {
+            const G = []; L.forEach(e => { const k = e.dam || '（ドナー未設定）'; let g = G.find(x => x.k === k); if (!g) G.push(g = { k, L: [] }); g.L.push(e); });
+            return `<div style="display:flex;flex-direction:column;gap:6px;">${G.map(g => { const open = (E.openDam || {})[g.k] || g.L.some(e => e.id === E.lot); const tot = g.L.reduce((t, e) => t + (Number(e.stock) || 0), 0);
+              const sires = [...new Set(g.L.map(e => e.sire).filter(Boolean))].join('・');
+              return `<div class="nui-etgrp" data-s="${esc([g.k, ...g.L.map(e => [e.sire, e.lot, ...etNos(e).map(d => d.no)].join(' '))].join(' ').toLowerCase())}">
+                <button onclick="nuiEtDam('${jsq(g.k)}')" style="display:flex;align-items:center;gap:8px;width:100%;min-height:46px;padding:6px 12px;border-radius:10px;border:1px solid ${g.L.some(e => e.id === E.lot) ? '#a78bfa' : '#2a3050'};background:#171b26;color:#e2e8f0;font-size:14px;font-weight:900;cursor:pointer;font-family:inherit;text-align:left;">
+                  <span style="flex:1;">🐄 ${esc(g.k)}<br><span style="font-size:11px;color:#94a3b8;font-weight:400;">× ${esc(sires)}・${g.L.length}ロット</span></span><span style="font-size:12px;color:#94a3b8;white-space:nowrap;">計 ${tot}本 ${open ? '▲' : '▼'}</span></button>
+                <div class="nui-etgl" style="display:${open ? 'flex' : 'none'};flex-direction:column;gap:6px;margin:6px 0 4px 12px;">${g.L.map(lotBtn).join('')}</div></div>`; }).join('')}</div>`; })() : '<div style="font-size:13px;color:#64748b;">在庫の受精卵はありません</div>'}
+          ${sel && nos.length && nos.length !== Number(sel.stock) ? (() => { let dup = []; try { dup = _dupEmbryoUses(sel, sel.embryoDetails || getSheet2DetailsForLot(sel.lot)); } catch (e) {}
+            return `<div style="font-size:12px;color:#fbbf24;background:#1a1508;border:1px solid #b45309;border-radius:8px;padding:8px 10px;margin-top:10px;line-height:1.6;">⚠ 在庫の数（${sel.stock}本）と、まだ使っていない胚番号（${nos.length}個）が合いません。${dup.length ? `${dup.map(esc).join('・')} は、使った記録が2回入っています（${dup.length}本多くへっています）。<button onclick="nuiEtFixDup('${jsq(sel.id)}')" style="display:block;width:100%;margin-top:8px;min-height:40px;border-radius:8px;border:1px solid #b45309;background:#2a1a00;color:#fde68a;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">🔧 重なっている記録を1つにして、在庫を直す</button>` : '使ったのに記録されていない胚があるかもしれません。受精卵の在庫で確かめてください。'}</div>`; })() : ''}
+          ${sel && nos.length ? `<div class="nui-lb" style="margin-top:10px;">胚番号（まだ使っていないもの ${nos.length}個）</div><div style="display:flex;flex-wrap:wrap;gap:6px;">${nos.map(d => `<button class="nui-chip${E.no === d.no ? ' on' : ''}" onclick="nuiET({no:'${jsq(d.no)}'})">${esc(d.no)}${d.cane ? ' [' + esc(d.cane) + ']' : ''}${d.rank ? ' ' + esc(d.rank) : ''}</button>`).join('')}</div>` : ''}
+          <button onclick="nuiET({ext:${!E.ext},lot:'',no:''})" style="margin-top:10px;width:100%;min-height:42px;border-radius:10px;border:1px dashed ${E.ext ? '#a78bfa' : '#475569'};background:${E.ext ? '#1c1230' : 'transparent'};color:${E.ext ? '#c4b5fd' : '#cbd5e1'};font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">✏ 在庫にない受精卵（ほかの農家・購入など）${E.ext ? ' ▲' : ' ▼'}</button>
+          ${E.ext ? `<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">
+            <input class="nui-in" placeholder="ドナー（母）例: おひさ（b81）" value="${esc(E.mDam)}" oninput="S_nuiEt('mDam',this.value)">
+            <input class="nui-in" placeholder="種雄牛（父）例: 福勝鶴" value="${esc(E.mSire)}" oninput="S_nuiEt('mSire',this.value)">
+            <input class="nui-in" placeholder="胚番号（わかれば）例: 01L237R7-0032" value="${esc(E.mNo)}" oninput="S_nuiEt('mNo',this.value)"></div>` : ''}</div>
+        <div style="display:flex;gap:10px;">
+          <div class="nui-box" style="flex:1;"><div class="nui-lb">本数</div><div style="display:flex;align-items:center;">
+            <button aria-label="1本へらす" onclick="nuiET({count:Math.max(1,${E.count}-1)})" style="width:44px;height:44px;border-radius:10px;border:1px solid #2a3050;background:#1e2333;color:#e2e8f0;font-size:22px;cursor:pointer;">−</button>
+            <span class="nui-mono" style="flex:1;text-align:center;font-size:22px;font-weight:900;">${E.count}</span>
+            <button aria-label="1本ふやす" onclick="nuiET({count:Math.min(3,${E.count}+1)})" style="width:44px;height:44px;border-radius:10px;border:1px solid #2a3050;background:#1e2333;color:#e2e8f0;font-size:22px;cursor:pointer;">＋</button></div></div>
+          <div class="nui-box" style="flex:1;"><label for="nui-etop" class="nui-lb">術者</label><input id="nui-etop" class="nui-in" placeholder="空欄＝自分" value="${esc(E.op)}" oninput="S_nuiEt('op',this.value)"></div>
+        </div>
+        ${old ? `<div class="nui-box"><div class="nui-lb">妊娠鑑定の結果（${diffDays(T, E.date)}日前の移植なので、わかっていれば）</div><div style="display:flex;gap:6px;">
+          ${[['', 'まだ'], ['positive', '✓ 陽性'], ['negative', '✕ 陰性']].map(([v, l]) => `<button class="${chip(E.preg === v)}" onclick="nuiET({preg:'${v}'})">${l}</button>`).join('')}</div></div>` : ''}
+        <details class="nui-box" ${E.memo ? 'open' : ''}><summary style="cursor:pointer;font-size:13px;font-weight:700;">📝 メモ（なくてもOK） ▼</summary>
+          <input class="nui-in" style="margin-top:8px;" placeholder="黄体の大きさなど" value="${esc(E.memo)}" oninput="S_nuiEt('memo',this.value)"></details>
+        <button onclick="openEtSkip('${jsq(c.id)}','${E.date}')" style="width:100%;min-height:44px;border-radius:10px;border:1px solid #475569;background:transparent;color:#cbd5e1;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">🚫 移植しなかった（理由を残す）</button>
+      </div>`,
+      `<button class="nui-save" onclick="nuiSaveET()">💾 記録する</button><div style="font-size:11px;color:#94a3b8;text-align:center;margin-top:8px;">再発情の確認と妊鑑の予定も自動で入ります</div>`);
+  }
+  window.S_nuiEt = (k, v) => { if (S.et) S.et[k] = v; };
+  window.nuiEtFind = q => {
+    q = String(q || '').trim().toLowerCase();
+    document.querySelectorAll('#nui-scr .nui-etgrp').forEach(g => {
+      const hit = !q || g.dataset.s.includes(q); g.style.display = hit ? '' : 'none';
+      const gl = g.querySelector('.nui-etgl'); if (q && hit && gl) gl.style.display = 'flex';
+      g.querySelectorAll('.nui-etlot').forEach(b => { b.style.display = !q || b.dataset.s.includes(q) || g.dataset.s.split(' ')[0] === q ? '' : 'none'; });
+    });
+  };
+  // 同じ胚番号の使用が2回入っている記録を1つにする（あとから入った方を消す）。在庫は記録から数え直す
+  window.nuiEtFixDup = async function (lotId) {
+    const e = (typeof embryoInventory !== 'undefined' ? embryoInventory : []).find(x => x.id === lotId); if (!e) return;
+    let details = e.embryoDetails; try { if (!details || !details.length) details = getSheet2DetailsForLot(e.lot); } catch (er) {}
+    const dup = _dupEmbryoUses(e, details); if (!dup.length) return;
+    const before = Number(e.stock) || 0;
+    if (!await appConfirm(`${dup.join('・')} の「使った」記録が2回入っています。\nあとから入った方を消して、在庫を数え直しますか？（${before}本 → ${before + dup.length}本）`)) return;
+    try { armUndo('受精卵の在庫を直しました'); } catch (er) {}
+    dup.forEach(n => {
+      const idx = (e.history || []).map((h, i) => ({ h, i })).filter(({ h }) => ['use', 'transfer', 'discard'].includes(h.type) && String(h.memo || '').includes(n)).map(x => x.i);
+      idx.slice(1).reverse().forEach(i => e.history.splice(i, 1));
+    });
+    try { syncStockFromHistory(e); } catch (er) { e.stock = before + dup.length; }
+    e._mt = Date.now();
+    save(); nuiET({});
+  };
+  window.nuiEtDam = k => { const E = S.et; E.openDam = E.openDam || {}; const was = (E.openDam[k] != null) ? E.openDam[k] : etLots().some(e => (e.dam || '（ドナー未設定）') === k && e.id === E.lot); E.openDam[k] = !was; nuiET({}); };
+  window.nuiET = function (o) {
+    const E = S.et; Object.assign(E, o);
+    if ('day' in o) { if (o.day === 0) E.date = today(); if (o.day === 1) E.date = addDays(today(), -1); }
+    if (diffDays(today(), E.date) < 30) E.preg = '';
+    const sb = document.querySelector('#nui-scr .sb'), y = sb ? sb.scrollTop : 0; vET(); const sb2 = document.querySelector('#nui-scr .sb'); if (sb2) sb2.scrollTop = y;
+  };
+  window.nuiSaveET = async function () {
+    const E = S.et, id = S.cow;
+    const sel = etLots().find(e => e.id === E.lot);
+    if (!sel && !(E.mSire.trim() || E.mDam.trim() || E.mNo.trim())) { appAlert('受精卵を選ぶか、「在庫にない受精卵」に種雄牛などを入れてください'); return; }
+    if (sel && etNos(sel).length && !E.no) { appAlert('胚番号を選んでください'); return; }
+    if (!E.date) { appAlert('日付を入れてください'); return; }
+    scrClose();
+    { let n = 0; while (typeof _submitting !== 'undefined' && _submitting && n++ < 30) await new Promise(r => setTimeout(r, 100)); }   // 前の記録の送信中なら少し待つ（2秒の二重送信よけで、黙って記録されないのを防ぐ）
+    window._nuiFill = true; try { addEventForCow(id, 'et_done'); } finally { window._nuiFill = false; }
+    $('qr-date').value = E.date; try { onQrDateChange(); } catch (e) {}
+    if (sel) {
+      $('qr-embryo-select').value = sel.id; try { onQrEmbryoSelectChange(); } catch (e) {}
+      if (E.no) { const ns = $('qr-embryo-no-select'); ns.value = E.no; try { onQrEmbryoNoSelectChange(); } catch (e) {} }
+    } else {
+      $('qr-embryo-dam-input').value = E.mDam.trim(); $('qr-embryo-name-input').value = E.mSire.trim(); try { onQrEmbryoNameInput(); } catch (e) {}
+      if (E.mNo.trim()) $('qr-embryo').value = E.mNo.trim();
+    }
+    const cnt = $('qr-embryo-count'); if (cnt) cnt.value = E.count;
+    $('qr-operator').value = E.op.trim();
+    $('qr-memo').value = [!sel && E.mNo.trim() ? '胚No.' + E.mNo.trim() : '', E.time === 0 ? 'AM' : 'PM', E.memo.trim()].filter(Boolean).join(' ');
+    try { setQrPreg(E.preg || 'pending'); } catch (e) {}
     await submitQuickReg();
     if (!$('modal-quick-reg').classList.contains('open')) { try { showCowDetail(id); } catch (e) {} }
   };
@@ -36330,6 +36674,25 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       sch.replaceWith(card);
       dt.parentNode.insertBefore(card, dt.nextSibling);
     }
+    // ★ プログラム中なのに予定がひとつもない → どういう状態か出して、どうするか選べるようにする
+    try {
+      const k = cowDisplayStatus(c).key;
+      if ((k === 'program' || c.status === 'program') && !tasks.some(t => t.cowId === id && !t.done)) {
+        const st = [...(c.events || [])].filter(e => PROG_START_TYPES.includes(e.type)).sort((a, b) => b.date.localeCompare(a.date))[0];
+        const LB = { cidr_ai_start: 'CIDRプログラム（AI）', et_recipient: 'ETレシピエント', estrus_et: '自然発情→ET', estrus_ai: '発情→AI', donor_et_start: '採卵（自然発情）', donor_et_pretreat_start: '採卵（前処置）', donor_et_takahashi_start: '採卵（高橋式）' };
+        const lastDone = tasks.filter(t => t.cowId === id && t.done && st && t.date >= st.date).sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+        const w = document.createElement('div');
+        w.style.cssText = 'background:#1a1508;border:1.5px solid #b45309;border-radius:12px;padding:12px;margin:10px 0;';
+        w.innerHTML = `<div style="font-size:14px;font-weight:900;color:#fbbf24;margin-bottom:6px;">⚠ プログラム中なのに、これからの予定がありません</div>
+          <div style="font-size:13px;color:#e2e8f0;line-height:1.7;">${st ? `${esc(fmtDate(st.date))} に「${esc((st.type === 'et_recipient' && st.protocol === 'takahashi' ? 'ETレシピエント（高橋式）' : LB[st.type]) || 'プログラム')}」を始めています。` : 'プログラムを始めた記録がありません。'}${lastDone ? `<br>最後に済んだ予定：${esc(fmtDate(lastDone.date))} ${esc(lastDone.action)}` : ''}</div>
+          <div style="font-size:12px;color:#94a3b8;margin-top:4px;">予定が消えたか、途中でやめた可能性があります。</div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button onclick="closeModal('modal-cow');addEventForCow('${jsq(id)}','')" style="flex:1;height:42px;border-radius:10px;border:1px solid #2a3050;background:#1e2333;color:#e2e8f0;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;">📅 プログラムを入れ直す</button>
+            <button onclick="closeModal('modal-cow');addEventForCow('${jsq(id)}','open')" style="flex:1;height:42px;border-radius:10px;border:1px solid #2a3050;background:#1e2333;color:#e2e8f0;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;">⭕ 空胎に戻す</button>
+          </div>`;
+        dt.parentNode.insertBefore(w, dt.nextSibling);
+      }
+    } catch (e) { console.error('nuiProgNoTask', e); }
     // 記録ボタンは下の「この牛に記録する」1つに
     const btn = document.createElement('div'); btn.className = 'nui-cowrec';
     btn.innerHTML = `<button onclick="closeModal('modal-cow');nuiRec('${jsq(id)}')">➕ この牛に記録する</button>`;
@@ -36682,6 +37045,26 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     }
   };
 
+  // 💉 ゲストロン・E2 の予定をチェックしたとき：投与した／しなかった
+  window.nuiDoseChoice = function (taskId) {
+    const t = tasks.find(x => x.id === taskId); if (!t) return;
+    scrShow(`${backBtn('nuiClose()', 'やめる')}<span style="font-size:17px;font-weight:900;">💉 ${esc(t.action)}</span>`,
+      `<div style="padding:16px 14px;">
+        <div style="font-size:15px;margin-bottom:6px;"><b class="nui-mono">${esc(t.cowId)}</b> <span style="color:#4ade80;font-weight:700;">${esc(nm(t.cowId))}</span></div>
+        <div style="font-size:13px;color:#94a3b8;margin-bottom:14px;">${esc(fmtDate(t.date))}　${esc(t.detail || '')}</div>
+        <button onclick="nuiDose('${jsq(taskId)}',1)" style="width:100%;min-height:56px;border-radius:12px;border:1.5px solid #22c55e;background:#14532d;color:#4ade80;font-size:17px;font-weight:900;margin-bottom:10px;cursor:pointer;font-family:inherit;">💉 投与した</button>
+        <button onclick="nuiDose('${jsq(taskId)}',0)" style="width:100%;min-height:56px;border-radius:12px;border:1.5px solid #b45309;background:#1a1508;color:#fbbf24;font-size:17px;font-weight:900;cursor:pointer;font-family:inherit;">🚫 投与しなかった（非投与）</button>
+        <div style="font-size:12px;color:#64748b;margin-top:12px;line-height:1.6;">どちらでも、この予定は済みになります。「非投与」はストーリーに「🚫 非投与」と残ります。</div>
+      </div>`, '');
+  };
+  window.nuiDose = function (taskId, gave) {
+    const t = tasks.find(x => x.id === taskId); if (!t) { nuiClose(); return; }
+    nuiClose();
+    if (gave) { t._doseOk = true; delete t.skipped; toggleTask(taskId); return; }
+    t.done = true; t.skipped = true; t.doneAt = new Date().toISOString(); t._mt = Date.now(); delete t._undoneAt;
+    save(); try { renderAll(); } catch (e) {}
+  };
+
   // ---------- 🎯 受胎率のタブ：受胎率（記録ベース）と月別受胎率だけ開いておき、ほかはたたむ ----------
   const concOpen = () => { try { return JSON.parse(localStorage.getItem('nuiConcOpen') || '{}'); } catch (e) { return {}; } };
   window.nuiConcT = function (k) { const o = concOpen(); o[k] = !o[k]; try { localStorage.setItem('nuiConcOpen', JSON.stringify(o)); } catch (e) {} statsFilter(); };
@@ -36808,7 +37191,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#64748b;letter-spacing:2px;margin:0 2px 6px;">🔧 困ったとき（データの修復）▼</summary>
         <div class="lst">
           <div onclick="openSyncDiag()"><span>🔎 同期のようすを調べる</span><span style="color:#64748b;">${'版 ' + String(window.APP_BUILD || '').slice(-4)} ›</span></div>
-          <div onclick="openLostRecover()"><span>🩹 消えた記録を取り戻す（お産・移動・タグ・チェック）</span><span style="color:#64748b;">›</span></div>
+          <div onclick="openLostRecover()"><span>🩹 消えた記録を取り戻す（授精・予定・お産・移動・タグ・チェック）</span><span style="color:#64748b;">›</span></div>
           <div onclick="openIbRestore()"><span>☁ 消えた授精簿の行を戻す（バックアップから）</span><span style="color:#64748b;">›</span></div>
         </div>
       </details>`;
