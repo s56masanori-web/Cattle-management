@@ -6484,6 +6484,9 @@ function cowCalvingIntervalText(cow) {
 // タグの札の色（同じタグはいつも同じ色）。個体カードを描くときに使うので、ここで先に決めておく
 // ★ 2026/11/22：タグの色を選べる（黄・赤・水・白）。選んでいないタグは今までどおり名前から自動で決まる色
 const TAG_COLORS = { y: ['黄', '#fbbf24', '#1f1600'], r: ['赤', '#f87171', '#2a0f0f'], b: ['水', '#22d3ee', '#06232a'], w: ['白', '#e2e8f0', '#1e2333'] };
+// 色ごとにまとめて並べる順（黄→赤→水→白→色を選んでいないもの）
+function tagColorRank(t) { const k = tagColorOf(t); return k ? ['y', 'r', 'b', 'w'].indexOf(k) : 9; }
+function sortTagsByColor(list, cnt) { return list.slice().sort((a, b) => tagColorRank(a) - tagColorRank(b) || (cnt ? (cnt[b] || 0) - (cnt[a] || 0) : 0) || a.localeCompare(b, 'ja')); }
 function tagColorOf(t) { try { return ((typeof farmTargets !== 'undefined' && farmTargets._tagColors) || {})[t] || ''; } catch (e) { return ''; } }
 function nuiTagStyle(t) {
   const sel = TAG_COLORS[tagColorOf(t)];
@@ -6961,7 +6964,7 @@ function renderCowList() {
       if (cow.status === 'pregnant' && cow.dueDate) { const dl = diffDays(cow.dueDate, today()); _key = `<div class="nui-cc-key">🍼 分娩予定 <b style="color:var(--purple);">${fmtDate(cow.dueDate)}</b> <span style="color:${dl < 0 ? 'var(--danger)' : 'var(--muted)'};">${dl < 0 ? '（' + (-dl) + '日超過）' : '（あと' + dl + '日）'}</span></div>`; }
       else if (openDays !== null && cow.status === 'open' && !isPregWaiting) _key = `<div class="nui-cc-key">空胎 <b style="color:${openDays > 90 ? 'var(--danger)' : openDays > 60 ? 'var(--warn)' : 'var(--text)'};">${openDays}日</b>${nextEstrusLabel ? ' ・ ' + nextEstrusLabel.replace(/<\/?div[^>]*>/g, '') : ''}</div>`;
       return `<div class="cow-card nui-cc" data-cowid="${cow.id}" style="${cardStyle}cursor:pointer;" onclick="cowCardClick('${cow.id}')">
-        ${(cow.tags || []).length ? `<div class="nui-tags nui-tags-top" onclick="event.stopPropagation()">${cow.tags.map(t => `<button class="nui-tagc" style="${nuiTagStyle(t)}" onclick="nuiTagFilter('${String(t).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')}')">🏷 ${_stEsc(t)}</button>`).join('')}</div>` : ''}
+        ${(cow.tags || []).length ? `<div class="nui-tags nui-tags-top" onclick="event.stopPropagation()">${sortTagsByColor(cow.tags).map(t => `<button class="nui-tagc" style="${nuiTagStyle(t)}" onclick="nuiTagFilter('${String(t).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')}')">🏷 ${_stEsc(t)}</button>`).join('')}</div>` : ''}
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
           <div class="nui-cc-name"><span class="cow-id">${cow.id}</span><span style="font-size:15px;font-weight:700;">${cowName}</span>${(() => { const m = getMasterCow(cow.id); const d = String((m && m.nationalId) || cow.nationalId || '').replace(/\D/g, ''); return d.length >= 5 ? ` <span class="nui-nid">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}${breedBadge}${roleBadge}${abortionRiskBadge(cow.id)}</div>
           ${(() => { const t = String(displayStatus || ''), m = t.match(/^([^（(<]+)[（(](.+)[）)]$/); return `<div class="nui-cc-st"><span style="white-space:nowrap;"><span class="cow-status-dot ${displayDot}"></span>${m ? m[1] : t}</span>${m ? `<div style="font-size:11px;color:var(--muted);">${m[2].replace(/^授精可能[:：]\s*/, '授精可能 ').replace(/\d{4}\//, '')}</div>` : ''}</div>`; })()}
@@ -11069,7 +11072,7 @@ function openTagEditor(kind, key) {
   const label = kind === 'calf' ? (obj.earTagId || obj.nationalId || '子牛') : `${obj.id} ${cowDisplayName(obj.id) || ''}`;
   const cur = new Set(obj.tags || []);
   const draw = () => {
-    const known = [...new Set([...allHerdTags(), ...cur])];
+    const known = sortTagsByColor([...new Set([...allHerdTags(), ...cur])]);
     document.getElementById('confirm-title').innerHTML = `🏷 タグ — ${_stEsc(label)}`;
     document.getElementById('confirm-body').innerHTML = `
       <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">タップで付け外し。新しいタグは下の欄に入力して追加</div>
@@ -11109,7 +11112,7 @@ function openTagManager() {
   let w = document.getElementById('tag-mgr');
   if (!w) { w = document.createElement('div'); w.id = 'tag-mgr'; w.className = 'modal-overlay open'; w.style.zIndex = '9200'; w.onclick = e => { if (e.target === w) closeTagManager(); }; document.body.appendChild(w); }
   const cnt = {}; _tagHolders().forEach(c => (c.tags || []).forEach(t => cnt[t] = (cnt[t] || 0) + 1));
-  const names = Object.keys(cnt).sort((a, b) => a.localeCompare(b, 'ja'));
+  const names = sortTagsByColor(Object.keys(cnt), cnt);
   const E = _stEsc, J = x => String(x).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   w.innerHTML = `<div class="modal" style="max-width:520px;padding:0;overflow:hidden;">
     <div class="modal-title" style="padding:14px 16px;margin:0;border-bottom:1px solid var(--border);"><span>🏷 タグの管理</span><button class="modal-close" onclick="closeTagManager()">✕</button></div>
@@ -29541,7 +29544,7 @@ function renderReport() {
 
       const detailHTML = monthEntries.length ? `
         <tr id="${detailId}" style="display:none;">
-          <td colspan="7" style="padding:0;border:1px solid var(--info);">
+          <td colspan="${isEmbryo ? 8 : 7}" style="padding:0;border:1px solid var(--info);">
             <div style="background:var(--bg2);padding:8px;">
               <div style="font-size:11px;color:var(--info);font-weight:700;margin-bottom:6px;">${parseInt(m)}月の明細 （${monthEntries.length}件）<span style="color:var(--muted);font-weight:400;margin-left:8px;">行を押すと直せます</span></div>
               ${(() => { const usedBRKeys = new Set(); const _old = monthEntries.map((h,hi) => {
@@ -34614,7 +34617,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112207';
+const APP_BUILD = '2026112210';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -37124,7 +37127,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const box = $('cow-list-container'); if (!box) return;
     let bar = $('nui-tagbar');
     const cnt = {}; cows.forEach(c => (c.tags || []).forEach(t => { cnt[t] = (cnt[t] || 0) + 1; }));
-    const names = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a] || a.localeCompare(b, 'ja'));
+    const names = sortTagsByColor(Object.keys(cnt), cnt);   // ★ 2026/11/22：色ごとにまとめる（同じ色の中は頭数の多い順）
     if (!names.length) { if (bar) bar.remove(); return; }
     if (!bar) { bar = document.createElement('div'); bar.id = 'nui-tagbar'; bar.className = 'nui-tagbar'; box.parentNode.insertBefore(bar, box); }
     const cur = (($('cow-search') || {}).value || '').replace(/^🏷/, '');
