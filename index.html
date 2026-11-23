@@ -12645,6 +12645,97 @@ function _etShareText(farm) {
     donor: t.donor || '', sire: t.sire || '', stage: t.stage || '', rank: t.rank || '', preg: t.pregResult || '', pdate: t.pregDate || '', vet: t.vet || '' }));
   return JSON.stringify({ kind: 'et-share', farm, from: (window.FARM && FARM.name) || '', date: today(), list });
 }
+// ===== ★ 2026/11/23：農家さんのツールと自動でつなぐ =====
+//   ・それぞれのツールが、自分のクラウドの share/<合いことば>/ に「相手に渡す分だけ」を置く（相手は読むだけ）
+//   ・農家さん → 獣医さん：牛の一覧（耳標・名前・個体識別番号・生年月日・品種）… share/<合いことば>/herd
+//   ・獣医さん → 農家さん：その農家の牛への移植の記録（📤 農家に渡す と同じ中身）… share/<合いことば>/et/<農家の合いことば>
+//   クラウドの設定に "share": { "$t": { ".read": true, ".write": "auth != null" } } を書き足してもらう
+function _shareToken() { if (!farmTargets._shareToken) { farmTargets._shareToken = 's' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); save(); } return farmTargets._shareToken; }
+function _shareBase() { const u = (window._fbDb && window._fbDb.app && window._fbDb.app.options.databaseURL) || ''; return u ? u.replace(/\/$/, '') + '/share/' + _shareToken() : ''; }
+function _isVetFarm() { return ((window.FARM_CFG || {}).farmId || 'obara') === 'obara'; }
+async function _sharePut(sub, obj) {
+  if (!window._fbDb) return false;
+  const sig = _syncHashLite(JSON.stringify(obj)), k = 'shareSig_' + sub;
+  try { if (localStorage.getItem(k) === sig) return true; } catch (e) {}
+  await window._fbDb.ref('share/' + _shareToken() + '/' + sub).set(obj);
+  try { localStorage.setItem(k, sig); } catch (e) {}
+  return true;
+}
+async function _shareGet(url) {
+  const r = await fetch(String(url).replace(/\/$/, '') + '.json', { cache: 'no-store' });
+  if (!r.ok) throw new Error('読めませんでした（' + r.status + '）');
+  return r.json();
+}
+const _HERD_BREED = b => /褐/.test(b || '') ? '褐毛和種' : /黒/.test(b || '') ? '黒毛和種' : /F1|交雑|乳/.test(b || '') ? '乳×肉' : '';
+async function _shareTick() {
+  if (!window._fbDb || window._tabStopped) return;
+  window._shareState = window._shareState || {};
+  const S = window._shareState;
+  try {
+    if (!_isVetFarm()) {
+      // 農家さん側：牛の一覧を置く
+      await _sharePut('herd', { t: Date.now(), farm: (window.FARM && FARM.name) || '', cows: cows.map(c => ({ id: c.id, name: c.name || '', nid: c.nationalId || '', dob: c.dob || '', breed: c.breed || '' })) });
+      S.herdAt = Date.now(); S.herdErr = '';
+    } else {
+      // 獣医さん側：つないだ農家ごとに移植の記録を置く
+      for (const f of (otherFarms || [])) { if (!f.shareKey) continue; await _sharePut('et/' + f.shareKey, JSON.parse(_etShareText(f.name))); }
+      S.etAt = Date.now(); S.etErr = '';
+    }
+  } catch (e) { if (_isVetFarm()) S.etErr = e.message || String(e); else S.herdErr = e.message || String(e); }
+  // 農家さん側：獣医さんから届いた移植の記録を入れる
+  if (!_isVetFarm() && farmTargets._vetShareUrl) {
+    try {
+      const d = await _shareGet(farmTargets._vetShareUrl);
+      S.inAt = Date.now(); S.inErr = '';
+      if (d && d.kind === 'et-share' && Array.isArray(d.list)) {
+        const sig = _syncHashLite(JSON.stringify(d.list));
+        if (farmTargets._vetShareSig !== sig) {
+          const R = importEtShare(JSON.stringify(d), { quiet: true });
+          farmTargets._vetShareSig = sig; save();
+          if (R && R.add) _shareToast(`🧬 獣医さんから移植の記録が届いたので、${R.add}件入れました`);
+          S.inLast = R;
+        }
+      } else if (d == null) S.inErr = 'まだ獣医さんのツールから記録が置かれていません';
+    } catch (e) { S.inErr = e.message || String(e); }
+  }
+}
+function _shareToast(msg) {
+  const w = document.createElement('div');
+  w.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(90px + env(safe-area-inset-bottom));z-index:9500;background:#14532d;color:#fff;border-radius:12px;padding:12px 14px;font-size:14px;max-width:520px;margin:0 auto;box-shadow:0 6px 20px rgba(0,0,0,.5);';
+  w.innerHTML = _stEsc(msg) + ' <button style="margin-left:8px;background:#fff;color:#14532d;border:none;border-radius:6px;padding:3px 10px;font-weight:800;">閉じる</button>';
+  w.querySelector('button').onclick = () => w.remove(); document.body.appendChild(w); setTimeout(() => w.isConnected && w.remove(), 12000);
+}
+async function _copyText(t) { try { await navigator.clipboard.writeText(t); appAlert('コピーしました'); } catch (e) { appPrompt('コピーしてください', t); } }
+const _SHARE_RULE = '"share": { "$t": { ".read": true, ".write": "auth != null" } }';
+// 農家さんのツール：⚙ 獣医さんのツールとつなぐ
+function openVetLink() {
+  document.getElementById('vetlink-modal')?.remove();
+  const S = window._shareState || {}, w = document.createElement('div'); w.id = 'vetlink-modal';
+  w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9300;display:flex;align-items:center;justify-content:center;padding:14px;';
+  const code = _shareBase(), f = t => t ? new Date(t).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  w.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;width:100%;max-width:480px;max-height:90vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><b>🔗 獣医さんのツールとつなぐ</b><button class="modal-close" onclick="document.getElementById('vetlink-modal').remove()">✕</button></div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:10px;">つなぐと、獣医さんが移植した記録が自動で授精簿とストーリーに入ります。こちらからは牛の一覧（耳標・名前・個体識別番号・生年月日・品種）だけを渡します。</div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:4px;">① 獣医さんに渡すコード</div>
+    <div style="display:flex;gap:6px;"><input readonly value="${_stEsc(code)}" style="flex:1;font-size:11px;font-family:monospace;"><button class="btn btn-secondary" style="margin:0;" onclick="_copyText('${_stEsc(code)}')">コピー</button></div>
+    <div style="font-size:11px;margin:4px 0 12px;color:${S.herdErr ? 'var(--danger)' : 'var(--muted)'};">${S.herdErr ? '⚠ 牛の一覧を置けません：' + _stEsc(S.herdErr) + '（クラウドの設定を確かめてください）' : S.herdAt ? '✓ 牛の一覧を置きました（' + f(S.herdAt) + '）' : '牛の一覧は、開いて少しすると置かれます'}</div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:4px;">② 獣医さんからもらったコード</div>
+    <input id="vetlink-in" value="${_stEsc(farmTargets._vetShareUrl || '')}" placeholder="ここに貼り付け" style="width:100%;font-size:11px;font-family:monospace;">
+    <div style="font-size:11px;margin:4px 0 12px;color:${S.inErr ? 'var(--danger)' : 'var(--muted)'};">${farmTargets._vetShareUrl ? (S.inErr ? '⚠ ' + _stEsc(S.inErr) : S.inAt ? '✓ 獣医さんの記録を見ました（' + f(S.inAt) + '）' : '') : ''}</div>
+    <button class="btn btn-primary" style="width:100%;" onclick="farmTargets._vetShareUrl=document.getElementById('vetlink-in').value.trim();delete farmTargets._vetShareSig;save();_shareTick().then(()=>openVetLink())">保存して、すぐ見に行く</button>
+    <details style="margin-top:12px;font-size:11px;color:var(--muted);"><summary>はじめに1回だけ：クラウドの設定</summary><div style="margin-top:6px;line-height:1.7;">Firebase の「Realtime Database → ルール」で、"rules" の中に次の1行を書き足して「公開」を押してください。<br><code style="display:block;background:var(--bg3);padding:6px;border-radius:6px;margin-top:4px;word-break:break-all;">${_stEsc(_SHARE_RULE)}</code></div></details>
+  </div>`;
+  document.body.appendChild(w);
+}
+// 獣医さんのツール：その農家の牛の一覧（つないでいれば自動で読む。15分は前に読んだものを使う）
+async function _farmHerd(f, force) {
+  if (!f || !f.shareUrl) return null;
+  const k = 'herd_' + _syncHashLite(f.shareUrl); let c = null;
+  try { c = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) {}
+  if (!force && c && Date.now() - (c._at || 0) < 15 * 60000) return c;
+  try { const d = await _shareGet(String(f.shareUrl).replace(/\/$/, '') + '/herd'); if (d && Array.isArray(d.cows)) { d._at = Date.now(); try { localStorage.setItem(k, JSON.stringify(d)); } catch (e) {} return d; } } catch (e) { if (c) { c._err = e.message; return c; } return { cows: [], _err: e.message }; }
+  return c || { cows: [], _err: 'まだ農家さんのツールから牛の一覧が置かれていません' };
+}
 function openEtShareOut() {
   document.getElementById('etshare-modal')?.remove();
   const farms = [...new Set((transferBook || []).map(t => t.farmName).filter(Boolean))];
@@ -12694,7 +12785,8 @@ function checkEtImport() {
     <div style="overflow:auto;max-height:45vh;"><table style="font-size:11px;width:100%;border-collapse:collapse;"><tr style="color:var(--muted);"><td>日</td><td>牛</td><td>胚</td><td>結果</td><td>ストーリー</td><td>受胎率</td><td>修正</td></tr>${rows.join('')}</table></div>
     <div style="font-size:11px;color:var(--muted);margin-top:4px;">この画面をスクリーンショットで送ってもらえれば、原因が分かります</div>`;
 }
-function importEtShare(text) {
+function importEtShare(text, opt) {
+  opt = opt || {};
   let d; try { d = JSON.parse(String(text != null ? text : (document.getElementById('es-in') || {}).value || '').trim()); } catch (e) { appAlert('読み取れませんでした。「📤 農家に渡す」でコピーしたものをそのまま貼り付けてください'); return null; }
   if (!d || d.kind !== 'et-share' || !Array.isArray(d.list)) { appAlert('移植の記録ではないようです'); return null; }
   const all = [...cows, ...retiredCows];
@@ -12754,6 +12846,7 @@ function importEtShare(text) {
     try { if (typeof reconcileCow === 'function') reconcileCow(cow); } catch (e) {}
   });
   save(); try { renderAll(); } catch (e) {}
+  if (opt.quiet) return { add, dup, miss };   // 自動で届いた分：画面は出さない（呼んだ側が知らせる）
   document.getElementById('etshare-modal')?.remove();
   appAlert(`移植の記録を${add}件入れました${dup ? `（${dup}件はもう入っていました）` : ''}${miss.length ? `\n\n牛が見つからなかったもの（${miss.length}件）：\n` + miss.join('\n') : ''}`);
   return { add, dup, miss };
@@ -23504,12 +23597,33 @@ async function printSelectedEtCertsOtherFarm() {
   openModal('modal-otherfarm-pick');
 }
 // 農家を選ぶと、在籍牛リストがあれば受け牛セレクトを出す
+async function ofpickSearch(){
+  const f = otherFarms[document.getElementById('ofpick-farm').value]; const box = document.getElementById('ofpick-res'); if (!f || !box) return;
+  const H = await _farmHerd(f); const q = (document.getElementById('ofpick-q').value || '').trim();
+  const msg = H && H._err ? `<div style="font-size:11px;color:var(--warn);margin-bottom:4px;">⚠ ${_stEsc(H._err)}${H.cows && H.cows.length ? '（前に読んだ一覧を使っています）' : ''}</div>` : '';
+  if (!q) { box.innerHTML = msg + `<div style="font-size:11px;color:var(--muted);">${H && H.cows ? H.cows.length + '頭から探せます' : ''}</div>`; return; }
+  const Q = q.toLowerCase();
+  const L = ((H && H.cows) || []).filter(c => [c.id, c.name, c.nid].some(v => String(v || '').toLowerCase().includes(Q))).slice(0, 8);
+  box.innerHTML = msg + (L.length ? L.map((c, i) => `<button type="button" onclick="ofpickChoose(${JSON.stringify(c).replace(/"/g, '&quot;')})" style="display:flex;width:100%;gap:8px;align-items:center;text-align:left;padding:9px 10px;border:none;border-bottom:1px solid var(--bg);background:${i % 2 ? 'var(--bg3)' : 'var(--bg2)'};color:var(--text);font-family:inherit;cursor:pointer;">
+      <b style="font-family:monospace;color:var(--accent);min-width:48px;">${_stEsc(c.id)}</b><span style="flex:1;">${_stEsc(c.name || '')}</span><span style="font-size:11px;color:var(--muted);">${_stEsc(c.nid || '')}${c.breed ? '・' + _stEsc(c.breed) : ''}</span></button>`).join('') : '<div style="font-size:12px;color:var(--muted);">見つかりません（下の欄に手で入れられます）</div>');
+}
+function ofpickChoose(c){
+  const set = (id, v) => { const e = document.getElementById(id); if (e && v != null) e.value = v; };
+  set('ofpick-cow-name', c.name || ''); set('ofpick-cow-natid', c.nid || ''); set('ofpick-cow-eartag', c.id || '');
+  if (c.dob) set('ofpick-dob', c.dob);
+  const br = _HERD_BREED(c.breed); if (br) set('ofpick-breed', br);
+  const cs = document.getElementById('ofpick-cow'); if (cs) cs.value = '';
+  document.getElementById('ofpick-cow-manual').style.display = 'grid';
+  document.getElementById('ofpick-res').innerHTML = `<div style="font-size:12px;color:var(--accent);padding:6px 2px;">✓ ${_stEsc(c.id)} ${_stEsc(c.name || '')} を入れました（下の欄で確かめてください）</div>`;
+  document.getElementById('ofpick-q').value = '';
+}
 function onOtherFarmPick(){
   const i = document.getElementById('ofpick-farm').value;
   const f = otherFarms[i]; if(!f) return;
+  { const sb = document.getElementById('ofpick-search'); if (sb) { sb.style.display = f.shareUrl ? '' : 'none'; if (f.shareUrl) { document.getElementById('ofpick-q').value = ''; ofpickSearch(); } } }
   const cowGroup = document.getElementById('ofpick-cow-group');
   const cowSel = document.getElementById('ofpick-cow');
-  const link = f.linkFarm && FARM_DAM_IDS[f.linkFarm];
+  const link = !f.shareUrl && f.linkFarm && FARM_DAM_IDS[f.linkFarm];   // つないでいる農家は、上の検索を使う
   if (link) {
     cowGroup.style.display = '';
     const names = Object.keys(link).sort((a,b)=>a.localeCompare(b,'ja'));
@@ -23615,6 +23729,7 @@ function confirmOtherFarmCert(){
         donor: donor, sire: cr.sire || '',
         embryoNo: no,  // 凍結胚の正式番号はそのまま保存（pikerのdata-noから来る値が完全な番号のはず）
         embryoType: embType(no),
+        stage: getStageRank(no).stage || '', rank: getStageRank(no).rank || '',   // ★ 2026/11/23：採卵記録のステージ・ランクも入れる
         regOrg: window._etCertRegOrg || '', breed: window._etCertBreed || '',
         pregResult: '', pregDate: '',
         vet: FARM.vetName, vetLicense: FARM.license,
@@ -23656,7 +23771,8 @@ function renderOtherFarmList(){
 }
 function clearOtherFarmForm(){
   document.getElementById('ofm-editidx').value='';
-  ['ofm-name','ofm-feeder','ofm-regorg','ofm-regno'].forEach(id=>document.getElementById(id).value='');
+  ['ofm-name','ofm-feeder','ofm-regorg','ofm-regno','ofm-share'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  { const o=document.getElementById('ofm-share-out'); if(o) o.innerHTML='保存すると、② 農家さんのツールに入れるコードが出ます'; }
   document.getElementById('ofm-link').value='';
 }
 function editOtherFarm(i){
@@ -23667,6 +23783,17 @@ function editOtherFarm(i){
   document.getElementById('ofm-regorg').value=f.regOrg||'';
   document.getElementById('ofm-regno').value=f.regNo||'';
   document.getElementById('ofm-link').value=f.linkFarm||'';
+  document.getElementById('ofm-share').value=f.shareUrl||'';
+  _ofmShareOut(f);
+}
+function _ofmShareOut(f){
+  const o = document.getElementById('ofm-share-out'); if (!o) return;
+  if (!f || !f.shareKey) { o.innerHTML = '保存すると、② 農家さんのツールに入れるコードが出ます'; return; }
+  const code = _shareBase() + '/et/' + f.shareKey, S = window._shareState || {};
+  o.innerHTML = `<div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px;">② 農家さんのツール（⚙ → 🔗 獣医さんのツールとつなぐ）に入れるコード</div>
+    <div style="display:flex;gap:6px;"><input readonly value="${_stEsc(code)}" style="flex:1;font-size:11px;font-family:monospace;"><button class="btn btn-secondary" style="margin:0;" onclick="_copyText('${_stEsc(code)}')">コピー</button></div>
+    <div style="margin-top:4px;color:${S.etErr ? 'var(--danger)' : 'var(--muted)'};">${S.etErr ? '⚠ 記録を置けません：' + _stEsc(S.etErr) : ''}</div>
+    <details style="margin-top:6px;"><summary>はじめに1回だけ：クラウドの設定</summary><div style="margin-top:4px;line-height:1.7;">Firebase の「Realtime Database → ルール」で、"rules" の中に次の1行を書き足して「公開」を押してください（千佳さんのクラウドと、農家さんのクラウドの両方）。<br><code style="display:block;background:var(--bg3);padding:6px;border-radius:6px;margin-top:4px;word-break:break-all;">${_stEsc(_SHARE_RULE)}</code></div></details>`;
 }
 async function deleteOtherFarm(i){
   if(!await appConfirm('この農家を削除しますか？')) return;
@@ -23681,10 +23808,14 @@ function saveOtherFarmEntry(){
     regOrg: document.getElementById('ofm-regorg').value.trim(),
     regNo: document.getElementById('ofm-regno').value.trim(),
     linkFarm: document.getElementById('ofm-link').value,
+    shareUrl: (document.getElementById('ofm-share')?.value || '').trim(),
   };
   const idx=document.getElementById('ofm-editidx').value;
+  { const old = idx !== '' ? otherFarms[parseInt(idx)] : null; entry.shareKey = (old && old.shareKey) || ('f' + Math.random().toString(36).slice(2, 10)); }
   if(idx!==''){ otherFarms[parseInt(idx)]=entry; } else { otherFarms.push(entry); }
   saveOtherFarms(); renderOtherFarmList(); clearOtherFarmForm();
+  try { _shareTick(); } catch (e) {}
+  if (entry.shareUrl || true) { const i2 = idx !== '' ? parseInt(idx) : otherFarms.length - 1; editOtherFarm(i2); }   // 保存したら②のコードを見せる
   // ピッカーが開いていれば農家リストを更新
   const pick=document.getElementById('ofpick-farm');
   if(pick) pick.innerHTML = otherFarms.map((f,i)=>`<option value="${i}">${f.name}</option>`).join('');
@@ -23768,8 +23899,25 @@ function renderTransferBook(){
     </div>`;
   }).join('');
 }
+// ★ 2026/11/23：渡した移植の胚の「凍結/新鮮・ステージ・ランク」を、採卵記録（なければ受精卵の在庫）からさがす
+function _tbEmbInfo(t) {
+  const no = String(t.embryoNo || '').trim(); if (!no) return {};
+  const cols = (typeof collectionRecordsNew !== 'undefined' ? collectionRecordsNew : []);
+  const look = cr => {
+    if (!cr) return null;
+    const fz = (cr.frozenEmbryos || []).find(e => (e.no || e.embryoNo) === no); if (fz) return { type: '凍結', stage: fz.stage || '', rank: fz.rank || '' };
+    const fr = (cr.freshEmbryos || []).find(e => (e.embryoNo || e.no) === no); if (fr) return { type: '新鮮', stage: fr.stage || '', rank: fr.rank || '' };
+    const cu = (cr.cultureEmbryos || []).find(e => (e.embryoNo || e.no) === no); if (cu) return { type: '培養', stage: cu.cultureStage || cu.stage || '', rank: cu.cultureRank || cu.rank || '' };
+    return null;
+  };
+  let r = t.colRecId ? look(cols.find(c => c.id === t.colRecId)) : null;
+  if (!r) for (const c of cols) { r = look(c); if (r) break; }
+  if (!r) { for (const it of (typeof embryoInventory !== 'undefined' ? embryoInventory : [])) { const d = (it.embryoDetails || []).find(d => d && d.no === no); if (d) { r = { type: it.type === 'frozen' ? '凍結' : it.type === 'fresh' ? '新鮮' : '', stage: d.stage || '', rank: d.rank || '' }; break; } } }
+  return r || {};
+}
 function editTransferBook(id){
   const t = transferBook.find(x=>x.id===id); if(!t) return;
+  { const inf = _tbEmbInfo(t); if (!t.stage && inf.stage) t.stage = inf.stage; if (!t.rank && inf.rank) t.rank = inf.rank; if (!t.embryoType && inf.type) t.embryoType = inf.type; }   // 空なら採卵記録から入れて見せる（保存を押すと残る）
   document.getElementById('tb-edit-id').value=id;
   document.getElementById('tb-edit-title').textContent='移植記録の編集';
   document.getElementById('tb-e-date').value=t.transferDate||'';
@@ -34217,7 +34365,12 @@ try {
         <span onclick="openOtherFarmManage()" style="color:var(--accent);cursor:pointer;text-decoration:underline;">＋ 農家を登録・編集</span>
       </div>
     </div>
-    <div id="ofpick-cow-group" class="form-group" style="margin-bottom:8px;display:none;">
+    <div id="ofpick-search" class="form-group" style="margin-bottom:8px;display:none;">
+<label>受け牛をさがす（農家さんのツールの牛から）</label>
+<input id="ofpick-q" type="search" placeholder="🔍 耳標・名前・個体識別番号（例：N-28、みえこ、4604）" oninput="ofpickSearch()" style="width:100%;font-size:14px;">
+<div id="ofpick-res" style="margin-top:6px;"></div>
+</div>
+<div id="ofpick-cow-group" class="form-group" style="margin-bottom:8px;display:none;">
       <label>受け牛（在籍牛リストから選択）</label>
       <select id="ofpick-cow" onchange="document.getElementById('ofpick-cow-manual').style.display=this.value?'none':'grid';" style="width:100%;font-size:13px;"><option value="">— 手入力する —</option></select>
     </div>
@@ -34274,6 +34427,11 @@ try {
       <div class="form-group" style="margin-bottom:10px;"><label style="font-size:11px;">登録番号</label><input type="text" id="ofm-regno" placeholder="例: 褐-1234567" style="font-size:12px;"></div>
       <div class="form-group" style="margin-bottom:10px;"><label style="font-size:11px;">在籍牛リストと連携（受け牛を選べるようにする）</label>
         <select id="ofm-link" style="font-size:12px;width:100%;"><option value="">連携しない</option></select>
+      </div>
+      <div style="border-top:1px dashed var(--border);margin:6px 0 10px;padding-top:10px;">
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px;">🔗 農家さんのツールとつなぐ（つなぐと、受け牛を検索で選べて、移植の記録も自動で届きます）</div>
+        <div class="form-group" style="margin-bottom:8px;"><label style="font-size:11px;">① 農家さんのツールからもらったコード</label><input type="text" id="ofm-share" placeholder="ここに貼り付け" style="font-size:11px;font-family:monospace;"></div>
+        <div id="ofm-share-out" style="font-size:11px;color:var(--muted);">保存すると、② 農家さんのツールに入れるコードが出ます</div>
       </div>
       <button class="btn btn-primary" style="width:100%;" onclick="saveOtherFarmEntry()">保存</button>
     </div>
@@ -34392,6 +34550,7 @@ auth.onAuthStateChanged(user => {
     window._fbDb = db; window._DATA_PATH = DATA_PATH; window._VET_PATH = (window.FARM_CFG && window.FARM_CFG.vetPath) || 'vet/farm';   // 薬品管理データの読み込み（startVetSync）用
     try { if (typeof startVetSync === 'function') startVetSync(); } catch (e) {}   // 薬品管理データ（読み取りのみ）
     initFirebaseSync();
+    setTimeout(() => { try { _shareTick(); } catch (e) {} }, 8000); setInterval(() => { try { _shareTick(); } catch (e) {} }, 5 * 60000);   // ★ 農家さんのツールとのやりとり
   } else {
     currentUser = null;
     document.getElementById('app-root').style.display = 'none';
@@ -34745,7 +34904,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112303';
+const APP_BUILD = '2026112305';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -37837,6 +37996,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         <div onclick="nuiPrintMenu()"><span>🖨 お産予定・授精簿の印刷</span><span style="color:#64748b;">›</span></div>
         <div onclick="switchTab('history')"><span>📝 変更履歴</span><span style="color:#64748b;">›</span></div>
         <div onclick="switchTab('calc')"><span>🧮 発情・分娩の日を計算</span><span style="color:#64748b;">›</span></div>
+        ${((window.FARM_CFG || {}).farmId || 'obara') !== 'obara' ? `<div onclick="openVetLink()"><span>🔗 獣医さんのツールとつなぐ</span><span style="color:#64748b;">›</span></div>` : ''}
         <div onclick="openModal('modal-settings')"><span>⚙ 設定・データ管理</span><span style="color:#64748b;">›</span></div>
       </div>
       <details style="margin-top:16px;" ${(() => { try { return localStorage.getItem('nuiFixOpen') === '1' ? 'open' : ''; } catch (e) { return ''; } })()} ontoggle="try{localStorage.setItem('nuiFixOpen',this.open?'1':'0')}catch(e){}">
