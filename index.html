@@ -4473,6 +4473,8 @@ function initApp() {
   try { if (repairDonorFlagsOnce()) save(); } catch (e) { console.error('repairDonorFlags', e); }
   try { if (repairEmb0042Once()) save(); } catch (e) { console.error('repairEmb0042', e); }
   try { if (repairEtShareRowsOnce()) save(); } catch (e) { console.error('repairEtShare', e); }
+  // ★ 2026/11/23：獣医さんから届いた移植の行の年度を1月始まりにそろえる（前は4月始まりで入っていた）
+  try { let fx = false; (insemBookRecords || []).forEach(r => { if (r && r.fromVet && r.d) { const y = 'R' + (parseInt(String(r.d).slice(0, 4)) - 2018); if (r.y !== y) { r.y = y; r._mt = Date.now(); fx = true; } } }); if (fx) save(); } catch (e) { console.error('fixVetFy', e); }
   try { if (typeof fillPromotedCowDam === 'function' && fillPromotedCowDam()) save(); } catch (e) { console.error('fillPromotedCowDam', e); }
   try { reconcileCows(null); } catch (e) { console.error('reconcile', e); }
   try { initCalfCertIssuedOnce(); } catch (e) {}
@@ -5947,7 +5949,7 @@ function renderPregList() {
       <div style="font-size:10px;color:var(--muted);margin-top:6px;">済＝生まれた子牛の頭数（死産含む）／予＝妊娠中の牛の分娩予定（双子は2頭）</div>
       ${_calvCompareChart(pregYear, prevYear, curB, curD, prevM, sexCur, sexPrev, brCur, brPrev)}
     </div>
-    ${(() => { const h = calfBirthSummaryHTML(pregYear, 'renderPregList()', '_pregSumOpen'); return h ? `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:12px;">${h}</div>` : ''; })()}`;
+    ${(() => { const h = calfBirthSummaryHTML(pregYear, 'renderPregList()', '_pregSumOpen', dueCows); return h ? `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:12px;">${h}</div>` : ''; })()}`;
   })();
 
   const calvingHTML = yearHTML + (Object.keys(monthMap).length ? (
@@ -12812,7 +12814,7 @@ function importEtShare(text, opt) {
       if (fixed) { same._mt = Date.now(); add++; } else dup++;
       return;
     }
-    const fy = (() => { const dt = new Date(x.d + 'T00:00:00'); return 'R' + ((dt.getMonth() >= 3 ? dt.getFullYear() : dt.getFullYear() - 1) - 2018); })();
+    const fy = 'R' + (parseInt(String(x.d).slice(0, 4)) - 2018);   // 授精簿の年度は1月始まり
     const typ = /新鮮/.test(x.type) ? '🌱新鮮' : /凍結/.test(x.type) ? '❄凍結' : '';
     // ★ 2026/11/23：手で入れた移植の行と同じ形にそろえる（種雄牛の欄＝「ドナー×種雄牛」、番号の欄＝胚番号、メモ＝新鮮/凍結・ステージ）
     const nm = (x.donor || x.sire) ? `${x.donor || '?'}×${x.sire || '?'}` : '';
@@ -15874,15 +15876,40 @@ function saveCalfGenomic() {
   if (calf) { const g = _genReadForm(); if (g) calf.genomic = g; else delete calf.genomic; save(); }
   closeCalfGenomic(); renderCalves();
 }
+// ★ 2026/11/23：ETで生まれた子牛か（胚番号が子牛に入っていなくても、母の移植の記録から分かるようにする）
+function _calfIsET(c) {
+  if (!c) return false;
+  if (c.embryoNo || c.donor || c.insemType === 'et') return true;
+  try { if (typeof looksLikeEmbryo === 'function' && looksLikeEmbryo(String(c.sire || ''))) return true; } catch (e) {}
+  if (!c.damId || !c.dob) return false;
+  const lo = addDays(c.dob, -300), hi = addDays(c.dob, -255);
+  const dam = cows.find(x => x.id === c.damId) || (typeof retiredCows !== 'undefined' ? retiredCows : []).find(x => x.id === c.damId);
+  const evs = ((dam && dam.events) || []).filter(e => e.date >= lo && e.date <= hi && ['ai_done', 'et_done', 'estrus_ai', 'estrus_et'].includes(e.type));
+  const embMemo = m => { m = String(m || ''); return /胚番号:/.test(m) || (typeof looksLikeEmbryo === 'function' && looksLikeEmbryo(m.replace(/^精液:/, '').split(/[\/／\s]/)[0])); };
+  if (evs.length) { const e = evs.sort((a, b) => b.date.localeCompare(a.date))[0]; return ['et_done', 'estrus_et'].includes(e.type) || embMemo(e.memo); }
+  const bk = (typeof insemBookRecords !== 'undefined' ? insemBookRecords : []).filter(r => r.t === c.damId && r.d >= lo && r.d <= hi).sort((a, b) => b.d.localeCompare(a.d))[0];
+  if (bk) return bk.insemType === 'et' || /胚/.test(bk.m || '') || embMemo(bk.n) || embMemo(bk.s);
+  return false;
+}
+// お産予定の牛が、ETの子を産む予定か（最後の授精・移植の記録で見る）
+function _dueIsET(cow) {
+  const e = [...(cow.events || [])].sort((a, b) => b.date.localeCompare(a.date)).find(x => ['ai_done', 'et_done', 'estrus_ai', 'estrus_et'].includes(x.type));
+  if (!e) return false;
+  let memo = e.memo || ''; if (!memo) memo = insemMemoFor(cow.id, e.date) || '';
+  const str = memo.match(/胚番号:([^\/\n]+)/)?.[1]?.trim() || memo.match(/精液:([^\/\n]+)/)?.[1]?.trim() || memo.trim();
+  return ['et_done', 'estrus_et'].includes(e.type) || looksLikeEmbryo(str) || looksLikeEmbryo(memo);
+}
+const _pct = (n, t) => t ? Math.round(n / t * 100) + '%' : '—';
 // 📊 その年の産仔の内訳（ET・AI・合計）。子牛タブとお産予定の両方で使う
 //   RR：開け閉めしたあとに描き直す関数（文字列）、OK：開いた状態を覚えるキー
-function calfBirthSummaryHTML(thisYear, RR, OK) {
-  const etCalvesThisYear = calves.filter(c => c.dob && c.dob.startsWith(thisYear) && c.embryoNo);
-  const aiCalvesThisYear = calves.filter(c => c.dob && c.dob.startsWith(thisYear) && !c.embryoNo && c.insemType !== 'et' && !c.donor);
+function calfBirthSummaryHTML(thisYear, RR, OK, dueList) {
+  const etCalvesThisYear = calves.filter(c => c.dob && c.dob.startsWith(thisYear) && _calfIsET(c));
+  const aiCalvesThisYear = calves.filter(c => c.dob && c.dob.startsWith(thisYear) && !_calfIsET(c));
   const total = etCalvesThisYear.length;
   const male = etCalvesThisYear.filter(c => c.sex === '雄').length;
   const female = etCalvesThisYear.filter(c => c.sex === '雌').length;
-  if (!total && !aiCalvesThisYear.length) return '';
+  const dueL = (dueList || []).filter(c => c.dueDate && c.dueDate.startsWith(thisYear));   // 予定日を過ぎてまだ生まれていない牛も「これから」に入れる（上の分娩頭数とそろえる）
+  if (!total && !aiCalvesThisYear.length && !dueL.length) return '';
       // 品種：子牛の品種欄 → 空なら父牛（精液在庫）の品種から推定
       const breedOf = c => {
         const b = String(c.breed || '');
@@ -15946,9 +15973,13 @@ function calfBirthSummaryHTML(thisYear, RR, OK) {
           }).join('');
       }).join('');
       let sumOpen = false; try { sumOpen = localStorage.getItem(OK) === '1'; } catch (e) {}
+      // ETの割合（細い帯：紫＝ET、緑＝AI）
+      const ratioBar = (et, ai, lead) => { const t = et + ai; if (!t) return ''; const w = Math.round(et / t * 100);
+        return '<div style="margin-top:6px;font-size:11px;color:var(--muted);">'+lead+' ET <strong style="color:var(--purple);font-size:13px;">'+w+'%</strong>（'+t+'頭中 '+et+'頭）</div>'+
+          '<div style="display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--bg3);margin-top:3px;"><div style="width:'+w+'%;background:var(--purple);"></div><div style="flex:1;background:var(--accent);opacity:.55;"></div></div>'; };
       const head = '<div onclick="(function(){try{localStorage.setItem(\''+OK+'\',localStorage.getItem(\''+OK+'\')===\'1\'?\'0\':\'1\')}catch(e){};'+RR+'})()" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
         '<span style="font-size:12px;font-weight:700;color:var(--text);">📊 '+thisYear+'年 産仔の内訳</span>'+
-        '<span style="font-size:11px;color:var(--muted);">'+'計'+(total+aiTotal)+'頭（'+(total ? 'ET '+total+'頭' : '')+(total && aiTotal ? '・' : '')+(aiTotal ? 'AI '+aiTotal+'頭' : '')+'）　'+(sumOpen ? '▲ 閉じる' : '▼ 開く')+'</span></div>';
+        '<span style="font-size:11px;color:var(--muted);">'+(total+aiTotal ? '計'+(total+aiTotal)+'頭（'+(total ? 'ET '+total+'頭' : '')+(total && aiTotal ? '・' : '')+(aiTotal ? 'AI '+aiTotal+'頭' : '')+(total && aiTotal ? '・ET '+_pct(total, total+aiTotal) : '')+'）' : '')+(dueL.length ? '＋予定'+dueL.reduce((t, c) => t + (c.twin ? 2 : 1), 0)+'頭' : '')+'　'+(sumOpen ? '▲ 閉じる' : '▼ 開く')+'</span></div>';
       const aiHTML = !aiTotal ? '' : '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">'+
         '<div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:6px;">💉 '+thisYear+'年 人工授精（AI）産仔</div>'+
         '<div style="display:flex;gap:16px;font-size:13px;">'+
@@ -15975,8 +16006,22 @@ function calfBirthSummaryHTML(thisYear, RR, OK) {
           '<span style="color:var(--muted);">♂ '+allM+'頭　♀ '+allF+'頭</span></div>'+
         '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin-top:4px;">'+
           BR.map(([key,label,col]) => { const n = allC.filter(c => breedOf(c) === key).length; return n ? '<span><span style="color:'+col+';font-weight:700;">'+label+'</span> <strong>'+n+'頭</strong>（ET '+etCalvesThisYear.filter(c => breedOf(c) === key).length+'・AI '+aiCalvesThisYear.filter(c => breedOf(c) === key).length+'）</span>' : ''; }).join('')+
-        '</div></div>';
-      return sumOpen ? head + totHTML + etHTML + aiHTML : head;
+        '</div>'+ratioBar(total, aiTotal, 'もう生まれた子牛のうち')+'</div>';
+      // ★ 2026/11/23：これから生まれる予定（お産予定の牛）のET・AI
+      const nD = c => c.twin ? 2 : 1;
+      const dueEt = dueL.filter(_dueIsET), dueAi = dueL.filter(c => !_dueIsET(c));
+      const dEt = dueEt.reduce((t, c) => t + nD(c), 0), dAi = dueAi.reduce((t, c) => t + nD(c), 0);
+      const DBR = [['褐毛','🟥 褐毛和種','#f87171'],['黒毛','⬛ 黒毛和種','#e2e8f0'],['F1','F1','var(--text)'],['不明','❔ 品種不明','var(--muted)']];
+      const dueHTML = !dueL.length ? '' : '<div style="margin-top:10px;background:var(--bg2);border:1px dashed var(--purple);border-radius:8px;padding:8px 10px;">'+
+        '<div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;font-size:13px;">'+
+          '<span style="font-weight:700;">これから生まれる予定</span>'+
+          '<strong style="color:var(--text);font-size:18px;">'+(dEt + dAi)+'頭</strong>'+
+          '<span style="color:var(--muted);">ET '+dEt+'頭・AI '+dAi+'頭</span></div>'+
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin-top:4px;">'+
+          DBR.map(([key,label,col]) => { const L = dueL.filter(c => dueCalfBreed(c) === key); if (!L.length) return ''; const e = L.filter(_dueIsET).reduce((t, c) => t + nD(c), 0), n = L.reduce((t, c) => t + nD(c), 0); return '<span><span style="color:'+col+';font-weight:700;">'+label+'</span> <strong>'+n+'頭</strong>（ET '+e+'・AI '+(n - e)+'）</span>'; }).join('')+
+        '</div>'+ratioBar(dEt, dAi, '生まれる予定のうち')+'</div>'+
+        '<div style="margin-top:8px;font-size:12px;color:var(--muted);text-align:right;">'+thisYear+'年 全部（生まれた＋予定）'+(allC.length + dEt + dAi)+'頭のうち ET <strong style="color:var(--purple);font-size:14px;">'+_pct(total + dEt, allC.length + dEt + dAi)+'</strong>（'+(total + dEt)+'頭）</div>';
+      return sumOpen ? head + totHTML + dueHTML + etHTML + aiHTML : head;
 }
 // 保留（繁殖候補）の内訳：品種ごとに ET産仔・AI産仔・ゲノミックの判定
 function _calfBreedOf(c) {
@@ -27085,23 +27130,23 @@ function renderCalves() {
   const candYearSel = document.getElementById('calf-cand-year');
   // 長島さん用（features.calfYear）：繁殖候補だけでなく子牛全部を生まれた年度で絞る。開いたときは今年度
   if (candYearSel && window.FARM_FEAT && FARM_FEAT.calfYear) {
-    const fy = dob => { if(!dob) return null; const d=new Date(dob+'T00:00:00'); const y=d.getFullYear(); return (d.getMonth()>=3?y:y-1)-2018; };
+    const fy = dob => { if(!dob) return null; return parseInt(String(dob).slice(0,4)) - 2018; };   // ★ 2026/11/23：年度は1月始まり（2026年＝R8）
     const curFy = fy(todayStr);
     const lb = document.getElementById('calf-cand-year-label'); if (lb) lb.textContent = '📅 生まれた年度で絞る:';
     const yrs = [...new Set([curFy, ...calves.map(c=>fy(c.dob)).filter(v=>v!=null)])].sort((a,b)=>b-a);
     const cur = window._calfYearInit ? (candYearSel.value || 'all') : 'R' + curFy;
     window._calfYearInit = true;
-    candYearSel.innerHTML = '<option value="all">全年度</option>' + yrs.map(y=>`<option value="R${y}">R${y}（${y+2018}年4月〜）生まれ${y===curFy?'・今年度':''}</option>`).join('');
+    candYearSel.innerHTML = '<option value="all">全年度</option>' + yrs.map(y=>`<option value="R${y}">R${y}（${y+2018}年1〜12月）生まれ${y===curFy?'・今年':''}</option>`).join('');
     candYearSel.value = yrs.map(y=>'R'+y).includes(cur) ? cur : 'all';
     if (candYearSel.value !== 'all') {
       const targetFy = parseInt(candYearSel.value.replace('R',''));
       filtered = filtered.filter(c => fy(c.dob)===targetFy);
     }
   } else if (candYearSel) {
-    const fy = dob => { if(!dob) return null; const d=new Date(dob+'T00:00:00'); const y=d.getFullYear(); return (d.getMonth()>=3?y:y-1)-2018; };
+    const fy = dob => { if(!dob) return null; return parseInt(String(dob).slice(0,4)) - 2018; };   // ★ 2026/11/23：年度は1月始まり（2026年＝R8）
     const yrs = [...new Set(calves.filter(c=>c.status==='kept'||c.isBreedingCandidate).map(c=>fy(c.dob)).filter(v=>v!=null))].sort((a,b)=>b-a);
     const cur = candYearSel.value || 'all';
-    candYearSel.innerHTML = '<option value="all">全年度</option>' + yrs.map(y=>`<option value="R${y}">R${y}（${y+2018}年度）生まれ</option>`).join('');
+    candYearSel.innerHTML = '<option value="all">全年度</option>' + yrs.map(y=>`<option value="R${y}">R${y}（${y+2018}年）生まれ</option>`).join('');
     candYearSel.value = yrs.map(y=>'R'+y).includes(cur) ? cur : 'all';
     // 年度が指定されたら、繁殖候補のうちその年度生まれだけに絞る
     if (candYearSel.value !== 'all') {
@@ -27847,7 +27892,7 @@ function goToInsemBookForCalves() {
   // 授精日から年度を特定
   const firstDate = targets[0].insemDate;
   const d = new Date(firstDate);
-  const fy = d.getMonth() >= 3 ? d.getFullYear() - 2018 : d.getFullYear() - 2019;
+  const fy = d.getFullYear() - 2018;   // 授精簿の年度は1月始まり
   const yearStr = 'R' + fy;
 
   // ハイライト対象を記録
@@ -34904,7 +34949,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112306';
+const APP_BUILD = '2026112307';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
