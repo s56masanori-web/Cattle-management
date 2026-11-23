@@ -640,42 +640,6 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
 /* ===== スマホ版（430px以下）採卵モーダル・授精簿 ===== */
 @media (max-width: 430px) {
 
-  /* 採卵モーダル：テーブルを横スクロールで表示（PCと同じレイアウト） */
-  #col-frozen-tbody-wrap,
-  #col-fresh-tbody-wrap,
-  #col-culture-tbody-wrap { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
-
-  #col-frozen-tbody-wrap table,
-  #col-fresh-tbody-wrap table,
-  #col-culture-tbody-wrap table { min-width: 600px; font-size: 11px; }
-
-  #col-frozen-tbody-wrap thead,
-  #col-fresh-tbody-wrap thead,
-  #col-culture-tbody-wrap thead { display: table-header-group !important; }
-
-  #col-frozen-tbody tr,
-  #col-fresh-tbody tr,
-  #col-culture-tbody tr { display: table-row !important; background: unset !important; border: none !important; border-radius: 0 !important; margin-bottom: 0 !important; padding: 0 !important; }
-
-  #col-frozen-tbody td,
-  #col-fresh-tbody td,
-  #col-culture-tbody td { display: table-cell !important; padding: 4px 3px !important; border: 1px solid var(--border) !important; }
-
-  #col-frozen-tbody .cf-no,
-  #col-frozen-tbody .cf-cane { width: auto !important; font-size: 11px !important; padding: 3px !important; }
-  #col-frozen-tbody .cf-stage,
-  #col-frozen-tbody .cf-rank { display: table-cell !important; width: auto !important; font-size: 11px !important; padding: 3px !important; }
-  #col-frozen-tbody .cf-comment { width: auto !important; font-size: 11px !important; padding: 3px !important; }
-
-  #col-culture-tbody .cul-embryo-no,
-  #col-culture-tbody .cul-cane-no { width: auto !important; font-size: 11px !important; padding: 3px !important; }
-  #col-culture-tbody .cul-stage,
-  #col-culture-tbody .cul-rank,
-  #col-culture-tbody .cul-next-stage,
-  #col-culture-tbody .cul-next-rank { display: table-cell !important; width: auto !important; font-size: 11px !important; padding: 3px !important; }
-  #col-culture-tbody .cul-action { width: auto !important; font-size: 11px !important; padding: 3px !important; }
-  #col-culture-tbody .cul-recip-search { width: 80px !important; font-size: 11px !important; padding: 3px !important; }
-
   /* 授精簿：行をタップで展開するためのスタイル */
   .insem-row-header {
     display: flex !important;
@@ -687,6 +651,59 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
     border-bottom: 1px solid var(--border);
   }
   .insem-row-detail { padding: 8px 10px; }
+}
+/* ★ 2026/11/23：スマホの採卵記録：胚1個＝1行（胚番号・ステージ・ランク）。ケーン・メモ・移植先は「›」で開く。上に「まとめて入れる」 */
+@media (max-width:720px){
+ #modal-collection .modal{padding:12px 10px 20px;}
+ #modal-collection input, #modal-collection select{font-size:16px!important;min-height:42px;}
+ #modal-collection .form-group label{font-size:12px!important;}
+ #modal-collection [style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important;}
+ #modal-collection [style*="grid-template-columns:repeat(4,1fr)"]{grid-template-columns:repeat(3,1fr)!important;gap:8px!important;}
+ #modal-collection [style*="grid-template-columns:repeat(4,1fr)"] input{text-align:center;font-weight:700;}
+ #col-embryo-outer{overflow:visible!important;}
+ #col-embryo-outer>div{width:auto!important;}
+ #col-embryo-outer table, #col-embryo-outer tbody{display:block;width:100%;}
+ #col-embryo-outer thead, #col-embryo-outer colgroup{display:none!important;}
+ #col-embryo-outer tbody tr{display:grid!important;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:6px;padding:6px 6px!important;border:none!important;border-bottom:1px solid var(--bg)!important;}
+ #col-embryo-outer tbody tr:nth-child(odd){background:var(--bg2)!important;} #col-embryo-outer tbody tr:nth-child(even){background:var(--bg3)!important;}
+ #col-embryo-outer tbody td{display:none;padding:0!important;background:none!important;opacity:1!important;border:none!important;text-align:left!important;position:relative;}
+ #col-embryo-outer tbody td:first-child{display:block;font-size:11px!important;color:var(--muted)!important;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+ #col-embryo-outer tbody td:first-child .colrc{white-space:normal;}
+ #col-embryo-outer tbody td:nth-child(4), #col-embryo-outer tbody td:nth-child(5){display:block;}
+ .colno{display:inline;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);margin-left:4px;letter-spacing:-.2px;}
+ .colrc{display:block;font-size:11px;color:var(--accent);margin-top:2px;}
+ #col-embryo-outer tbody tr.open td:not(:first-child):has(input,select,button){display:block;grid-column:1/-1;}
+ #col-embryo-outer tbody tr.open td{order:2;}
+ #col-embryo-outer tbody tr.open td:first-child, #col-embryo-outer tbody tr.open td:nth-child(4), #col-embryo-outer tbody tr.open td:nth-child(5){order:1;grid-column:auto!important;}
+ #col-embryo-outer tbody tr.open{padding-bottom:10px!important;}
+ #col-embryo-outer tbody tr.open td::before{display:block;font-size:11px;color:var(--muted);margin:4px 0 3px;}
+ #col-embryo-outer tbody tr.open td:nth-child(2)::before{content:'胚番号';}
+ #col-embryo-outer tbody tr.open td:nth-child(3)::before{content:'ケーン番号';}
+ #col-embryo-outer tbody tr.open td:nth-child(6)::before{content:'ステージ（翌日）';color:var(--purple);}
+ #col-embryo-outer tbody tr.open td:nth-child(7)::before{content:'ランク（翌日）';color:var(--purple);}
+ #col-fresh-tbody tr.open td:nth-child(8)::before, #col-frozen-tbody tr.open td:nth-child(8)::before{content:'メモ';}
+ #col-culture-tbody tr.open td:nth-child(8)::before{content:'処置';}
+ #col-embryo-outer tbody tr.open td:nth-child(9)::before{content:'移植先（受卵牛）';}
+ #col-embryo-outer tbody td input[type=text]{width:100%!important;box-sizing:border-box;font-size:16px!important;padding:8px 10px!important;border-radius:8px!important;}
+ #col-embryo-outer tbody td select{width:100%!important;}
+ #col-embryo-outer tbody td:nth-child(10) button{width:100%;min-height:38px;font-size:13px!important;}
+ .colseg{display:flex;gap:2px;}
+ .colseg button{min-width:29px;height:34px;padding:0 2px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);font-size:12px;font-weight:800;font-family:inherit;cursor:pointer;}
+ .colseg button.on{border-color:#22c55e;background:#14532d;color:#4ade80;}
+ select.colseg-src{display:none!important;}
+ #col-embryo-outer tbody td:nth-child(5){display:flex!important;align-items:center;gap:4px;}
+ .colmore{width:28px;height:34px;border:none;background:none;color:var(--muted);font-size:20px;font-weight:900;cursor:pointer;padding:0;}
+ .colmore.has{color:#60a5fa;} tr.open .colmore{transform:rotate(90deg);}
+ .colcnt{display:flex;align-items:center;gap:6px;}
+ .colcnt button{width:42px;height:40px;border-radius:10px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:22px;font-weight:900;cursor:pointer;}
+ .colcnt input{width:56px!important;text-align:center;font-size:18px!important;font-weight:900;}
+ .colbulk{background:rgba(56,189,248,.06);border:1px dashed var(--info);border-radius:8px;padding:8px;margin:0 0 8px;}
+ .colbulk .t{font-size:12px;color:var(--info);font-weight:700;margin-bottom:6px;}
+ .colbulk .colseg button{flex:1;height:40px;font-size:14px;}
+ .colbulk input{width:100%;box-sizing:border-box;margin-top:6px;border-radius:8px;}
+ .colbulk .go{width:100%;margin-top:6px;height:42px;border:none;border-radius:8px;background:#0369a1;color:#fff;font-weight:900;font-size:14px;font-family:inherit;cursor:pointer;}
+ .colbulk .go:disabled{opacity:.45;}
+ .colbulk .sm{font-size:11px;color:var(--muted);margin-top:6px;}
 }
 </style>
 </head>
@@ -3834,6 +3851,23 @@ function stampDonorFlags() {
 // 採卵記録を保存したときに外れてしまっていたドナー授精の印を、採卵記録の授精日から1回だけ付け直す（採卵後PGなしの記録は除く）
 // ★ 2026/11/21b：前の「🔧 重なっている記録を1つにして」が、もどってきた胚（25J16B1 の 01L237R7-0042：12/2 ジェネティクス北海道へ→12/3 もどり→1/18 r1 にTBSが移植）
 //   の正しい移植の記録を消してしまい、在庫が1本ふえていた。消えた記録を1回だけ戻して、在庫を数え直す
+// ★ 2026/11/23：「📤 農家に渡す」から取り込んだ移植の行は、胚番号が種雄牛の欄に、「ドナー×種雄牛」がメモに入っていた。
+//   手で入れた移植の行と同じ形（種雄牛の欄＝ドナー×種雄牛、番号の欄＝胚番号）に1回だけ並べ直す
+function repairEtShareRowsOnce() {
+  if (typeof farmTargets === 'undefined' || farmTargets._fixEtShare) return false;
+  farmTargets._fixEtShare = true;
+  (insemBookRecords || []).forEach(r => {
+    if (!r || !r.fromVet || r.insemType !== 'et' || r.n) return;
+    if (!/^[0-9A-Z]{2,}[0-9A-Za-z]*-\d+$/.test(String(r.s || ''))) return;
+    const parts = String(r.m || '').split('／');
+    const i = parts.findIndex(x => /×/.test(x)); if (i < 0) return;
+    const nm = parts.splice(i, 1)[0];
+    r.n = r.s; r.s = nm;
+    r.m = parts.map(x => /^🌱新鮮$|^❄️?凍結$/.test(x) ? x + '胚' : x).filter(Boolean).join('／');
+    r._mt = Date.now();
+  });
+  return true;
+}
 function repairEmb0042Once() {
   if (typeof farmTargets === 'undefined' || farmTargets._embFix0042) return false;
   const e = (typeof embryoInventory !== 'undefined' ? embryoInventory : []).find(x => x.lot === '25J16B1' && x.type === 'frozen' && (x.history || []).some(h => /ジェネティクス北海道より/.test(h.memo || '')));
@@ -4438,6 +4472,7 @@ function initApp() {
   syncAbortionRecords();
   try { if (repairDonorFlagsOnce()) save(); } catch (e) { console.error('repairDonorFlags', e); }
   try { if (repairEmb0042Once()) save(); } catch (e) { console.error('repairEmb0042', e); }
+  try { if (repairEtShareRowsOnce()) save(); } catch (e) { console.error('repairEtShare', e); }
   try { if (typeof fillPromotedCowDam === 'function' && fillPromotedCowDam()) save(); } catch (e) { console.error('fillPromotedCowDam', e); }
   try { reconcileCows(null); } catch (e) { console.error('reconcile', e); }
   try { initCalfCertIssuedOnce(); } catch (e) {}
@@ -12677,7 +12712,7 @@ function importEtShare(text) {
       // 前からある行に、新鮮/凍結・胚番号・結果が無ければ足す（新鮮胚・凍結胚の受胎率を出すのに使う）
       const typ0 = /新鮮/.test(x.type) ? '🌱新鮮' : /凍結/.test(x.type) ? '❄凍結' : '';
       if (typ0 && !/新鮮|凍結/.test(String(same.s || '') + String(same.m || ''))) { same.m = [typ0, same.m].filter(Boolean).join('／'); fixed = true; }
-      if (x.no && same.s !== x.no && !String(same.m || '').includes(x.no)) {
+      if (x.no && same.s !== x.no && same.n !== x.no && !String(same.m || '').includes(x.no)) {
         const first = !String(same.m || '').includes('胚番号:') && !/^[0-9A-Za-z][0-9A-Za-z\-]+$/.test(String(same.s || ''));
         same.m = [same.m, first ? `胚番号:${x.no}` : `2個移植：${x.no}`].filter(Boolean).join('／'); fixed = true;
       }
@@ -12687,8 +12722,10 @@ function importEtShare(text) {
     }
     const fy = (() => { const dt = new Date(x.d + 'T00:00:00'); return 'R' + ((dt.getMonth() >= 3 ? dt.getFullYear() : dt.getFullYear() - 1) - 2018); })();
     const typ = /新鮮/.test(x.type) ? '🌱新鮮' : /凍結/.test(x.type) ? '❄凍結' : '';
-    insemBookRecords.push({ d: x.d, t: cow.id, c: `${cow.nationalId || x.nid}[${cow.name || x.name || ''}]`, s: x.no || '', n: '', q: '', op: x.vet || '',
-      m: [typ, (x.donor || x.sire) ? `${x.donor || '?'}×${x.sire || '?'}` : '', [x.stage, x.rank].filter(Boolean).join(' ')].filter(Boolean).join('／'),
+    // ★ 2026/11/23：手で入れた移植の行と同じ形にそろえる（種雄牛の欄＝「ドナー×種雄牛」、番号の欄＝胚番号、メモ＝新鮮/凍結・ステージ）
+    const nm = (x.donor || x.sire) ? `${x.donor || '?'}×${x.sire || '?'}` : '';
+    insemBookRecords.push({ d: x.d, t: cow.id, c: `${cow.nationalId || x.nid}[${cow.name || x.name || ''}]`, s: nm || x.no || '', n: nm ? (x.no || '') : '', q: '', op: x.vet || '',
+      m: [typ ? typ + '胚' : '', [x.stage, x.rank].filter(Boolean).join(' ')].filter(Boolean).join('／'),
       y: fy, _new: true, donorAI: false, insemType: 'et',
       pregResult: x.preg === '+' ? 'positive' : x.preg === '-' ? 'negative' : null, fromVet: true });
     add++;
@@ -21413,6 +21450,97 @@ function onColFrozenCountInput(val, existing) {
   syncEmbryoGrades();
 }
 
+// ★ 2026/11/23：スマホの採卵記録（胚1個＝1行・「›」で開く・まとめて入れる）。PCでは何もしない
+(function(){
+  const KIND = { 'col-fresh-tbody': { st: '.cfr-stage', rk: '.cfr-rank', no: '.cfr-embryo-no', cane: null, more: ['.cfr-comment', '.cfr-recipient'], rc: '.cfr-recip-search', rcId: '.cfr-recipient' },
+                 'col-frozen-tbody': { st: '.cf-stage', rk: '.cf-rank', no: '.cf-no', cane: '.cf-cane', more: ['.cf-cane', '.cf-comment'] },
+                 'col-culture-tbody': { st: '.cul-stage', rk: '.cul-rank', no: '.cul-embryo-no', cane: '.cul-cane-no', more: ['.cul-cane-no', '.cul-action', '.cul-recipient'], rc: '.cul-recip-search', rcId: '.cul-recipient' } };
+  const BULK = {};
+  function seg(sel, cb){
+    const opts=[...sel.options].filter(o=>o.value!=='');
+    if (!opts.length || opts.length>6) return null;
+    const box=document.createElement('div'); box.className='colseg';
+    const draw=()=>{ box.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.v===sel.value)); };
+    opts.forEach(o=>{ const b=document.createElement('button'); b.type='button'; b.dataset.v=o.value; b.textContent=o.textContent.replace(/（.*）/,'').trim(); b.onclick=()=>{ sel.value = sel.value===o.value ? '' : o.value; sel.dispatchEvent(new Event('change',{bubbles:true})); draw(); cb && cb(); }; box.appendChild(b); });
+    sel.addEventListener('change', draw); draw(); return box;
+  }
+  function enhanceSel(sel){ if (sel.dataset.seg) return; sel.dataset.seg='1'; const box=seg(sel, refreshAll); if (!box) return; sel.classList.add('colseg-src'); sel.parentNode.insertBefore(box, sel); }
+  function cnt(inp){
+    if (!inp || inp.dataset.cnt) return; inp.dataset.cnt='1';
+    const w=document.createElement('span'); w.className='colcnt'; inp.parentNode.insertBefore(w, inp);
+    const mk=(t,d)=>{ const b=document.createElement('button'); b.type='button'; b.textContent=t; b.onclick=()=>{ inp.value=Math.max(0,(parseInt(inp.value)||0)+d); inp.dispatchEvent(new Event('input',{bubbles:true})); inp.dispatchEvent(new Event('change',{bubbles:true})); }; return b; };
+    w.appendChild(mk('−',-1)); w.appendChild(inp); w.appendChild(mk('＋',1));
+  }
+  function rowInfo(tr, K){
+    const td1=tr.firstElementChild; if (!td1) return;
+    let no=td1.querySelector('.colno'); if (!no){ no=document.createElement('span'); no.className='colno'; td1.appendChild(no); }
+    const ni=tr.querySelector(K.no); let nv=(ni && ni.value) || ''; if (nv.length > 10) nv = '…' + nv.slice(-7); if (no.textContent !== nv) no.textContent = nv;   // 長い番号は後ろ（区別できるところ）を見せる。同じなら書かない（書くと見張りがまた動いて止まらなくなる）
+    let rc=td1.querySelector('.colrc');
+    const rcv = K.rc && tr.querySelector(K.rcId) && tr.querySelector(K.rcId).value ? (tr.querySelector(K.rc).value || '') : '';
+    if (rcv) { if (!rc){ rc=document.createElement('span'); rc.className='colrc'; td1.appendChild(rc); } if (rc.textContent !== '→ '+rcv) rc.textContent='→ '+rcv; } else if (rc) rc.remove();
+    const has = K.more.some(c => { const e=tr.querySelector(c); return e && String(e.value||'').trim(); });
+    const mb=tr.querySelector('.colmore'); if (mb) mb.classList.toggle('has', !!has);
+  }
+  function enhanceRow(tr, K){
+    tr.querySelectorAll('select').forEach(enhanceSel);
+    const td5=tr.children[4];
+    if (td5 && !td5.querySelector('.colmore')){ const b=document.createElement('button'); b.type='button'; b.className='colmore'; b.textContent='›'; b.setAttribute('aria-label','くわしく'); b.onclick=()=>{ tr.classList.toggle('open'); }; td5.appendChild(b); }
+    rowInfo(tr, K);
+  }
+  function bulk(id, K){
+    const tb=document.getElementById(id); if (!tb) return;
+    const wrap=tb.closest('[id$="-tbody-wrap"]'); if (!wrap) return;
+    let box=wrap.querySelector('.colbulk');
+    if (!box){
+      box=document.createElement('div'); box.className='colbulk';
+      const st=document.createElement('select'), rk=document.createElement('select');
+      const s0=tb.querySelector(K.st), r0=tb.querySelector(K.rk);
+      if (!s0 || !r0) return;
+      st.innerHTML=s0.innerHTML; rk.innerHTML=r0.innerHTML; st.value=''; rk.value='';
+      const t=document.createElement('div'); t.className='t'; box.appendChild(t);
+      const line=document.createElement('div'); line.style.cssText='display:flex;gap:8px;';
+      const sb=seg(st, ()=>upd()), rb=seg(rk, ()=>upd()); sb.style.flex='4'; rb.style.flex='2';
+      line.appendChild(sb); line.appendChild(rb); box.appendChild(line);
+      let cane=null; if (K.cane){ cane=document.createElement('input'); cane.type='text'; cane.placeholder='ケーン番号（空いている胚だけに入ります）'; cane.oninput=()=>upd(); box.appendChild(cane); }
+      const go=document.createElement('button'); go.type='button'; go.className='go'; box.appendChild(go);
+      const sm=document.createElement('div'); sm.className='sm'; box.appendChild(sm);
+      const todo=()=>[...tb.querySelectorAll('tr')].filter(tr=>{ const a=tr.querySelector(K.st), b=tr.querySelector(K.rk); return a && b && !a.value && !b.value; });
+      const upd=()=>{
+        const n=todo().length; t.textContent=`まとめて入れる（まだの胚 ${n}個）`;
+        go.textContent = n ? `まだの ${n}個 に入れる` : 'まだの胚はありません';
+        go.disabled = !n || (!st.value && !rk.value && !(cane && cane.value.trim()));
+        const c={}; let rest=0; tb.querySelectorAll('tr').forEach(tr=>{ const a=tr.querySelector(K.st)?.value, b=tr.querySelector(K.rk)?.value; if (!a && !b) rest++; else { const k=(a||'—')+'/'+(b||'—'); c[k]=(c[k]||0)+1; } });
+        sm.textContent='いま：'+[...Object.entries(c).map(([k,v])=>k+' '+v+'個'), rest?('まだ '+rest+'個'):''].filter(Boolean).join('・');
+      };
+      go.onclick=()=>{
+        todo().forEach(tr=>{
+          if (st.value){ const e=tr.querySelector(K.st); e.value=st.value; e.dispatchEvent(new Event('change',{bubbles:true})); }
+          if (rk.value){ const e=tr.querySelector(K.rk); e.value=rk.value; e.dispatchEvent(new Event('change',{bubbles:true})); }
+          if (cane && cane.value.trim()){ const e=tr.querySelector(K.cane); if (e && !e.value.trim()){ e.value=cane.value.trim(); e.dispatchEvent(new Event('input',{bubbles:true})); } }
+        });
+        try { syncEmbryoGrades(); } catch(e){}
+        refreshAll();
+      };
+      BULK[id]=upd; wrap.insertBefore(box, wrap.firstChild);
+    }
+    BULK[id] && BULK[id]();
+  }
+  function refreshAll(){
+    Object.entries(KIND).forEach(([id,K])=>{ const tb=document.getElementById(id); if (!tb) return; tb.querySelectorAll('tr').forEach(tr=>rowInfo(tr,K)); BULK[id] && BULK[id](); });
+  }
+  function run(){
+    if (window.innerWidth>720) return;
+    Object.entries(KIND).forEach(([id,K])=>{ const tb=document.getElementById(id); if (!tb) return; tb.querySelectorAll('tr').forEach(tr=>enhanceRow(tr,K)); if (tb.querySelector('tr')) bulk(id,K); });
+    ['col-fresh-count','col-frozen-count','col-culture-count'].forEach(id=>cnt(document.getElementById(id)));
+  }
+  window._colMobile=run;
+  let busy=false;
+  const init=()=>{ const root=document.getElementById('col-embryo-outer'); if (root && !root.dataset.mob) { root.dataset.mob='1';
+      new MutationObserver(()=>{ if (busy) return; busy=true; requestAnimationFrame(()=>{ run(); busy=false; }); }).observe(root,{childList:true,subtree:true});
+      root.addEventListener('input', ()=>setTimeout(refreshAll,30)); root.addEventListener('click', ()=>setTimeout(refreshAll,60)); }
+    run(); };
+  if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
 function onColFreshCountInput(val, existing) {
   const n = parseInt(val)||0;
   const wrap = document.getElementById('col-fresh-tbody-wrap');
@@ -24755,7 +24883,7 @@ function buildEtCertHTML(r, certNo) {
         var count = ai.count || 1;
         var found = allBookRecs2.filter(function(rd){return rd.t===donorId2&&rd.d===ai.date;});
         return found.slice(0, count).map(function(f){
-          var ek=f._src+'_'+f._idx;var ed3=insemBookEdits[ek]||{};return ed3.n||f.n||f.q||'';
+          var ek=f._src+'_'+f._idx;var ed3=insemBookEdits[ek]||{};return ed3.n||f.n||'';   // ★ 2026/11/23：精液証明書番号は n だけ（q は授精証明書番号なので入れない）
         });
       }).reduce(function(a,b){return a.concat(b);},[]).filter(Boolean);
       semenCertNoFromCol = certNos.join('、');
@@ -34617,7 +34745,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112210';
+const APP_BUILD = '2026112303';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
