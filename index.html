@@ -108,6 +108,8 @@
       c.preg = { ai: [...new Set(a)].sort((x, y) => x - y), et: [...new Set(e)].sort((x, y) => x - y) };
     }
     ['market', 'marketMonths', 'breeds', 'carryIn', 'otherFarms'].forEach(k => { if (s[k] !== undefined) c[k] = s[k]; });
+    if (has('fattenMonths') && +s.fattenMonths > 0) c.fattenMonths = +s.fattenMonths;
+    if ('shipK1' in s || 'shipA1' in s || 'shipF1' in s) { const st = {}; [['黒毛', 'shipK1', 'shipK2'], ['褐毛', 'shipA1', 'shipA2'], ['F1', 'shipF1', 'shipF2']].forEach(([b, x, y]) => { if (+s[x] > 0) st[b] = [+s[x], +s[y] > 0 ? +s[y] : +s[x]]; }); c.shipTarget = st; }
     return c;
   };
   try { const _fs = JSON.parse(localStorage.getItem('farmSettings') || 'null'); if (_fs && _fs.v) cfg = window._applyFarmSettings(cfg, _fs); } catch (e) { console.error('farmSettings', e); }
@@ -144,6 +146,10 @@
 <style>html.no-extinsem div:has(> #ibsub-ext) { display: none !important; }
 html body:not(.is-home) #barn-board.home-only { display: none !important; }
 html.hx-collection #gnav-collection { display: none !important; }
+html.hx-fattening .nui-fatbtn { display: none !important; }
+#page-calves.fatmode > *:not(.nui-cowbar):not(#fattab-list) { display: none !important; }
+#page-calves:not(.fatmode) #fattab-list { display: none !important; }
+.nui-cowbar .tg button.nui-fatbtn.on, #page-calves.fatmode .nui-cowbar .tg button[data-k="fat"] { background:#7c2d12; color:#fdba74; }
 html.hx-fattening #gnav-fattening, html.hx-fattening #nui-side [data-p="fattening"], html.hx-fattening #page-more [data-p="fattening"] { display: none !important; }
 .ib-preg-m { display: flex !important; justify-content: flex-end; }
 html.hx-syncCol #insembook-table th:nth-child(9), html.hx-syncCol #insembook-tbody td:nth-child(9), html.hx-syncCol #ib-sync-all-btn { display: none !important; }
@@ -27447,7 +27453,79 @@ function printCalvesList(){
   if (iframe.contentWindow.document.readyState === 'complete') setTimeout(doPrint, 300);
   else { iframe.onload = () => setTimeout(doPrint, 300); setTimeout(doPrint, 800); }
 }
+// ===== ★ 2026/11/24：🥩 肥育タブ（◯か月齢になった子牛は「肥育」へ。保留（繁殖候補）の雌はのぞく） =====
+function _ageMonths(dob, at) {
+  const a = String(dob || '').slice(0, 10), b = String(at || today()).slice(0, 10); if (!a || !b) return 0;
+  const [y1, m1, d1] = a.split('-').map(Number), [y2, m2, d2] = b.split('-').map(Number);
+  return (y2 - y1) * 12 + (m2 - m1) - (d2 < d1 ? 1 : 0);
+}
+function _fatMonths() { return (window.FARM_CFG && +FARM_CFG.fattenMonths > 0) ? +FARM_CFG.fattenMonths : 13; }
+function _fatOn() { return !document.documentElement.classList.contains('hx-fattening'); }
+const _SHIP_DEF = { 黒毛: [28, 30], 褐毛: [23, 25] };
+function _shipTarget(breed) {
+  const T = (window.FARM_CFG && FARM_CFG.shipTarget) || _SHIP_DEF;
+  const k = /黒/.test(breed || '') ? '黒毛' : /褐|赤/.test(breed || '') ? '褐毛' : /F1|交雑|乳/.test(breed || '') ? 'F1' : '';
+  const r = k && T[k]; return Array.isArray(r) && +r[0] > 0 ? [+r[0], +(r[1] || r[0])] : null;
+}
+let _fatShippedNids = null, _fatShippedAt = 0;
+function _calfGone(c) {
+  if (c.deathDate || c.status === 'dead' || c.shipDate || (c.moves || []).some(m => m.to === '出荷')) return true;
+  if (!_fatShippedNids || Date.now() - _fatShippedAt > 5000) {   // 枝肉成績（出荷した記録）にある牛も出荷済み
+    _fatShippedNids = new Set((typeof fatteningRecords !== 'undefined' ? fatteningRecords : []).map(r => String(r.nationalId || '').replace(/\D/g, '')).filter(Boolean)); _fatShippedAt = Date.now(); }
+  const n = String(c.nationalId || '').replace(/\D/g, ''); return !!(n && _fatShippedNids.has(n));
+}
+function _isFatCalf(c) {
+  return _fatOn() && c && c.dob && !(c.status === 'kept' || c.isBreedingCandidate) && !_calfGone(c) && _ageMonths(c.dob, today()) >= _fatMonths();
+}
+window._fatF = window._fatF || { sex: 'all', sort: 'old' };
+function _fatModeApply() {
+  const pg = document.getElementById('page-calves'); if (!pg) return;
+  const on = !!window._calfFat && _fatOn();
+  pg.classList.toggle('fatmode', on);
+  pg.querySelectorAll('.nui-cowbar .tg button').forEach(b => { const k = b.dataset.k; if (k) b.classList.toggle('on', on ? k === 'fat' : k === 'calves'); });
+  let box = document.getElementById('fattab-list');
+  if (on) {
+    if (!box) { box = document.createElement('div'); box.id = 'fattab-list'; const bar = pg.querySelector('.nui-cowbar'); pg.insertBefore(box, bar ? bar.nextSibling : pg.firstChild); }
+    renderFatList();
+  }
+}
+function setFatF(k, v) { window._fatF[k] = v; renderFatList(); }
+function renderFatList() {
+  const box = document.getElementById('fattab-list'); if (!box) return;
+  const T = today(), M = _fatMonths();
+  const q = (document.getElementById('calf-search')?.value || '').trim().replace(/[-\s]/g, '');
+  const all = calves.filter(_isFatCalf);
+  const sx = c => (typeof calfSexMark === 'function' ? calfSexMark(c) : (c.sex === '雄' ? '♂' : '♀'));
+  const isM = c => c.sex === '雄', isF = c => c.sex === '雌';
+  let L = all.filter(c => _fatF.sex === 'all' || (_fatF.sex === 'm' ? isM(c) : isF(c)));
+  if (q) L = L.filter(c => cowQueryMatch(q, { id: c.earTagId, name: c.name, nationalId: c.nationalId }));
+  L.sort((a, b) => _fatF.sort === 'old' ? String(a.dob).localeCompare(String(b.dob)) : String(b.dob).localeCompare(String(a.dob)));
+  const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const nM = all.filter(isM).length, nF = all.filter(isF).length;
+  const mLab = all.some(c => isM(c) && sx(c) === '去勢') ? '♂ 去勢・雄' : '♂ 雄';
+  const chip = (k, v, l) => `<button class="nui-chip ${_fatF[k] === v ? 'on' : ''}" style="font-size:12px;padding:5px 11px;${_fatF[k] === v ? 'border-color:#fb923c;color:#fb923c;font-weight:700;' : ''}" onclick="setFatF('${k}','${v}')">${l}</button>`;
+  const row = c => {
+    const mo = _ageMonths(c.dob, T), st = _shipTarget(c.breed), dam = c.damId ? `${c.damId} ${cowDisplayName(c.damId) || ''}`.trim() : '';
+    let ship = '';
+    if (st) { const [lo, hi] = st; ship = mo < lo ? `出荷の目安 ${lo === hi ? lo : lo + '〜' + hi}か月（あと${lo - mo === hi - mo ? lo - mo : (lo - mo) + '〜' + (hi - mo)}か月）` : mo <= hi ? `<span style="color:#fbbf24;">🚚 出荷の目安の月齢です（${lo === hi ? lo : lo + '〜' + hi}か月）</span>` : `<span style="color:#f87171;">⚠ 出荷の目安（${hi}か月）を${mo - hi}か月こえています</span>`; }
+    const just = mo === M ? `<div style="font-size:11.5px;color:#4ade80;margin-top:2px;">✨ 今月から肥育に入りました</div>` : '';
+    let loc = ''; try { loc = calfLocation(c); } catch (e) {}
+    return `<div class="nui-card" style="padding:10px 12px;margin-bottom:8px;cursor:pointer;" onclick="showCalfStory('${E(c.id)}')">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;">
+        <span style="min-width:0;"><span class="nui-mono" style="font-weight:700;">${E(c.earTagId || '耳標なし')}</span> <span style="color:#4ade80;">${E(c.name || '')}</span>
+          <span style="font-size:11px;border:1px solid #475569;border-radius:5px;padding:1px 5px;margin-left:3px;">${E(sx(c))}</span>${c.breed ? `<span style="font-size:11px;border:1px solid #475569;border-radius:5px;padding:1px 5px;margin-left:3px;">${E(c.breed)}</span>` : ''}</span>
+        <span style="color:#fb923c;font-weight:700;white-space:nowrap;">${mo}か月</span></div>
+      <div style="font-size:11.5px;color:#94a3b8;margin-top:3px;">${E(fmtDate(c.dob))}生まれ${dam ? '・母 ' + E(dam) : ''}${c.sire ? '・父 ' + E(c.sire) : ''}${loc ? '・🏠 ' + E(loc) : ''}</div>
+      ${ship ? `<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${ship}</div>` : ''}${just}
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;"><button class="nui-chip" style="font-size:11.5px;padding:4px 10px;" onclick="event.stopPropagation();openMoveDialog('calf','${E(c.id)}','出荷')">🚚 出荷</button><button class="nui-chip" style="font-size:11.5px;padding:4px 10px;" onclick="event.stopPropagation();openMoveDialog('calf','${E(c.id)}')">🏠 移動</button><button class="nui-chip" style="font-size:11.5px;padding:4px 10px;" onclick="event.stopPropagation();recordCalfDeath('${E(c.id)}')">✕ 死亡</button></div></div>`;
+  };
+  box.innerHTML = `<div style="font-size:12px;color:#94a3b8;margin:2px 2px 8px;">${M}か月齢から上の牛　<b style="color:#e2e8f0;font-size:14px;">${all.length}頭</b>（${mLab.replace('♂ ', '')} ${nM}・雌 ${nF}）</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${chip('sex', 'all', '全て ' + all.length)}${chip('sex', 'm', mLab + ' ' + nM)}${chip('sex', 'f', '♀ 雌 ' + nF)}${chip('sort', 'old', '月齢↓ 上から')}${chip('sort', 'young', '月齢↑ 若い順')}</div>
+    ${L.length ? L.map(row).join('') : `<div style="color:#94a3b8;font-size:13px;padding:16px 4px;">${all.length ? '当てはまる牛がいません' : M + 'か月齢になった子牛はまだいません'}</div>`}
+    <div style="font-size:11.5px;color:#64748b;margin:10px 2px;line-height:1.6;">押すとその牛の画面が開きます。出荷・移動・死亡は下のボタンから記録します。<br>「🌟 保留（繁殖候補）」にした雌は、${M}か月をこえても子牛のほうに残ります。</div>`;
+}
 function renderCalves() {
+  try { _fatModeApply(); } catch (e) { console.error('fatMode', e); }
   { const ba = document.getElementById('birth-report-alert'); if (ba && typeof birthReportAlertHTML === 'function') ba.innerHTML = birthReportAlertHTML(); }
   updateCalvesBadge();
   const todayStr = today();
@@ -27456,11 +27534,12 @@ function renderCalves() {
 
   const calfSearchVal = (document.getElementById('calf-search')?.value || '').trim().replace(/[-\s]/g, '');
 
-  let filtered = calves;
-  if (calfFilter === 'pending') filtered = calves.filter(c => c.status === 'active');
-  else if (calfFilter === 'kept') filtered = calves.filter(c => c.status === 'kept' || c.isBreedingCandidate);
-  else if (calfFilter === 'moved') filtered = calves.filter(c => c.status === 'moved');
-  else if (calfFilter === 'certTodo') filtered = calves.filter(calfNeedsCert);
+  const _cbase = calves.filter(c => !_isFatCalf(c));   // ★ 2026/11/24：肥育の月齢になった牛は「🥩 肥育」のほうに出す
+  let filtered = _cbase;
+  if (calfFilter === 'pending') filtered = _cbase.filter(c => c.status === 'active');
+  else if (calfFilter === 'kept') filtered = _cbase.filter(c => c.status === 'kept' || c.isBreedingCandidate);
+  else if (calfFilter === 'moved') filtered = _cbase.filter(c => c.status === 'moved');
+  else if (calfFilter === 'certTodo') filtered = _cbase.filter(calfNeedsCert);
 
   // 繁殖候補の年度セレクタを組み立て（生年の年度＝R◯で分類）
   const candYearSel = document.getElementById('calf-cand-year');
@@ -27508,7 +27587,7 @@ function renderCalves() {
   }
 
   // 移動待ちアラート
-  const overdueCount = calves.filter(c => c.status==='active' && !c.deathDate && c.dob && diffDays(todayStr, c.dob)>=120).length;
+  const overdueCount = _cbase.filter(c => c.status==='active' && !c.deathDate && c.dob && diffDays(todayStr, c.dob)>=120).length;
   const alertEl = document.getElementById('calf-move-alert');
   // ✕で閉じたら、頭数が増えるまで出さない
   let _hid = 0; try { _hid = +localStorage.getItem('_calfMoveAlertHide') || 0; } catch (e) {}
@@ -35287,7 +35366,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112406';
+const APP_BUILD = '2026112407';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -37770,7 +37849,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       const pg = $('page-' + p); if (!pg || pg.querySelector('.nui-cowbar')) return;
       const d = document.createElement('div'); d.className = 'nui-cowbar';
       const isC = p === 'calves';
-      d.innerHTML = `<div class="tg"><button class="${isC ? '' : 'on'}" onclick="switchTab('cows');window.scrollTo(0,0)">🐄 親牛</button><button class="${isC ? 'on' : ''}" onclick="switchTab('calves');window.scrollTo(0,0)">🍼 子牛</button></div>
+      d.innerHTML = `<div class="tg"><button data-k="cows" class="${isC ? '' : 'on'}" onclick="window._calfFat=false;switchTab('cows');window.scrollTo(0,0)">🐄 親牛</button><button data-k="calves" class="${isC ? 'on' : ''}" onclick="window._calfFat=false;switchTab('calves');window.scrollTo(0,0)">🍼 子牛</button><button data-k="fat" class="nui-fatbtn" onclick="window._calfFat=true;switchTab('calves');window.scrollTo(0,0)">🥩 肥育</button></div>
         ${p === 'herd' ? '<span style="flex:1;"></span>' : `<input type="search" placeholder="🔍 耳標・名前でさがす" oninput="nuiCowQ('${p}',this.value)">`}`;
       pg.insertBefore(d, pg.firstChild);
     });
@@ -37778,6 +37857,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   window.nuiCowQ = function (p, v) {
     const el = $(p === 'calves' ? 'calf-search' : 'cow-search'); if (!el) return;
     el.value = v; el.dispatchEvent(new Event('input', { bubbles: true }));
+    if (p === 'calves' && window._calfFat) { try { renderFatList(); } catch (e) {} }
   };
   function cowBarSync(name) {
     const pg = $('page-' + name); if (!pg) return;
@@ -38590,7 +38670,10 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     let barns = []; try { barns = (typeof getBarns === 'function' ? getBarns() : []) || []; } catch (e) {}
     const base = {
       name: f.name || '', owner: f.ownerSpaced || f.owner || '', address: f.address || '',
-      breeds: brs, fattening: !hide.includes('fattening'), market: true, marketMonths: 9,
+      breeds: brs, fattening: !hide.includes('fattening'), market: true, marketMonths: 9, fattenMonths: c.fattenMonths || 13,
+      shipK1: ((c.shipTarget || { 黒毛: [28, 30] })['黒毛'] || [])[0] || '', shipK2: ((c.shipTarget || { 黒毛: [28, 30] })['黒毛'] || [])[1] || '',
+      shipA1: ((c.shipTarget || { 褐毛: [23, 25] })['褐毛'] || [])[0] || '', shipA2: ((c.shipTarget || { 褐毛: [23, 25] })['褐毛'] || [])[1] || '',
+      shipF1: ((c.shipTarget || {})['F1'] || [])[0] || '', shipF2: ((c.shipTarget || {})['F1'] || [])[1] || '',
       startTab: c.startTab || (document.documentElement.classList.contains('nui') ? 'home' : 'tasks'),
       donor: !hide.includes('collection'), sanshitsu: c.sanshitsuTask !== false, sanshitsuDays: c.sanshitsuDays || 10, vwp: c.vwp || 45,
       autoNeg: !!c.autoNegReinsem, calfEse: c.calfEse !== false, calfCastr: !!ft.calfFlags, calfNose: c.calfNose !== false,
@@ -38620,6 +38703,11 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       ${txt('name', '牧場の名前', '例：YK農場')}${txt('owner', '代表者の名前（姓と名の間にスペース）', '例：山田 太郎')}${txt('address', '住所', '例：北海道中川郡池田町字○○123')}
       ${q('飼っている品種')}<div class="fsw-row">${brk('黒毛')}${brk('褐毛')}${brk('F1')}</div>
       ${q('肥育もやっていますか？')}${seg('fattening', 'やっている', 'やっていない')}
+      ${W.fattening ? num('fattenMonths', '子牛を', 'か月齢から 肥育牛にする') + hint('この月齢になった子牛は「🐄 牛 → 🥩 肥育」に移ります（保留の雌はのぞく）') +
+        `<div class="fsw-num">出荷の目安　黒毛 <input type="number" inputmode="numeric" value="${E(W.shipK1)}" oninput="_fsw.val('shipK1',this.value===''?'':+this.value)">〜<input type="number" inputmode="numeric" value="${E(W.shipK2)}" oninput="_fsw.val('shipK2',this.value===''?'':+this.value)">か月</div>
+         <div class="fsw-num">　　　　　　褐毛 <input type="number" inputmode="numeric" value="${E(W.shipA1)}" oninput="_fsw.val('shipA1',this.value===''?'':+this.value)">〜<input type="number" inputmode="numeric" value="${E(W.shipA2)}" oninput="_fsw.val('shipA2',this.value===''?'':+this.value)">か月</div>
+         <div class="fsw-num">　　　　　　F1　 <input type="number" inputmode="numeric" value="${E(W.shipF1)}" oninput="_fsw.val('shipF1',this.value===''?'':+this.value)">〜<input type="number" inputmode="numeric" value="${E(W.shipF2)}" oninput="_fsw.val('shipF2',this.value===''?'':+this.value)">か月</div>` +
+        hint('肥育の一覧に「出荷の目安 あと◯か月」を出します（空欄の品種は出しません）') : ''}
       ${q('子牛を市場に出しますか？')}${seg('market', '出す', '出さない')}${W.market ? num('marketMonths', '出すのは だいたい', 'か月齢') : ''}
       ${q('開いたときの最初の画面')}${seg('startTab', '🏠 ホーム', '✅ タスク', 'home', 'tasks')}`;
     if (P === 2) return `${q('採卵（ドナー）もやりますか？')}${seg('donor', 'やる', 'やらない')}${hint('「やらない」なら採卵記録・ドナーの予定を出しません')}
@@ -38671,7 +38759,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   }
   window._fsw = {
     tip(i) { W._tip = W._tip === i ? null : i; const sc = document.querySelector('#fsw .fsw-in')?.scrollTop || 0; draw(); const b = document.querySelector('#fsw .fsw-in'); if (b) b.scrollTop = sc; },
-    set(k, v) { W[k] = v; draw(); }, val(k, v) { W[k] = v; if (['market', 'sanshitsu', 'aiLicense', 'aiStation', 'etLicense', 'etCert', 'preg2'].includes(k)) draw(); },
+    set(k, v) { W[k] = v; draw(); }, val(k, v) { W[k] = v; if (['market', 'sanshitsu', 'aiLicense', 'aiStation', 'etLicense', 'etCert', 'preg2', 'fattening'].includes(k)) draw(); },
     breed(b, on) { const L = new Set(W.breeds || []); on ? L.add(b) : L.delete(b); W.breeds = [...L]; },
     barnAdd() { const n = prompt('牛舎の名前'); if (n && n.trim()) { W.barns = [...(W.barns || []), n.trim()]; draw(); } },
     barnDel(i) { const b = W.barns[i]; if (!confirm(`「${b}」を一覧から外しますか？（牛の記録は消えません）`)) return; W.barns = W.barns.filter((_, j) => j !== i); if (W.calfBarn === b) W.calfBarn = ''; draw(); },
@@ -38840,7 +38928,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     today: ['✅ タスク（今日の予定）', ['左の <b>□</b> を押すと「済み」。もう一度押すと元に戻ります', '妊娠鑑定は □（または <b>入れる</b>）で結果を入れます', '右のボタン（<b>記録</b> など）で、その記録の画面が開きます', '牛のところを押すと、その牛の画面が開きます', '上の <b>‹ ›</b> で前の日・次の日。「⚠ 前の日からのこり」はまだ済んでいない予定です'], ['task', 'preg', 'fix']],
     rec: ['➕ 記録する', ['① 牛 → ② 何をした → ③ 内容 の順に進みます', '牛は耳標・名前・個体識別番号の下4けたで探せます', '<b>🏠 牛群リストから選ぶ</b> で何頭もえらぶと、まとめて記録できます', '最後に <b>💾 記録する</b> を押すと保存されます'], ['ai', 'et', 'calv', 'multi']],
     insembook: ['📒 授精簿', ['授精・移植の記録が1行ずつ並びます。上の年（R8 など）と月で絞れます', '行の <b>▼</b> で直したり、くわしく見たりできます。<b>🔬 妊鑑</b> で結果も入れられます', '<b>No. を続き番号で入れる</b> で、まだ番号がない行に番号を付けられます', '<b>☁ 消えた行を戻す</b> で、消えてしまった行を戻せることがあります'], ['ai', 'preg', 'cert', 'lost']],
-    cows: ['🐄 牛', ['上で <b>🐄 親牛</b>・<b>🍼 子牛</b> を切りかえます', '品種や状態のボタンで絞り、並べ方も変えられます', '牛を押すと、その牛の画面（ストーリー）が開きます', '<b>＋ 新規導入</b> で牛を足せます', '<b>🏷 タグ</b> でタグを付けたり、色を決めたりできます'], ['find', 'add', 'tag']],
+    cows: ['🐄 牛', ['上で <b>🐄 親牛</b>・<b>🍼 子牛</b>・<b>🥩 肥育</b> を切りかえます（肥育は、決めた月齢になった子牛）', '品種や状態のボタンで絞り、並べ方も変えられます', '牛を押すと、その牛の画面（ストーリー）が開きます', '<b>＋ 新規導入</b> で牛を足せます', '<b>🏷 タグ</b> でタグを付けたり、色を決めたりできます'], ['find', 'add', 'tag']],
     calves: ['🍼 子牛', ['生まれた子牛の一覧です。<b>＋ 子牛を追加</b> で足せます', '上のボタンで「移動待ち」「離乳済」などに絞れます', '<b>📊 産仔の内訳</b> で、今年生まれた子牛のET・AIの数がわかります', '「出生報告がまだの子牛」から、らくちく出生報告へ進めます'], ['birth', 'cert', 'add']],
     more: ['☰ その他', ['予定・成績・記録簿・書類など、ほかの画面への入口です', '<b>📄 証明書</b> の右に、まだ出していない数が出ます', '<b>⚙ 牧場の設定</b> で、はじめの設定をいつでも直せます', '<b>🔧 困ったとき</b> に、データを調べたり直したりする道具があります'], ['settings', 'cert', 'syncred']],
     preg: ['🍼 お産予定', ['妊娠中の牛を、お産が近い順・月ごとに見られます', '<b>🔬 妊鑑待ち</b> は、妊娠鑑定がまだの牛です', '<b>🗓 分娩頭数</b> で、月ごとに生まれた数（済）と予定（予）がわかります', '<b>📊 産仔の内訳</b> を開くと、ETの割合やこれから生まれる予定も出ます'], ['calv', 'preg']],
@@ -38894,7 +38982,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   const SOON = '<br><span style="color:#f59e0b;">※ この項目は準備中です。今は答えを覚えておくだけで、ツールの動きはまだ変わりません。</span>';
   window.FSW_TIPS = {
     '飼っている品種': '牛の品種のえらび方や、子牛の品種の初めの値に使います。' + SOON,
-    '肥育もやっていますか？': '「やっていない」にすると、肥育成績の画面を出しません。',
+    '肥育もやっていますか？': '「やっていない」にすると、肥育成績の画面と「🥩 肥育」のタブを出しません。<br>「やっている」なら、決めた月齢になった子牛が「🐄 牛 → 🥩 肥育」に移ります（「🌟 保留（繁殖候補）」の雌は子牛のほうに残ります）。出荷の目安の月齢を入れると、一覧に「あと◯か月」が出ます。',
     '子牛を市場に出しますか？': '市場に出す月齢の目安を、子牛の管理に使います。' + SOON,
     '開いたときの最初の画面': 'ツールを開いたときに、ホームとタスクのどちらを先に出すかです。',
     '採卵（ドナー）もやりますか？': '「やらない」にすると、採卵記録の画面と、ドナーのプログラム・採卵の予定を出しません。画面がすっきりします。',
