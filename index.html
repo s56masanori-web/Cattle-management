@@ -146,6 +146,8 @@
 <style>html.no-extinsem div:has(> #ibsub-ext) { display: none !important; }
 html body:not(.is-home) #barn-board.home-only { display: none !important; }
 html.hx-collection #gnav-collection { display: none !important; }
+#retired-tab-fat { display: none !important; }
+#retired-tab-cow{order:0} #retired-tab-retfat{order:1} #retired-tab-calf{order:2} #retired-tab-miscarriage{order:3}
 html.hx-fattening .nui-fatbtn { display: none !important; }
 #page-calves.fatmode > *:not(.nui-cowbar):not(#fattab-list) { display: none !important; }
 #page-calves:not(.fatmode) #fattab-list { display: none !important; }
@@ -1319,15 +1321,19 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
     <div class="section-title">🚫 廃用・死亡リスト</div>
   </div>
 
-  <!-- タブ切り替え -->
-  <div style="display:flex;gap:8px;margin-bottom:14px;">
+  <!-- タブ切り替え（★ 2026/11/24：何があったかで分ける） -->
+  <div id="retired-tabs" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
     <button id="retired-tab-cow" onclick="switchRetiredTab('cow')"
       style="flex:1;padding:8px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:#0a1a2a;border:2px solid var(--info);color:var(--info);">
-      🐄 親牛 <span id="retired-count"></span>
+      🚫 廃用 <span id="retired-count"></span>
     </button>
     <button id="retired-tab-calf" onclick="switchRetiredTab('calf')"
       style="flex:1;padding:8px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:var(--bg3);border:2px solid var(--border);color:var(--muted);">
-      🐮 子牛 <span id="dead-calves-count"></span>
+      💀 死亡 <span id="dead-calves-count"></span>
+    </button>
+    <button id="retired-tab-retfat" onclick="switchRetiredTab('retfat')"
+      style="flex:1;padding:8px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:var(--bg3);border:2px solid var(--border);color:var(--muted);">
+      🥩 廃用肥育 <span id="retfat-count"></span>
     </button>
     <button id="retired-tab-fat" onclick="switchRetiredTab('fat')"
       style="flex:1;padding:8px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:var(--bg3);border:2px solid var(--border);color:var(--muted);">
@@ -2749,6 +2755,9 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
         <option value="">選択してください</option>
         <optgroup label="── AI プログラム ──">
           <option value="cidr_ai_start">CIDRプログラム開始（AI用）D0</option>
+          <option value="cidr_ai_e2p4">E2＋P4法 プログラム開始（AI用）D0（D11授精）</option>
+          <option value="cidr_ai_ovsynch" class="obara-only">オブシンク プログラム開始（AI用）D0（D10授精）</option>
+          <option value="cidr_ai_covsynch" class="obara-only">CIDR-オブシンク プログラム開始（AI用）D0（D10授精）</option>
         </optgroup>
         <optgroup label="── ET プログラム ──">
           <option value="estrus_et">自然発情 → ET（AIせず）発情確認日D0</option>
@@ -4436,15 +4445,45 @@ function fmtDateFull(d) {
   return `${dt.getFullYear()}年${dt.getMonth()+1}月${dt.getDate()}日（${days[dt.getDay()]}）`;
 }
 
+// ★ 2026/11/25：定時授精のやり方（記録は cidr_ai_start のまま、protocol で見分ける）
+const AI_PROGS = {
+  e2p4: { opt: 'cidr_ai_e2p4', sched: 'cidr_ai_e2p4', label: 'E2＋P4法', how: 'D0 CIDR＋E2 → D9 PG・抜去 → D10 E2 → D11 授精' },
+  ovsynch: { opt: 'cidr_ai_ovsynch', sched: 'ovsynch', label: 'オブシンク', how: 'D0 GnRH → D7 PG → D9夕 GnRH → D10朝 授精', obara: true },
+  covsynch: { opt: 'cidr_ai_covsynch', sched: 'cidr_ovsynch', label: 'CIDR-オブシンク', how: 'D0 CIDR＋GnRH → D7 PG・抜去 → D9夕 GnRH → D10朝 授精', obara: true },
+};
+function _isObaraFarm() { return ((window.FARM_CFG && FARM_CFG.farmId) || 'obara') === 'obara'; }
+function _aiProtoOfOpt(opt) { const k = Object.keys(AI_PROGS).find(k => AI_PROGS[k].opt === opt); return k && (!AI_PROGS[k].obara || _isObaraFarm()) ? k : ''; }
+function _aiSchedOf(proto) { return (AI_PROGS[proto] && AI_PROGS[proto].sched) || 'cidr_ai'; }
+function _aiProgLabel(proto) { return (AI_PROGS[proto] && AI_PROGS[proto].label) || ''; }
 // ===== PROTOCOLS =====
 const PROTOCOLS = {
   cidr_ai: s => [
     {day:0, action:'CIDR挿入', detail:'CIDRプログラム開始', color:'#60a5fa', priority:'high'},
-    {day:9, action:'PG投与 2ml', detail:'PGF2α 2ml 筋注（CIDR挿入9日目）', color:'#f59e0b', priority:'high'},
+    {day:9, action:'PG投与 2ml', detail:'PGF2α（レジプロン）2mL 筋注（CIDR挿入9日目）', color:'#f59e0b', priority:'high'},
     {day:10, action:'CIDR抜去', detail:'CIDR除去', color:'#f59e0b', priority:'high'},
-    {day:11, action:'E2投与', detail:'エストラジオール（E2）投与', color:'#a78bfa', priority:'high'},
+    {day:11, action:'E2投与', detail:'E2（オバホルモン）0.5mL 筋注（CIDR抜去の24時間後）', color:'#a78bfa', priority:'high'},
     {day:12, action:'人工授精（AI）', detail:'AI実施 ★精液番号をメモに記入 → チェックすると妊鑑予定が自動追加されます', color:'#4ade80', priority:'high'},
     // 妊娠鑑定はAI実施チェック時に自動追加（D57）
+  ],
+  // ★ 2026/11/24：E2＋P4法（ゾエティス）。D0にE2も打って卵胞の波をそろえる。和牛はCIDRを9日入れる
+  cidr_ai_e2p4: s => [
+    {day:0, action:'CIDR挿入 ＋ E2投与', detail:'E2＋P4法の開始：CIDR1900挿入 ＋ E2（オバホルモン）1mL 筋注', color:'#60a5fa', priority:'high'},
+    {day:9, action:'PG投与 ＋ CIDR抜去', detail:'PGF2α（レジプロン）2mL 筋注 ＋ CIDRを抜く（挿入9日目）', color:'#f59e0b', priority:'high'},
+    {day:10, action:'E2投与', detail:'E2（オバホルモン）0.5mL 筋注（PGの24時間後）', color:'#a78bfa', priority:'high'},
+    {day:11, action:'人工授精（AI）', detail:'AI実施（E2の24〜36時間後）★精液番号をメモに記入 → チェックすると妊鑑予定が自動追加されます', color:'#4ade80', priority:'high'},
+  ],
+  // ★ 2026/11/25：オブシンク・CIDR-オブシンク（小原農場だけ）。2回目のGnRHは夕方、授精は翌朝（GnRHの約16時間後）
+  ovsynch: s => [
+    {day:0, action:'GnRH投与', detail:'オブシンクの開始：GnRH（スポルネン）2mL 筋注（酢酸フェルチレリン100μg）', color:'#60a5fa', priority:'high'},
+    {day:7, action:'PG投与 2ml', detail:'PGF2α（レジプロン）2mL 筋注', color:'#f59e0b', priority:'high'},
+    {day:9, action:'GnRH投与（夕方）', detail:'GnRH（スポルネン）2mL 筋注（PGの約56時間後・夕方）', color:'#a78bfa', priority:'high', timeOfDay:'夕'},
+    {day:10, action:'人工授精（AI）', timeOfDay:'朝', detail:'AI実施（朝・GnRHの約16時間後／8〜24時間の間）★精液番号をメモに記入 → チェックすると妊鑑予定が自動追加されます', color:'#4ade80', priority:'high'},
+  ],
+  cidr_ovsynch: s => [
+    {day:0, action:'CIDR挿入 ＋ GnRH投与', detail:'CIDR-オブシンクの開始：CIDR1900挿入 ＋ GnRH（スポルネン）2mL 筋注', color:'#60a5fa', priority:'high'},
+    {day:7, action:'PG投与 ＋ CIDR抜去', detail:'PGF2α（レジプロン）2mL 筋注 ＋ CIDRを抜く', color:'#f59e0b', priority:'high'},
+    {day:9, action:'GnRH投与（夕方）', detail:'GnRH（スポルネン）2mL 筋注（PGの約56時間後・夕方）', color:'#a78bfa', priority:'high', timeOfDay:'夕'},
+    {day:10, action:'人工授精（AI）', timeOfDay:'朝', detail:'AI実施（朝・GnRHの約16時間後／8〜24時間の間）★精液番号をメモに記入 → チェックすると妊鑑予定が自動追加されます', color:'#4ade80', priority:'high'},
   ],
   estrus_ai: s => [
     {day:0, action:'発情確認・AI実施', detail:'発情確認当日にAI → チェックすると妊鑑予定が自動追加されます', color:'#4ade80', priority:'high'},
@@ -4954,6 +4993,10 @@ function registerEvent() {
   if (event !== 'ai_done' && event !== 'et_done') {
     cow.events.push({ type: event, date, memo });
     if (event === 'et_recipient' && window._etTakahashi) cow.events[cow.events.length - 1].protocol = 'takahashi';
+    if (event === 'cidr_ai_start' && window._aiProto) cow.events[cow.events.length - 1].protocol = window._aiProto;
+    // ★ 卵巣の所見（小原農場）：プログラム開始の記録に残す
+    if (event === 'cidr_ai_start' && window._qrOvary && window._qrOvary.cow === cowId) { const ev_ = cow.events[cow.events.length - 1]; ev_.ovary = window._qrOvary.k; if (window._qrOvary.day != null) ev_.cycDay = window._qrOvary.day; }
+    window._qrOvary = null;
   }
 
   let schedule = [];
@@ -4990,7 +5033,7 @@ function registerEvent() {
       cow.status='program'; cow.cidrStartDate=date;
       // 古い妊鑑・再発情タスクをクリア（前のサイクルの残り）
       tasks = tasks.filter(t => !(t.cowId===cowId && !t.done && (t.action.includes('妊娠鑑定') || t.action.includes('再発情'))));
-      schedule=generateSchedule('cidr_ai',date,cowId); break;
+      schedule=generateSchedule(_aiSchedOf(window._aiProto),date,cowId); window._aiProto = ''; break;
     case 'et_recipient':
       cow.status='program'; cow.etStartDate=date;
       tasks = tasks.filter(t => !(t.cowId===cowId && !t.done && (t.action.includes('妊娠鑑定') || t.action.includes('再発情'))));
@@ -7916,13 +7959,19 @@ function buildCowStory(cowId) {
       if (donor) kv.push([donor, 'ドナー']);
       const stopped = e._retired && DONOR_PROG_TYPES.includes(e.type);
       if (stopped) kv.push([(e.stoppedAt ? fmtDate(e.stoppedAt) + ' ' : '') + (e.stopMemo ? _stEsc(e.stopMemo) : ''), '🛑 採卵中止']);
-      items.push({ date: e.date, cat: 'treat', color: e.type === 'pg_rescue' ? '#ef4444' : '#94a3b8', title: '▶ ' + progLabel[e.type] + (e.protocol === 'takahashi' ? '（高橋式）' : '') + (stopped ? '（中止）' : ''), badge: null, desc: '', kv, memo: donor ? '' : e.memo,
+      items.push({ date: e.date, cat: 'treat', color: e.type === 'pg_rescue' ? '#ef4444' : '#94a3b8', title: '▶ ' + (e.type === 'cidr_ai_start' && _aiProgLabel(e.protocol) ? _aiProgLabel(e.protocol) + ' プログラム開始（AI）' : progLabel[e.type]) + (e.ovary && typeof OV_LABEL !== 'undefined' && OV_LABEL[e.ovary] ? '［' + OV_LABEL[e.ovary] + (e.cycDay != null ? '・周期' + e.cycDay + '日目' : '') + '］' : '') + (e.protocol === 'takahashi' ? '（高橋式）' : '') + (stopped ? '（中止）' : ''), badge: null, desc: '', kv, memo: donor ? '' : e.memo,
         acts: isRetired || e.type === 'pg_rescue' ? [] : [...(stopped ? [`<button class="st-act" onclick="undoStopDonor('${_stEsc(cowId)}',${e._idx})">↩ 中止を取り消す</button>`] : []), `<button class="st-act del" onclick="deleteProgStart('${_stEsc(cowId)}',${e._idx})">🗑 なかったことにする</button>`] });
     } else if (e.type === 'open') {
       items.push({ date: e.date, cat: 'breed', color: '#94a3b8', title: '空胎に戻す', badge: null, desc: '', kv: [], memo: e.memo, acts: [] });
     }
   });
 
+  // ★ 2026/11/25：🔬 卵巣エコー（測った形を図で描き直す）
+  if (cow && Array.isArray(cow.scans)) cow.scans.forEach(sc => { try {
+    const J = _echoJudge(sc), etL = { ok: '◎移植してよい', mid: '△境目', ng: '✕小さい' }[sc.et] || '';
+    items.push({ date: sc.date, cat: 'breed', color: '#38bdf8', title: `🔬 卵巣エコー：${(OV_LABEL[sc.k] || '—')}${etL ? '（黄体 ' + etL + '）' : ''}`, badge: null, descHtml: true,
+      desc: `<div style="margin-top:4px;">${_echoSvg(sc, 280)}</div>${_echoSumHTML(sc, J)}`, kv: [], memo: '',
+      acts: isRetired ? [] : [`<button class="st-act del" onclick="deleteEchoScan('${_stEsc(cowId)}','${sc.id}')">🗑 削除</button>`] }); } catch (e) { console.error('scanStory', e); } });
   // ★ 2026/11/24：在籍牛の一覧から取り込んだときの記録（その日の時点の数）
   if (cow && cow.importSnap) { const z = cow.importSnap, kv = [];
     if (z.kids != null) kv.push([z.kids + '頭', '産子数']); if (z.firstCalvAge != null) kv.push([z.firstCalvAge + 'か月', '初回分娩月齢']);
@@ -9201,12 +9250,12 @@ async function deleteProgStart(cowId, evIdx) {
   const cow = cows.find(c => c.id === cowId);
   const e = cow && (cow.events || [])[evIdx];
   if (!e || typeof PROG_START_TYPES === 'undefined' || !PROG_START_TYPES.includes(e.type)) return;
-  const P = { cidr_ai_start: 'cidr_ai', et_recipient: e.protocol === 'takahashi' ? 'et_cidr_takahashi' : 'et_cidr', estrus_et: 'estrus_et', estrus_ai: 'estrus_ai', donor_et_start: 'donor_et', donor_et_pretreat_start: 'donor_et_pretreat', donor_et_takahashi_start: 'donor_et_takahashi' }[e.type];
+  const P = { cidr_ai_start: _aiSchedOf(e.protocol), et_recipient: e.protocol === 'takahashi' ? 'et_cidr_takahashi' : 'et_cidr', estrus_et: 'estrus_et', estrus_ai: 'estrus_ai', donor_et_start: 'donor_et', donor_et_pretreat_start: 'donor_et_pretreat', donor_et_takahashi_start: 'donor_et_takahashi' }[e.type];
   let keys = new Set();
   try { if (P && PROTOCOLS[P]) generateSchedule(P, e.date, cowId).forEach(x => keys.add(x.date + '|' + x.action)); } catch (er) {}
   let left = tasks.filter(t => t.cowId === cowId && !t.done && keys.has(t.date + '|' + t.action));
   try { if (DONOR_PROG_TYPES.includes(e.type)) left = [...new Set([...left, ...donorProgramTasks(cowId, e.date).filter(t => !t.done)])]; } catch (er) {}
-  const label = (e.type === 'et_recipient' && e.protocol === 'takahashi' ? 'ETレシピエント（高橋式）' : '') || { cidr_ai_start: 'CIDRプログラム（AI）', et_recipient: 'ETレシピエント', estrus_et: '自然発情→ET', estrus_ai: '発情→AI', donor_et_start: '採卵（自然発情）', donor_et_pretreat_start: '採卵（前処置）', donor_et_takahashi_start: '採卵（高橋式）' }[e.type] || 'プログラム';
+  const label = (e.type === 'et_recipient' && e.protocol === 'takahashi' ? 'ETレシピエント（高橋式）' : '') || (e.type === 'cidr_ai_start' && _aiProgLabel(e.protocol) ? _aiProgLabel(e.protocol) + '（AI）' : '') || { cidr_ai_start: 'CIDRプログラム（AI）', et_recipient: 'ETレシピエント', estrus_et: '自然発情→ET', estrus_ai: '発情→AI', donor_et_start: '採卵（自然発情）', donor_et_pretreat_start: '採卵（前処置）', donor_et_takahashi_start: '採卵（高橋式）' }[e.type] || 'プログラム';
   if (!await appConfirm(`${fmtDate(e.date)} に始めた「${label}」のプログラムを、なかったことにします。\n\n・ストーリーの「▶ プログラム開始」${e._retired ? 'と「🛑 採卵中止」' : ''}を消します\n・まだ済んでいない、このプログラムの予定 ${left.length}件 を消します\n・済んだ予定や、授精・移植の記録は消しません`)) return;
   try { armUndo('プログラムをなかったことにしました'); } catch (er) {}
   const ids = new Set(left);
@@ -10955,7 +11004,7 @@ function cal2Events(fromStr, toStr) {
     else if (a.includes('人工授精') || a.includes('胚移植') || a.includes('授精')) kind = 'insem';
     else if (a.includes('発情')) kind = 'estrus';
     const sub = kind === 'calving' ? conceptionLabel(t.cowId) : '';
-    push({ date: t.date, cowId: t.cowId, kind, title: kind === 'calving' ? '分娩予定' : a.replace(/[★]/g, '').trim(), sub, overdue: t.date < todayStr, taskId: t.id });
+    push({ date: t.date, cowId: t.cowId, calfId: t.calfId || '', kind, title: kind === 'calving' ? '分娩予定' : a.replace(/[★]/g, '').trim(), sub, overdue: t.date < todayStr, taskId: t.id });
   });
   // 分娩予定タスクが無い妊娠牛も拾う
   cows.forEach(c => {
@@ -11006,17 +11055,17 @@ function renderCalendar2() {
     const ds = `${y}-${pad(m + 1)}-${pad(d)}`;
     const list = byDay[ds] || [];
     const dow = (startDow + d - 1) % 7;
-    const chips = list.slice(0, 3).map(e => `<div class="cal2-chip" style="background:${CAL2_KINDS[e.kind].bg};color:${CAL2_KINDS[e.kind].color};">${_stEsc(e.cowId)}</div>`).join('');
+    const chips = list.slice(0, 3).map(e => `<div class="cal2-chip" style="background:${CAL2_KINDS[e.kind].bg};color:${CAL2_KINDS[e.kind].color};">${_stEsc(taskCowLabel(e.cowId, e.calfId))}</div>`).join('');
     cells += `<div class="cal2-cell${ds === todayStr ? ' today' : ''}${ds === _cal2Sel ? ' sel' : ''}" onclick="_cal2Sel='${ds}';renderCalendar2()">
       <div class="cal2-d" style="color:${dow === 0 ? 'var(--danger)' : dow === 6 ? 'var(--info)' : 'var(--text)'}">${d}</div>
       ${chips}${list.length > 3 ? `<div class="cal2-more">+${list.length - 3}</div>` : ''}
     </div>`;
   }
   const row = e => `
-    <div class="cal2-ev" onclick="showCowDetail('${_stEsc(e.cowId)}')">
+    <div class="cal2-ev" onclick="${(() => { const k = taskCalfOf(e.cowId, e.calfId); return k ? `showCalfStory('${_stEsc(k.id)}')` : `showCowDetail('${_stEsc(e.cowId)}')`; })()}">
       <span class="cal2-bar" style="background:${CAL2_KINDS[e.kind].color};"></span>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:13px;font-weight:700;"><span style="font-family:'JetBrains Mono',monospace;">${_stEsc(e.cowId)}</span> ${_stEsc(cowDisplayName(e.cowId) || '')} <span style="color:${CAL2_KINDS[e.kind].color};">${_stEsc(e.title)}</span></div>
+        <div style="font-size:13px;font-weight:700;"><span style="font-family:'JetBrains Mono',monospace;">${_stEsc(taskCowLabel(e.cowId, e.calfId))}</span> ${_stEsc(taskCalfOf(e.cowId, e.calfId) ? (taskCalfOf(e.cowId, e.calfId).name || '') : (cowDisplayName(e.cowId) || ''))} <span style="color:${CAL2_KINDS[e.kind].color};">${_stEsc(e.title)}</span></div>
         ${e.sub ? `<div style="font-size:11px;color:var(--muted);">${_stEsc(e.sub)}</div>` : ''}
       </div>
       ${e.overdue ? '<span style="font-size:10px;color:var(--danger);font-weight:700;white-space:nowrap;">期限切れ</span>' : ''}
@@ -12191,6 +12240,17 @@ function _cfChip(c, kind, label, done, tap) {
 }
 function calfSexText(c) { return c && c.sex === '雄' && c.castrated ? '去勢' : (c && c.sex) || ''; }
 // 性別の記号：去勢済みの♂は記号の代わりに「去勢」（記号と文字の2か所に出さない）
+// ★ 2026/11/24：タスクの牛の番号の出し方。耳標がまだない子牛のタスクは、中の番号（jb17mulgr6a など）ではなく「◯◯の子」と出す
+function taskCalfOf(cowId, calfId) {
+  if (cows.some(c => c.id === cowId) || (typeof retiredCows !== 'undefined' && retiredCows.some(c => c.id === cowId))) return null;
+  return (typeof calves !== 'undefined' ? calves : []).find(c => (calfId && c.id === calfId) || c.id === cowId || (c.earTagId && c.earTagId === cowId)) || null;
+}
+function taskCowLabel(cowId, calfId) {
+  const k = taskCalfOf(cowId, calfId); if (!k) return String(cowId || '');
+  if (k.earTagId) return k.earTagId;
+  const dn = k.damId ? (cowDisplayName(k.damId) || k.damId) : '';
+  return (k.damId ? k.damId + (dn && dn !== k.damId ? ' ' + dn : '') + 'の子' : '子牛') + '（耳標なし）';
+}
 function calfSexMark(c) { return !c || !c.sex ? '' : c.sex === '雄' ? (c.castrated && window.FARM_FEAT && FARM_FEAT.calfFlags ? '去勢' : '♂') : '♀'; }
 function calfFlagChips(c, withSex) {
   const sx = !withSex ? null : c.sex === '雄' ? (c.castrated ? ['去勢', '#93c5fd'] : ['♂', '#60a5fa']) : c.sex === '雌' ? ['♀', '#f472b6'] : null;
@@ -15326,9 +15386,384 @@ function quickReg(cowId, event) {
     onQrEventChange();
   }, 50);
 }
+// ===== ★ 2026/11/25：🔬 卵巣エコー（小原農場）：スクショから目盛りと黒い所（腔・卵胞）を自動で見つけ、黄体は4点タップ。図形だけ保存 =====
+var ECHO_RULE_DEF = { tisOk: 2.4, tisMin: 1.6, dMin: 1.4, cavMax: 50, wallMin: 0.3, cavDiaMax: 2.0, cyst: 2.5, cystMaybe: 2.0, staticFol: 1.0, recheckDays: 7 };
+function _echoRule() { return Object.assign({}, ECHO_RULE_DEF, (window.FARM_CFG && FARM_CFG.echoRule) || {}); }
+var _EC = null;   // 開いている測定画面の状態（画像はここにだけ置いて、保存しない）
+function _ecR(n, d) { const p = Math.pow(10, d == null ? 1 : d); return Math.round(n * p) / p; }
+// ---- 画像の解析 ----
+function _echoAnalyze(img) {
+  const W0 = img.naturalWidth, H0 = img.naturalHeight;
+  const cv = document.createElement('canvas'); cv.width = W0; cv.height = H0;
+  const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(img, 0, 0);
+  const D = cx.getImageData(0, 0, W0, H0).data;
+  const G = new Uint8Array(W0 * H0), RED = new Uint8Array(W0 * H0);
+  for (let i = 0, j = 0; i < G.length; i++, j += 4) { const r = D[j], g = D[j + 1], b = D[j + 2]; G[i] = (r + g + b) / 3; if (r > 150 && g < 90 && b < 90) RED[i] = 1; }
+  // 画像の帯（エコーの扇形がある行）：暗くない点が多い行がいちばん長く続くところ
+  const rowOn = y => { let n = 0; for (let x = 0; x < W0; x += 3) if (G[y * W0 + x] > 20) n++; return n / (W0 / 3) > 0.35; };
+  let best = [0, -1], st = -1;
+  for (let y = 0; y <= H0; y++) { const on = y < H0 && rowOn(y); if (on && st < 0) st = y; if (!on && st >= 0) { if (y - st > best[1] - best[0]) best = [st, y - 1]; st = -1; } }
+  const [top, bot] = best; if (bot - top < 100) return { err: 'エコーの画像が見つかりませんでした' };
+  // 目盛り：細い明るい線（となりより少し明るい列・行）
+  const med = a => { const b = Array.from(a).sort((p, q) => p - q); return b[b.length >> 1]; };
+  const y0 = top + Math.round((bot - top) * 0.15), y1 = bot - Math.round((bot - top) * 0.15);
+  const colV = new Float32Array(W0);
+  { const rows = []; for (let y = y0; y < y1; y += 4) rows.push(y);
+    for (let x = 8; x < W0 - 8; x++) { const v = rows.map(y => { const o = y * W0; let s = 0; for (let k = -7; k <= 7; k++) s += G[o + x + k]; return G[o + x] - s / 15; }); colV[x] = med(v); } }
+  const xMid0 = Math.round(W0 * 0.3), xMid1 = Math.round(W0 * 0.7), rowV = new Float32Array(H0);
+  { const cols = []; for (let x = xMid0; x < xMid1; x += 4) cols.push(x);
+    for (let y = top + 8; y < bot - 8; y++) { const v = cols.map(x => { let s = 0; for (let k = -7; k <= 7; k++) s += G[(y + k) * W0 + x]; return G[y * W0 + x] - s / 15; }); rowV[y] = med(v); } }
+  const peaks = (V, a, b) => { const P = []; for (let i = a + 2; i < b - 2; i++) if (V[i] > 3 && V[i] >= V[i - 1] && V[i] >= V[i + 1] && V[i] >= V[i - 2] && V[i] >= V[i + 2]) P.push(i); return P; };
+  const spacing = P => { const d = []; for (let i = 1; i < P.length; i++) d.push(P[i] - P[i - 1]); const ok = d.filter(x => x > 25); if (ok.length < 2) return 0;
+    let bestM = 0, bestN = 0; ok.forEach(m => { const n = ok.filter(x => Math.abs(x - m) <= m * 0.08).length; if (n > bestN) { bestN = n; bestM = m; } });
+    if (bestN < 2) return 0; const g = ok.filter(x => Math.abs(x - bestM) <= bestM * 0.08); return g.reduce((s, x) => s + x, 0) / g.length; };
+  const sx = spacing(peaks(colV, 8, W0 - 8)), sy = spacing(peaks(rowV, top + 8, bot - 8));
+  let ppc0 = sx && sy && Math.abs(sx - sy) / sx < 0.1 ? (sx + sy) / 2 : (sx || sy || 0);
+  // 処理は小さくした画像で（速くするため）
+  const s = Math.min(1, 700 / W0), W = Math.round(W0 * s), H = Math.round((bot - top + 1) * s), oy = top;
+  const g = new Float32Array(W * H), red = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const X = Math.min(W0 - 1, Math.round(x / s)), Y = Math.min(H0 - 1, oy + Math.round(y / s)); g[y * W + x] = G[Y * W0 + X]; red[y * W + x] = RED[Y * W0 + X]; }
+  // ぼかし（ざらざらを消す）：箱型を3回
+  const R = Math.max(2, Math.round(3.5 * s / 0.6)); let bl = g;
+  for (let pass = 0; pass < 3; pass++) {
+    const t = new Float32Array(W * H), u = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) { let acc = 0, n = 0; for (let x = -R; x < W + R; x++) { if (x + R < W) { acc += bl[y * W + x + R]; n++; } if (x - R - 1 >= 0) { acc -= bl[y * W + x - R - 1]; n--; } if (x >= 0 && x < W) t[y * W + x] = acc / n; } }
+    for (let x = 0; x < W; x++) { let acc = 0, n = 0; for (let y = -R; y < H + R; y++) { if (y + R < H) { acc += t[(y + R) * W + x]; n++; } if (y - R - 1 >= 0) { acc -= t[(y - R - 1) * W + x]; n--; } if (y >= 0 && y < H) u[y * W + x] = acc / n; } }
+    bl = u;
+  }
+  // 扇形の中だけ（行ごとの左右のはし）
+  const L = new Int16Array(H), Rr = new Int16Array(H);
+  for (let y = 0; y < H; y++) { let a = -1, b = -1; for (let x = 0; x < W; x++) if (bl[y * W + x] > 12) { a = x; break; } for (let x = W - 1; x >= 0; x--) if (bl[y * W + x] > 12) { b = x; break; } L[y] = a < 0 ? W : a + 10; Rr[y] = b < 0 ? -1 : b - 10; }
+  const inS = (x, y) => y > 6 && y < H - 6 && x > L[y] && x < Rr[y];
+  // 赤い書き込みのまわりはのぞく
+  const redD = new Uint8Array(W * H); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (red[y * W + x]) for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) { const X = x + dx, Y = y + dy; if (X >= 0 && Y >= 0 && X < W && Y < H) redD[Y * W + X] = 1; }
+  const ppc = ppc0 * s;
+  const regions = ppc ? _echoDark(bl, W, H, inS, redD, ppc, 22) : [];
+  return { W, H, s, oy, ppc0, ppc, bl, inS, redD, regions, top, bot, W0, H0 };
+}
+function _echoDark(bl, W, H, inS, redD, ppc, th) {
+  const lab = new Int32Array(W * H), out = []; let k = 0;
+  const minA = Math.PI * Math.pow(0.2 * ppc, 2);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x; if (lab[i] || !(bl[i] < th) || !inS(x, y) || redD[i]) continue;
+    k++; const st = [i]; lab[i] = k; let n = 0, sx = 0, sy = 0, x0 = x, x1 = x, y0 = y, y1 = y, edge = false;
+    while (st.length) { const p = st.pop(), px = p % W, py = (p - px) / W; n++; sx += px; sy += py; if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
+      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => { const X = px + dx, Y = py + dy; if (X < 0 || Y < 0 || X >= W || Y >= H) { edge = true; return; } const q = Y * W + X; if (lab[q]) return;
+        if (!inS(X, Y)) { edge = true; return; } if (bl[q] < th && !redD[q]) { lab[q] = k; st.push(q); } }); }
+    if (edge || n < minA) continue;
+    out.push({ t: 'fl', x: (sx / n) / ppc, y: (sy / n) / ppc, rx: (x1 - x0 + 1) / 2 / ppc, ry: (y1 - y0 + 1) / 2 / ppc, a: n / ppc / ppc, auto: 1 });
+  }
+  return out;
+}
+// タップしたところの黒い所を囲む（卵胞の追加）
+function _echoFlood(A, px, py) {
+  const { bl, W, H, inS, ppc } = A; const i0 = Math.round(py) * W + Math.round(px); const v0 = bl[i0]; if (!(v0 < 50)) return null;
+  const th = Math.max(28, v0 + 16), lim = 3 * ppc, seen = new Uint8Array(W * H), st = [i0]; seen[i0] = 1;
+  let n = 0, sx = 0, sy = 0, x0 = W, x1 = 0, y0 = H, y1 = 0;
+  while (st.length) { const p = st.pop(), x = p % W, y = (p - x) / W; n++; sx += x; sy += y; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    if (n > Math.PI * lim * lim) return null;
+    [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= W || Y >= H) return; const q = Y * W + X; if (seen[q] || !inS(X, Y)) return; if (Math.hypot(X - px, Y - py) > lim) return; if (bl[q] < th) { seen[q] = 1; st.push(q); } }); }
+  if (n < 20) return null;
+  return { t: 'fl', x: sx / n / ppc, y: sy / n / ppc, rx: (x1 - x0 + 1) / 2 / ppc, ry: (y1 - y0 + 1) / 2 / ppc, a: n / ppc / ppc };
+}
+// ---- 測った形から数字を出す ----
+function _inEll(s, e) { return Math.pow((s.x - e.x) / e.rx, 2) + Math.pow((s.y - e.y) / e.ry, 2) <= 1; }
+function _echoSide(sd) {
+  const sh = (sd && sd.shapes) || [], cls = sh.filter(x => x.t === 'cl'), fls = sh.filter(x => x.t === 'fl');
+  const CL = cls.map(c => {
+    const cav = fls.filter(f => _inEll(f, c)).sort((a, b) => b.a - a.a)[0] || null;
+    const area = Math.PI * c.rx * c.ry, ca = cav ? Math.min(cav.a, area * 0.95) : 0;
+    const wall = cav ? Math.min(c.rx - cav.rx, c.ry - cav.ry) : null;
+    return { d1: Math.max(c.rx, c.ry) * 2, d2: Math.min(c.rx, c.ry) * 2, area, cav, cavA: ca, cavD: cav ? (cav.rx + cav.ry) : 0, tis: area - ca, ratio: area ? ca / area * 100 : 0, wall };
+  });
+  const FO = fls.filter(f => !cls.some(c => _inEll(f, c))).map(f => ({ d: f.rx + f.ry, f }));   // 直径＝たて・よこの平均
+  return { seen: !!(sd && sd.seen), CL, FO, maxFol: FO.reduce((m, f) => Math.max(m, f.d), 0) };
+}
+function _echoJudge(scan) {
+  const Rl = _echoRule(), S = { R: _echoSide(scan.R), L: _echoSide(scan.L) };
+  const both = S.R.seen && S.L.seen, allCL = [...S.R.CL.map(c => ({ ...c, side: '右' })), ...S.L.CL.map(c => ({ ...c, side: '左' }))];
+  const maxFol = Math.max(S.R.maxFol, S.L.maxFol), lines = [];
+  let k = 'none', recheck = null, et = null, bestCL = null;
+  allCL.forEach(c => {
+    c.lcyst = c.cav && (c.ratio > Rl.cavMax || (c.wall != null && c.wall < Rl.wallMin) || c.cavD > Rl.cavDiaMax);
+    if (c.lcyst) lines.push(['warn', `${c.side}：腔が大きい・壁がうすい黄体です。黄体化嚢腫かもしれません（P4の値か、押したときのかたさを確かめて）`]);
+    else if (c.cav && c.cavD >= Rl.cavDiaMax - 0.15) lines.push(['info', `${c.side}：腔がやや大きめです（${_ecR(c.cavD)}cm）`]);
+  });
+  if (allCL.length) {
+    k = 'cl'; bestCL = allCL.slice().sort((a, b) => b.tis - a.tis)[0];
+    const c = bestCL;
+    et = c.tis >= Rl.tisOk && !c.lcyst ? 'ok' : (c.tis >= Rl.tisMin && c.d1 >= Rl.dMin) ? 'mid' : 'ng';
+    lines.unshift([et === 'ok' ? 'ok' : et === 'mid' ? 'warn' : 'ng', et === 'ok' ? `移植してよい黄体です（${c.side}・組織 ${_ecR(c.tis)}cm²）`
+      : et === 'mid' ? `境目の黄体です（${c.side}・組織 ${_ecR(c.tis)}cm²）。子宮の所見や同じ卵巣の大きな卵胞も見て決めてください`
+      : `小さい黄体です（${c.side}・組織 ${_ecR(c.tis)}cm²／直径 ${_ecR(c.d1)}cm）。移植は見送りをすすめます`]);
+    if (maxFol >= Rl.cyst) { lines.push(['warn', `${_ecR(maxFol)}cmの卵胞があります。黄体と嚢腫が一緒にあるかもしれません`]); recheck = `黄体と${_ecR(maxFol)}cmの卵胞（嚢腫かも）`; }
+  } else if (maxFol >= Rl.cyst) {
+    k = 'cyst'; lines.push(['warn', `黄体がなく、${_ecR(maxFol)}cmの卵胞があります。卵胞嚢腫かもしれません（壁が3mm以上あれば黄体化嚢腫）`]); recheck = `黄体なし・${_ecR(maxFol)}cmの卵胞（嚢腫かも）`;
+  } else if (maxFol >= Rl.cystMaybe) {
+    k = 'nocl'; lines.push(['warn', `黄体がなく、${_ecR(maxFol)}cmの卵胞があります。排卵前の卵胞かもしれないので、様子を見てください`]); recheck = `黄体なし・${_ecR(maxFol)}cmの卵胞（様子見）`;
+  } else if (maxFol >= Rl.staticFol) {
+    k = 'nocl'; lines.push(['info', `黄体がなく、卵胞（${_ecR(maxFol)}cm）が育っています。発情の前後か、排卵していないのかもしれません。発情の記録と合わせて見てください`]);
+  } else if (S.R.seen || S.L.seen) {
+    if (both) { k = 'static'; lines.push(['warn', `左右とも黄体がなく、卵胞も${Rl.staticFol}cm未満です。卵巣静止かもしれません`]); recheck = '左右とも黄体なし・卵胞1cm未満（卵巣静止かも）'; }
+    else { k = 'nocl'; lines.push(['info', '黄体も大きな卵胞もありません。反対側の卵巣も見ないと、静止とは決められません']); }
+  }
+  if (!both && (S.R.seen || S.L.seen) && k !== 'cl' && k !== 'static' && !lines.some(l => /反対側/.test(l[1]))) lines.push(['info', '反対側の卵巣も読み込むと、判定が確かになります']);
+  return { k, et, lines, recheck, S, bestCL, maxFol };
+}
+// ---- 保存した形を図で描き直す（1マス＝1cmの縮尺） ----
+function _echoSvg(scan, w) {
+  w = w || 320; const h = Math.round(w * 0.44), half = w / 2;
+  const box = sd => { const sh = (sd && sd.shapes) || []; if (!sh.length) return null; let a = 1e9, b = -1e9, c = 1e9, d = -1e9; sh.forEach(s => { a = Math.min(a, s.x - s.rx); b = Math.max(b, s.x + s.rx); c = Math.min(c, s.y - s.ry); d = Math.max(d, s.y + s.ry); }); return [a - 0.4, b + 0.4, c - 0.4, d + 0.4]; };
+  const bR = box(scan.R), bL = box(scan.L);
+  const bs = [bR, bL].filter(Boolean);
+  const k = Math.min((half - 16) / Math.max(1.5, ...bs.map(b => b[1] - b[0])), (h - 30) / Math.max(1.5, ...bs.map(b => b[3] - b[2])));
+  const one = (sd, b, ox, lab) => {
+    const cx0 = ox + half / 2, cy0 = 14 + (h - 30) / 2;
+    let g = `<text x="${cx0}" y="11" fill="#94a3b8" font-size="11" text-anchor="middle">${lab}</text>`;
+    if (!sd || !sd.seen) return g + `<text x="${cx0}" y="${cy0 + 4}" fill="#475569" font-size="11" text-anchor="middle">見ていない</text>`;
+    if (!b) return g + `<text x="${cx0}" y="${cy0 + 4}" fill="#64748b" font-size="11" text-anchor="middle">なにもなし</text>`;
+    const mx = (b[0] + b[1]) / 2, my = (b[2] + b[3]) / 2, P = (x, y) => [cx0 + (x - mx) * k, cy0 + (y - my) * k];
+    const [ox1, oy1] = P(mx, my); g += `<ellipse cx="${ox1}" cy="${oy1}" rx="${(b[1] - b[0]) / 2 * k}" ry="${(b[3] - b[2]) / 2 * k}" fill="none" stroke="#475569" stroke-width="1.2"/>`;
+    sd.shapes.filter(s => s.t === 'cl').forEach(s => { const [x, y] = P(s.x, s.y); g += `<ellipse cx="${x}" cy="${y}" rx="${s.rx * k}" ry="${s.ry * k}" fill="rgba(74,222,128,.16)" stroke="#4ade80" stroke-width="1.6"/>`; });
+    sd.shapes.filter(s => s.t === 'fl').forEach(s => { const [x, y] = P(s.x, s.y); g += `<ellipse cx="${x}" cy="${y}" rx="${s.rx * k}" ry="${s.ry * k}" fill="#0b0d12" stroke="#38bdf8" stroke-width="1.3"/>`; });
+    g += `<line x1="${ox + 8}" y1="${h - 6}" x2="${ox + 8 + k}" y2="${h - 6}" stroke="#64748b" stroke-width="2"/><text x="${ox + 12 + k}" y="${h - 3}" fill="#64748b" font-size="9">1cm</text>`;
+    return g;
+  };
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;max-width:100%;">${one(scan.L, bL, 0, '左')}${one(scan.R, bR, half, '右')}</svg>`;
+}
+function _echoSumHTML(scan, J) {
+  J = J || _echoJudge(scan); const E = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const col = { ok: '#4ade80', warn: '#fbbf24', ng: '#f87171', info: '#94a3b8' };
+  const side = (S, lab) => !S.seen ? '' : `<div style="font-size:12.5px;font-weight:700;margin-top:6px;">${lab}の卵巣</div>` + (S.CL.map(c => `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-top:1px solid rgba(255,255,255,.05);"><span>黄体</span><span>${_ecR(c.d1)}×${_ecR(c.d2)}cm・面積 ${_ecR(c.area)}cm²</span></div>`
+      + (c.cav ? `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0 2px 10px;color:#cbd5e1;"><span>└ 腔</span><span>${_ecR(c.cav.rx * 2)}×${_ecR(c.cav.ry * 2)}cm・${_ecR(c.cavA)}cm²</span></div>` : '')
+      + `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0 2px 10px;"><span>└ 黄体の組織</span><b>${_ecR(c.tis)}cm²</b></div>`
+      + (c.cav ? `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0 2px 10px;"><span>└ 腔のしめる割合・壁の厚さ</span><span><b style="color:#fbbf24;">${Math.round(c.ratio)}%</b>・${_ecR(c.wall * 10, 0)}mm</span></div>` : ''))).join('')
+      + (S.FO.length ? `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-top:1px solid rgba(255,255,255,.05);"><span>卵胞</span><span>${S.FO.map(f => _ecR(f.d) + 'cm').join('・')}</span></div>` : '')
+      + (!S.CL.length && !S.FO.length ? `<div style="font-size:12px;color:#94a3b8;padding:3px 0;">黄体も卵胞も、印がありません</div>` : '');
+  return `${side(J.S.R, '右')}${side(J.S.L, '左')}
+    <div style="margin-top:8px;font-size:13px;">→ 所見：<b style="color:#4ade80;">${E((typeof OV_LABEL !== 'undefined' && OV_LABEL[J.k]) || '—')}</b></div>
+    ${J.lines.map(([lv, t]) => `<div style="font-size:12px;line-height:1.6;color:${col[lv]};margin-top:3px;">${lv === 'ok' ? '◎ ' : lv === 'ng' ? '✕ ' : lv === 'warn' ? '⚠ ' : '・'}${E(t)}</div>`).join('')}
+    ${J.recheck ? `<div style="font-size:12px;color:#fbbf24;margin-top:4px;">🔁 ${_echoRule().recheckDays}日後に「卵巣の再検査」の予定を入れます</div>` : ''}`;
+}
+// ---- 測定画面 ----
+function openEchoScan(cowId, date, ctx, cb) {
+  _EC = { cowId, date: date || today(), ctx: ctx || 'exam', cb, side: 'R', mode: '', taps: [], A: { R: null, L: null }, url: { R: '', L: '' },
+    scan: { R: { seen: false, shapes: [] }, L: { seen: false, shapes: [] } } };
+  document.getElementById('echo-modal')?.remove();
+  const w = document.createElement('div'); w.id = 'echo-modal';
+  w.style.cssText = 'position:fixed;inset:0;z-index:9400;background:#0f1117;overflow:auto;color:#e2e8f0;';
+  document.body.appendChild(w); _echoRender();
+}
+function _echoClose() { const u = _EC && _EC.url; try { ['R', 'L'].forEach(k => u[k] && URL.revokeObjectURL(u[k])); } catch (e) {} _EC = null; document.getElementById('echo-modal')?.remove(); }
+function _echoRender() {
+  const w = document.getElementById('echo-modal'); if (!w || !_EC) return;
+  const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const sd = _EC.side, A = _EC.A[sd], sc = _EC.scan[sd];
+  const chip = (on, oc, l) => `<button type="button" onclick="${oc}" style="border:1px solid ${on ? '#4ade80' : '#2a3050'};color:${on ? '#4ade80' : '#cbd5e1'};font-weight:${on ? 700 : 400};background:#1e2333;border-radius:999px;padding:7px 13px;font-size:13px;cursor:pointer;font-family:inherit;">${l}</button>`;
+  const hint = { cl: '黄体のふちを4か所（上・下・左・右）タップしてください', fl: '卵胞（黒い所）の中をタップしてください。うまく囲めないときは、まん中→ふちの2回タップ', del: '消したい印をタップしてください', scale: '目盛りの1マス（1cm）の両はしを、2回タップしてください' }[_EC.mode] || '';
+  let pic = '';
+  if (A && !A.err) {
+    const shapes = sc.shapes.map((s, i) => { const cx = s.x * A.ppc, cy = s.y * A.ppc, rx = s.rx * A.ppc, ry = s.ry * A.ppc, c = s.t === 'cl' ? '#4ade80' : '#38bdf8';
+      return `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="none" stroke="${c}" stroke-width="${2.5 / (_EC.zoom || 1)}" ${s.t === 'cl' ? 'stroke-dasharray="9 5"' : ''}/><text x="${cx}" y="${cy - ry - 5}" fill="${c}" font-size="15" font-weight="700" text-anchor="middle" style="paint-order:stroke;stroke:#000;stroke-width:3px;">${s.t === 'cl' ? '黄体' : ''} ${_ecR(s.rx * 2)}×${_ecR(s.ry * 2)}</text>`; }).join('');
+    const taps = _EC.taps.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="6" fill="#4ade80"/>`).join('');
+    pic = `<div style="position:relative;width:100%;max-width:640px;margin:0 auto;">
+      <svg id="echo-svg" viewBox="0 0 ${A.W} ${A.H}" style="display:block;width:100%;height:auto;touch-action:manipulation;" onclick="_echoTap(event)">
+        <image href="${_EC.url[sd]}" x="0" y="${-A.oy * A.s}" width="${A.W0 * A.s}" height="${A.H0 * A.s}" preserveAspectRatio="none"/>${shapes}${taps}
+        ${A.ppc ? `<rect x="8" y="${A.H - 30}" width="190" height="22" rx="5" fill="rgba(15,17,23,.85)"/><text x="16" y="${A.H - 14}" fill="#e2e8f0" font-size="13">目盛り 1cm＝${Math.round(A.ppc0)}px${A.manual ? '（手で）' : '（自動）'}</text>` : ''}
+      </svg></div>`;
+  } else if (A && A.err) pic = `<div style="color:#f87171;font-size:13px;padding:10px 0;">${E(A.err)}</div>`;
+  const J = _echoJudge(_EC.scan);
+  const cow = cows.find(c => c.id === _EC.cowId);
+  w.innerHTML = `<div style="max-width:680px;margin:0 auto;padding:12px 14px 40px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b style="font-size:17px;">🔬 卵巣エコー　<span class="nui-mono" style="color:#4ade80;">${E(_EC.cowId)}</span> ${E(cow ? cowDisplayName(cow.id) || '' : '')}</b><button class="modal-close" onclick="_echoClose()">✕</button></div>
+    <div style="font-size:12px;color:#94a3b8;margin:4px 0 10px;">${E(fmtDate(_EC.date))}　画像は保存しません（印の形と大きさだけ残します）</div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;">${chip(sd === 'R', "_echoTab('R')", '右の卵巣' + (_EC.scan.R.seen ? ' ✓' : ''))}${chip(sd === 'L', "_echoTab('L')", '左の卵巣' + (_EC.scan.L.seen ? ' ✓' : ''))}</div>
+    <label style="display:block;text-align:center;border:1.5px dashed #2a3050;border-radius:12px;padding:${A ? '8px' : '28px'} 10px;cursor:pointer;font-size:14px;color:#cbd5e1;margin-bottom:10px;">📷 ${A ? '画像をかえる' : (sd === 'R' ? '右' : '左') + 'の卵巣のスクショを読み込む'}<input type="file" accept="image/*" style="display:none;" onchange="_echoLoad(this.files[0])"></label>
+    ${pic}
+    ${A && !A.err ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${chip(_EC.mode === 'cl', "_echoMode('cl')", '＋ 黄体')}${chip(_EC.mode === 'fl', "_echoMode('fl')", '＋ 卵胞')}${chip(_EC.mode === 'del', "_echoMode('del')", '− 消す')}${chip(_EC.mode === 'scale', "_echoMode('scale')", '📏 目盛りを手で')}</div>
+      ${hint ? `<div style="font-size:12.5px;color:#4ade80;margin-top:6px;">${hint}</div>` : `<div style="font-size:12px;color:#94a3b8;margin-top:6px;line-height:1.6;">水色＝自動で見つけた黒い所（腔・卵胞）。ちがうものは「− 消す」。黄体は「＋ 黄体」でふちを4か所タップ。</div>`}
+      ${A.ppc ? '' : '<div style="font-size:12.5px;color:#fbbf24;margin-top:6px;">目盛りが自動で見つかりませんでした。「📏 目盛りを手で」で1マスの両はしをタップしてください</div>'}
+      <label style="display:flex;align-items:center;justify-content:flex-start;text-align:left;gap:8px;font-size:12px;color:#94a3b8;margin-top:8px;"><input type="checkbox" style="width:18px;height:18px;flex:none;margin:0;" ${_EC.scan[sd].seen ? 'checked' : ''} onchange="_EC.scan['${sd}'].seen=this.checked;_echoRender()">この卵巣は見た（黄体も卵胞もなくても、見たら入れる）</label>` : `<label style="display:flex;align-items:center;justify-content:flex-start;text-align:left;gap:8px;font-size:12px;color:#94a3b8;"><input type="checkbox" style="width:18px;height:18px;flex:none;margin:0;" ${_EC.scan[sd].seen ? 'checked' : ''} onchange="_EC.scan['${sd}'].seen=this.checked;_echoRender()">画像はないが、この卵巣は見た（なにもなかった）</label>`}
+    <div class="nui-card" style="padding:12px;margin-top:14px;background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;">
+      <div style="font-size:13px;font-weight:700;color:#94a3b8;">結果</div>${_echoSvg(_EC.scan, 300)}${_echoSumHTML(_EC.scan, J)}</div>
+    <button type="button" onclick="_echoSave()" ${_EC.scan.R.seen || _EC.scan.L.seen ? '' : 'disabled'} style="width:100%;margin-top:14px;height:50px;border-radius:12px;border:none;background:${_EC.scan.R.seen || _EC.scan.L.seen ? '#22c55e' : '#334155'};color:#0f1117;font-weight:900;font-size:15px;cursor:pointer;font-family:inherit;">この所見を保存する</button>
+  </div>`;
+}
+function _echoTab(k) { _EC.side = k; _EC.mode = ''; _EC.taps = []; _echoRender(); }
+function _echoMode(m) { _EC.mode = _EC.mode === m ? '' : m; _EC.taps = []; _echoRender(); }
+function _echoLoad(f) {
+  if (!f || !_EC) return; const sd = _EC.side;
+  try { if (_EC.url[sd]) URL.revokeObjectURL(_EC.url[sd]); } catch (e) {}
+  const url = URL.createObjectURL(f), img = new Image();
+  img.onload = () => { let A; try { A = _echoAnalyze(img); } catch (e) { console.error('echo', e); A = { err: '画像を読めませんでした' }; }
+    _EC.url[sd] = url; _EC.A[sd] = A; _EC.scan[sd] = { seen: !A.err, ppc: A.ppc0 || 0, shapes: (A.regions || []).map(r => ({ t: r.t, x: _ecR(r.x, 3), y: _ecR(r.y, 3), rx: _ecR(r.rx, 3), ry: _ecR(r.ry, 3), a: _ecR(r.a, 3), auto: 1 })) };
+    _EC.mode = A.ppc ? '' : 'scale'; _EC.taps = []; _echoRender(); };
+  img.onerror = () => { appAlert('画像を読めませんでした'); };
+  img.src = url;
+}
+function _echoTap(ev) {
+  if (!_EC || !_EC.mode) return; const sd = _EC.side, A = _EC.A[sd]; if (!A) return;
+  const svg = document.getElementById('echo-svg'), r = svg.getBoundingClientRect();
+  const px = (ev.clientX - r.left) / r.width * A.W, py = (ev.clientY - r.top) / r.height * A.H;
+  const sc = _EC.scan[sd];
+  if (_EC.mode === 'scale') { _EC.taps.push([px, py]); if (_EC.taps.length === 2) { const [a, b] = _EC.taps, d = Math.hypot(a[0] - b[0], a[1] - b[1]); if (d > 10) {
+      const old = A.ppc; A.ppc = d; A.ppc0 = d / A.s; A.manual = 1; sc.ppc = A.ppc0;
+      if (!old) { A.regions = _echoDark(A.bl, A.W, A.H, A.inS, A.redD, A.ppc, 22); sc.shapes = A.regions.map(x => ({ ...x })); }
+      else sc.shapes.forEach(s => { s.x *= old / d; s.y *= old / d; s.rx *= old / d; s.ry *= old / d; s.a *= Math.pow(old / d, 2); });
+      sc.seen = true; } _EC.taps = []; _EC.mode = ''; } return _echoRender(); }
+  if (!A.ppc) return;
+  const cm = [px / A.ppc, py / A.ppc];
+  if (_EC.mode === 'del') { const hit = sc.shapes.map((s, i) => [s, i]).filter(([s]) => _inEll({ x: cm[0], y: cm[1] }, s)).sort((a, b) => a[0].rx * a[0].ry - b[0].rx * b[0].ry)[0];
+    if (hit) sc.shapes.splice(hit[1], 1); return _echoRender(); }
+  if (_EC.mode === 'fl') {
+    if (!_EC.taps.length) { const f = _echoFlood(A, px, py); if (f) { sc.shapes.push(f); sc.seen = true; return _echoRender(); } _EC.taps.push([px, py]); return _echoRender(); }
+    const [a] = _EC.taps, rr = Math.hypot(px - a[0], py - a[1]) / A.ppc; if (rr > 0.05) { sc.shapes.push({ t: 'fl', x: a[0] / A.ppc, y: a[1] / A.ppc, rx: rr, ry: rr, a: Math.PI * rr * rr }); sc.seen = true; }
+    _EC.taps = []; return _echoRender(); }
+  if (_EC.mode === 'cl') { _EC.taps.push([px, py]); if (_EC.taps.length === 4) { const xs = _EC.taps.map(t => t[0]), ys = _EC.taps.map(t => t[1]);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      if (x1 - x0 > 5 && y1 - y0 > 5) { sc.shapes.push({ t: 'cl', x: (x0 + x1) / 2 / A.ppc, y: (y0 + y1) / 2 / A.ppc, rx: (x1 - x0) / 2 / A.ppc, ry: (y1 - y0) / 2 / A.ppc }); sc.seen = true; }
+      _EC.taps = []; } return _echoRender(); }
+}
+function _echoSave() {
+  if (!_EC) return; const cow = cows.find(c => c.id === _EC.cowId); if (!cow) return;
+  const J = _echoJudge(_EC.scan), r3 = n => _ecR(n, 3);
+  const clean = sd => ({ seen: !!sd.seen, ppc: Math.round(sd.ppc || 0), shapes: (sd.shapes || []).map(s => ({ t: s.t, x: r3(s.x), y: r3(s.y), rx: r3(s.rx), ry: r3(s.ry), ...(s.a != null ? { a: r3(s.a) } : {}) })) });
+  const b = J.bestCL;
+  const scan = { id: 'sc' + Date.now().toString(36), date: _EC.date, ctx: _EC.ctx, R: clean(_EC.scan.R), L: clean(_EC.scan.L), k: J.k, et: J.et,
+    sum: b ? { side: b.side, d1: _ecR(b.d1, 2), d2: _ecR(b.d2, 2), tis: _ecR(b.tis, 2), ratio: Math.round(b.ratio), cav: !!b.cav, wall: b.wall != null ? _ecR(b.wall, 2) : null } : null, maxFol: _ecR(J.maxFol, 2) };
+  cow.scans = (cow.scans || []).filter(s => !(s.date === scan.date && s.ctx === scan.ctx)); cow.scans.push(scan);
+  if (J.recheck) {
+    const d = addDays(scan.date, _echoRule().recheckDays), act = '🔍 卵巣の再検査';
+    if (!tasks.some(t => t.cowId === cow.id && !t.done && t.action === act && Math.abs(diffDays(t.date, d)) <= 5))
+      tasks.push({ id: Math.random().toString(36).slice(2), date: d, action: act, detail: `${fmtDate(scan.date)}のエコー：${J.recheck}。もう一度エコーで見る（7〜10日後）`, color: '#fbbf24', priority: 'high', cowId: cow.id, done: false });
+  }
+  const cb = _EC.cb; _echoClose(); save(); try { renderAll(); } catch (e) {}
+  if (cb) try { cb(scan, J); } catch (e) { console.error(e); }
+  else appAlert(`保存しました。所見：${OV_LABEL[J.k] || '—'}${J.recheck ? `\n${_echoRule().recheckDays}日後に「卵巣の再検査」の予定を入れました` : ''}`);
+}
+function deleteEchoScan(cowId, id) {
+  const cow = cows.find(c => c.id === cowId); if (!cow) return;
+  appConfirm('このエコーの記録を消しますか？').then(ok => { if (!ok) return; cow.scans = (cow.scans || []).filter(s => s.id !== id); save(); try { renderAll(); } catch (e) {} try { showCowDetail(cowId); } catch (e) {} });
+}
+// 移植の日（とその前日）に測った黄体
+function _scanForET(cowId, d) {
+  const all = [...cows, ...(typeof retiredCows !== 'undefined' ? retiredCows : [])], c = all.find(x => x.id === cowId); if (!c || !c.scans) return null;
+  return c.scans.filter(s => s.sum && (s.date === d || s.date === addDays(d, -1))).sort((a, b) => b.date.localeCompare(a.date))[0] || null;
+}
+// 成績：黄体の大きさ別・腔の割合別の受胎率（ETだけ）
+function echoEtStatsHTML(from, to) {
+  let O = []; try { O = _insemOutcomes(from, to).filter(o => o.isET && !o.excluded); } catch (e) {}
+  const M = O.map(o => ({ o, s: _scanForET(o.cowId, o.rec.date || o.rec.d) })).filter(x => x.s);
+  const Rl = _echoRule();
+  const B1 = [[`${Rl.tisMin}cm²未満`, x => x.tis < Rl.tisMin], [`${Rl.tisMin}〜${Rl.tisOk}cm²`, x => x.tis >= Rl.tisMin && x.tis < Rl.tisOk], [`${Rl.tisOk}〜3.5cm²`, x => x.tis >= Rl.tisOk && x.tis < 3.5], ['3.5cm²以上', x => x.tis >= 3.5]];
+  const B2 = [['腔なし', x => !x.cav], ['25%未満', x => x.cav && x.ratio < 25], ['25〜50%', x => x.cav && x.ratio >= 25 && x.ratio <= 50], ['50%こえ', x => x.cav && x.ratio > 50]];
+  const row = ([l, f]) => { const a = M.filter(x => f(x.s.sum)), p = a.filter(x => x.o.pos).length; return `<div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);"><span>${l}</span><span>${a.length ? `<b class="nui-mono">${Math.round(p / a.length * 100)}%</b><span style="color:#94a3b8;font-size:12px;">（${p}/${a.length}回）</span>` : '<span style="color:#475569;">—</span>'}</span></div>`; };
+  const pics = M.slice().sort((a, b) => String(b.s.date).localeCompare(String(a.s.date))).slice(0, 30).map(x => `<div style="border-top:1px solid rgba(255,255,255,.06);padding:6px 0;"><div style="display:flex;justify-content:space-between;font-size:12.5px;"><span><b class="nui-mono">${x.o.cowId}</b> ${fmtDate(x.o.rec.date || x.o.rec.d)} 移植</span><b style="color:${x.o.pos ? '#4ade80' : '#94a3b8'};">${x.o.pos ? '受胎' : '不受胎'}</b></div>${_echoSvg(x.s, 260)}<div style="font-size:11.5px;color:#94a3b8;">組織 ${x.s.sum.tis}cm²${x.s.sum.cav ? `・腔 ${x.s.sum.ratio}%` : '・腔なし'}</div></div>`).join('');
+  return `<div class="stats-title" style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:6px;">🔬 移植した日の黄体と受胎率</div>
+    ${M.length ? `<div style="font-size:12px;color:#94a3b8;margin-top:4px;">黄体の組織の面積（腔をのぞく）</div>${B1.map(row).join('')}
+      <div style="font-size:12px;color:#94a3b8;margin-top:10px;">腔のしめる割合</div>${B2.map(row).join('')}
+      <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:#94a3b8;">受胎した黄体・しなかった黄体の図を見る（${M.length}回）</summary>${pics}</details>`
+      : '<div style="font-size:12.5px;color:#94a3b8;line-height:1.6;">まだ黄体を測った移植がありません。移植の日（か前日）に「🔬 卵巣エコー」で黄体を測っておくと、ここに出ます。</div>'}
+    <div style="font-size:11px;color:#64748b;margin-top:8px;line-height:1.6;">移植の日か前日に測った黄体（組織がいちばん大きいもの）で数えます。受胎・不受胎は「🎯 受胎率（記録ベース）」のETと同じ数え方です。</div>`;
+}
+
+// ★ 2026/11/25：プログラムを始めるときの「🔍 卵巣の所見」→ どの定時授精プログラムがよいか（小原農場だけ）
+var OV_LABEL = { cl: '黄体あり', nocl: '黄体なし・卵胞あり', cyst: '卵胞嚢腫', static: '卵巣静止', none: '見ていない' };
+// 前回の発情の日（発情・授精の記録。ETは移植の7日前）から何日目か。24日をこえたら分からない扱い
+function _cycDay(cow, at) {
+  let last = '';
+  (cow && cow.events || []).forEach(e => {
+    let d = '';
+    if (['estrus', 'estrus_ai', 'ai_done', 'estrus_et'].includes(e.type)) d = e.date;
+    else if (e.type === 'et_done') d = addDays(e.date, -7);
+    if (d && d <= at && d > last) last = d;
+  });
+  if (!last) return null;
+  const n = diffDays(at, last);
+  return n >= 0 && n <= 24 ? { day: n, from: last } : null;
+}
+// 所見と周期の日から、おすすめ（◎）とつぎの候補（○）
+function _ovRecommend(k, day) {
+  const why = {
+    ov: '周期の前半（5〜10日目）は開始の適期。GnRHで排卵させて、卵胞の波をそろえやすい',
+    lateCl: '周期の後半は途中で黄体がなくなりやすいので、CIDR（P4）で発情を抑えながらGnRHで波をそろえる',
+    early: '排卵してすぐ（1〜4日目）はGnRHが効きにくい時期。周期に関係なく始められるE2＋P4法が無難',
+    unk: '周期がどこか分からないので、周期を気にしなくてよいCIDR-オブシンクかE2＋P4法',
+    nocl: '黄体がないときはP4を足すと受胎率が上がる',
+    cyst: 'E2＋P4法だと新しい卵胞の波を作りにくい。嚢腫にはオブシンク＋P4',
+    static: 'P4（CIDR）が要る',
+    none: '所見がないときは、周期に関係なく始められるE2＋P4法',
+  };
+  if (k === 'cl') {
+    if (day == null) return { best: 'covsynch', next: 'e2p4', why: why.unk };
+    if (day <= 4) return { best: 'e2p4', next: 'covsynch', why: why.early };
+    if (day <= 10) return { best: 'ovsynch', next: 'covsynch', why: why.ov };
+    return { best: 'covsynch', next: 'e2p4', why: why.lateCl };
+  }
+  if (k === 'nocl') return { best: 'covsynch', next: 'e2p4', why: why.nocl };
+  if (k === 'cyst') return { best: 'covsynch', next: '', why: why.cyst };
+  if (k === 'static') return { best: 'covsynch', next: 'e2p4', why: why.static };
+  return { best: 'e2p4', next: 'cidr', why: why.none };
+}
+function _ovFarmRate(key) {
+  try { const G = window.aiProgCalc ? aiProgCalc('2019-01-01', '9999-12-31') : null; const a = G && G[key]; if (!a) return ''; const p = a.filter(x => x.pos).length;
+    return a.length ? `この農場 <b class="nui-mono">${Math.round(p / a.length * 100)}%</b>（${a.length}回）` : 'この農場 <b class="nui-mono">—</b>（0回）'; } catch (e) { return ''; }
+}
+function renderOvaryPanel() {
+  const grp = document.getElementById('qr-event-group'); if (!grp) return;
+  let box = document.getElementById('qr-ovary');
+  const ev0 = (document.getElementById('qr-event') || {}).value || '';
+  const isProg = ev0 === 'cidr_ai_start' || !!_aiProtoOfOpt(ev0);
+  if (!_isObaraFarm() || !isProg || grp.style.display === 'none') { if (box) box.style.display = 'none'; return; }
+  if (!box) { box = document.createElement('div'); box.id = 'qr-ovary'; box.style.cssText = 'margin:-2px 0 12px;'; grp.after(box); }
+  box.style.display = '';
+  const cowId = (document.getElementById('qr-cowid') || {}).value || '';
+  const date = (document.getElementById('qr-date') || {}).value || today();
+  const cow = cows.find(c => c.id === cowId);
+  if (window._qrOvary && window._qrOvary.cow !== cowId) window._qrOvary = null;
+  const cd = _cycDay(cow, date);
+  const sel = window._qrOvary ? window._qrOvary.k : '';
+  const cur = _aiProtoOfOpt(ev0) || 'cidr';
+  const NAME = { cidr: 'いつものCIDR法', e2p4: 'E2＋P4法', ovsynch: 'オブシンク', covsynch: 'CIDR-オブシンク' };
+  const OPT = { cidr: 'cidr_ai_start', e2p4: 'cidr_ai_e2p4', ovsynch: 'cidr_ai_ovsynch', covsynch: 'cidr_ai_covsynch' };
+  const chip = k => `<button type="button" onclick="_ovPick('${k}')" style="border:1px solid ${sel === k ? '#4ade80' : '#2a3050'};color:${sel === k ? '#4ade80' : '#cbd5e1'};font-weight:${sel === k ? 700 : 400};background:#1e2333;border-radius:999px;padding:6px 11px;font-size:12.5px;cursor:pointer;font-family:inherit;">${OV_LABEL[k]}</button>`;
+  const cyc = cd ? `前回の発情（${fmtDate(cd.from)}）から <b>${cd.day}日目</b>（${cd.day <= 4 ? '周期のはじめ' : cd.day <= 10 ? '周期の前半' : cd.day <= 17 ? '周期の後半' : '次の発情が近い'}）` : '前回の発情の記録がないか、24日より前なので、周期の日は分かりません';
+  let rec = '';
+  if (sel) {
+    const r = _ovRecommend(sel, cd ? cd.day : null);
+    const line = (k, mark, strong) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:7px 0;border-top:1px solid rgba(255,255,255,.06);font-size:13px;">
+      <span>${mark} ${strong ? `<b>${NAME[k]}</b>` : NAME[k]}</span><span style="display:flex;align-items:center;gap:6px;font-size:12px;color:#94a3b8;white-space:nowrap;">${_ovFarmRate(k)}${cur === k ? '<span style="color:#4ade80;font-weight:700;">えらび中</span>' : `<button type="button" onclick="_ovUse('${OPT[k]}')" style="border:1px solid #4ade80;color:#4ade80;background:none;border-radius:8px;padding:4px 9px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">これにする</button>`}</span></div>`;
+    rec = `<div style="border:1.5px solid #4ade80;border-radius:10px;padding:8px 12px 10px;margin-top:10px;background:rgba(74,222,128,.05);">
+      <div style="font-size:13px;font-weight:700;color:#4ade80;margin-bottom:2px;">おすすめ</div>
+      ${line(r.best, '◎', true)}<div style="font-size:12px;color:#94a3b8;line-height:1.6;margin:-2px 0 4px;">${r.why}</div>
+      ${r.next ? line(r.next, '○', false) : ''}
+      <div style="font-size:11px;color:#64748b;margin-top:6px;line-height:1.6;">ゾエティスの解説をもとにした目安です。決めるのは先生です。所見は記録に残り、成績の「所見別」にも使います。</div></div>`;
+  }
+  box.innerHTML = `<div style="font-size:12px;color:var(--muted,#94a3b8);margin-bottom:6px;">🔍 卵巣の所見（エコー・直検）</div>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;line-height:1.6;">${cyc}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">${Object.keys(OV_LABEL).map(chip).join('')}</div>
+    <button type="button" onclick="_ovEcho()" style="margin-top:8px;width:100%;border:1px dashed #2a3050;background:none;color:#cbd5e1;border-radius:10px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit;">📷 エコー画像から測って決める</button>
+    ${window._qrOvary && window._qrOvary.scan ? `<div style="font-size:12px;color:#94a3b8;margin-top:6px;">🔬 エコーで測った所見です${window._qrOvary.scan.sum ? `（黄体 組織 ${window._qrOvary.scan.sum.tis}cm²${window._qrOvary.scan.sum.cav ? '・腔 ' + window._qrOvary.scan.sum.ratio + '%' : ''}）` : ''}</div>` : ''}${rec}`;
+}
+function _ovPick(k) {
+  const cowId = (document.getElementById('qr-cowid') || {}).value || '';
+  const date = (document.getElementById('qr-date') || {}).value || today();
+  const cur = window._qrOvary && window._qrOvary.cow === cowId ? window._qrOvary.k : '';
+  if (cur === k) window._qrOvary = null;
+  else { const cd = _cycDay(cows.find(c => c.id === cowId), date); window._qrOvary = { cow: cowId, k, day: cd ? cd.day : null }; }
+  renderOvaryPanel();
+}
+function _ovEcho() {
+  const cowId = (document.getElementById('qr-cowid') || {}).value || ''; if (!cowId) return;
+  const date = (document.getElementById('qr-date') || {}).value || today();
+  openEchoScan(cowId, date, 'prog', (scan, J) => { const cd = _cycDay(cows.find(c => c.id === cowId), date); window._qrOvary = { cow: cowId, k: J.k, day: cd ? cd.day : null, scan }; renderOvaryPanel(); });
+}
+function _ovUse(opt) { const s = document.getElementById('qr-event'); if (!s) return; s.value = opt; onQrEventChange(); }
+// 長島さんなど小原農場でないところでは、オブシンク系のえらび肢を出さない
+setTimeout(() => { try { if (!_isObaraFarm()) document.querySelectorAll('#qr-event option.obara-only').forEach(o => o.remove()); } catch (e) {} }, 0);
 // プログラム開始日から計算した授精・移植の予定日（未来なら、使う精液・受精卵の欄は出さない）
 function _qrInsemPlan(ev0, date) {
-  const P = { cidr_ai_start: 'cidr_ai', estrus_et: 'estrus_et', et_recipient: 'et_cidr', et_recipient_takahashi: 'et_cidr_takahashi' }[ev0];
+  const P = { cidr_ai_start: 'cidr_ai', cidr_ai_e2p4: 'cidr_ai_e2p4', cidr_ai_ovsynch: 'ovsynch', cidr_ai_covsynch: 'cidr_ovsynch', estrus_et: 'estrus_et', et_recipient: 'et_cidr', et_recipient_takahashi: 'et_cidr_takahashi' }[ev0];
   if (!P || !date || typeof PROTOCOLS === 'undefined' || !PROTOCOLS[P]) return null;
   const it = PROTOCOLS[P](date).find(x => /人工授精|AI実施|胚移植/.test(x.action || ''));
   return it ? { date: addDays(date, it.day), et: /胚移植/.test(it.action) } : null;
@@ -15347,13 +15782,13 @@ function _qrFutureSemen() {
     note.innerHTML = `${pl.et ? '移植' : '授精'}の予定日は <b>${fmtDate(pl.date)}</b> です。使う${pl.et ? '受精卵' : '精液'}は、その日に${pl.et ? '移植' : '授精'}を記録するときに入れてください。`;
   } else {
     note.style.display = 'none';
-    const ev = ev0 === 'et_recipient_takahashi' ? 'et_recipient' : ev0;
+    const ev = ev0 === 'et_recipient_takahashi' ? 'et_recipient' : _aiProtoOfOpt(ev0) ? 'cidr_ai_start' : ev0;
     g.style.display = ['ai_done', 'estrus_ai', 'cidr_ai_start', 'et_done', 'et_recipient', 'estrus_et'].includes(ev) ? '' : 'none';
   }
 }
 function onQrEventChange() {
   const ev0 = document.getElementById('qr-event').value;
-  const ev = ev0 === 'et_recipient_takahashi' ? 'et_recipient' : ev0;
+  const ev = ev0 === 'et_recipient_takahashi' ? 'et_recipient' : _aiProtoOfOpt(ev0) ? 'cidr_ai_start' : ev0;
   const isAiEt = ev === 'ai_done' || ev === 'et_done';
   const isAI = ['ai_done','estrus_ai','cidr_ai_start'].includes(ev);
   const isET = ['et_done','et_recipient','estrus_et'].includes(ev);
@@ -15365,6 +15800,7 @@ function onQrEventChange() {
   const semEmbGroup = document.getElementById('qr-semen-embryo-group');
   if (semEmbGroup) semEmbGroup.style.display = (isAI || isET) ? '' : 'none';
   try { _qrFutureSemen(); } catch (e) {}
+  try { renderOvaryPanel(); } catch (e) { console.error('ovaryPanel', e); }
   document.getElementById('qr-date-label').textContent =
     ev === 'calving' ? '分娩日' :
     ev === 'cidr_ai_start' || ev === 'et_recipient' || ev === 'donor_et_start' ? 'プログラム開始日（D0）' :
@@ -15492,6 +15928,9 @@ async function submitQuickReg() {
   // 高橋式の受卵牛プログラムは、記録の種類は「ETレシピエント」のまま、スケジュールだけ高橋式にする
   window._etTakahashi = event === 'et_recipient_takahashi';
   if (window._etTakahashi) event = 'et_recipient';
+  // ★ E2＋P4法も、記録の種類は「CIDRプログラム開始（AI）」のまま、スケジュールだけE2＋P4法にする（protocol:'e2p4' で見分ける）
+  window._aiProto = _aiProtoOfOpt(event);
+  if (window._aiProto) event = 'cidr_ai_start';
   const date  = document.getElementById('qr-date').value;
   if (!event) { alert('イベント種別を選択してください'); return; }
   if (!date)  { alert('日付を入力してください'); return; }
@@ -17714,7 +18153,7 @@ function openDeleteTask(taskId) {
   // 🔄 完全リセット：このプログラム分を完了済みも含めて削除し、最初から組み直せる状態にする
   // 過去の別プログラムを消さないよう、「CIDR挿入から次のCIDR挿入の直前まで」をひとまとまりとする
   const findProgramScope = () => {
-    const isStart = t => t.action.includes('CIDR挿入');
+    const isStart = t => t.action.includes('CIDR挿入') || t.action === 'GnRH投与';   // オブシンクは GnRH投与 から始まる
     const mine = tasks.filter(t => t.cowId === cowId).sort((a,b)=>
       (a.date||'').localeCompare(b.date||'') || (a.id||'').localeCompare(b.id||''));
     const idx = mine.findIndex(t => t.id === taskId);
@@ -27294,6 +27733,10 @@ function saveCalvingRecord() {
   )));
 
   if (document.getElementById('cr-rp')?.checked) { try { addRetainedPlacenta(cowId, calvingDate); } catch (e) {} }
+  // ★ 2026/11/24：分娩のあとの予定（子牛のイーエスイー・授精開始可能日など）を作る。前はこの画面から記録すると作られていなかった
+  //   産後検診・卵巣子宮エコーは2週間ごとの繁殖検診で見るので作らない
+  try { generateSchedule('calving', calvingDate, cowId).filter(x => !/産後検診|卵巣・子宮エコー/.test(x.action)).forEach(x => {
+    if (!tasks.some(t => t.cowId === cowId && t.action === x.action && Math.abs(diffDays(t.date, x.date)) <= 5)) tasks.push(x); }); } catch (e) { console.error('calvingSchedule', e); }
   save();
   // ET産仔の胚番号を自動補完（保存直後に実行）
   let calvesFixed2 = false;
@@ -27532,12 +27975,12 @@ function renderFatList() {
         <span style="color:#fb923c;font-weight:700;white-space:nowrap;">${mo}か月</span></div>
       <div style="font-size:11.5px;color:#94a3b8;margin-top:3px;">${E(fmtDate(c.dob))}生まれ${dam ? '・母 ' + E(dam) : ''}${c.sire ? '・父 ' + E(c.sire) : ''}${loc ? '・🏠 ' + E(loc) : ''}</div>
       ${ship ? `<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${ship}</div>` : ''}${just}
-      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;"><button class="nui-chip" style="font-size:11.5px;padding:4px 10px;" onclick="event.stopPropagation();openMoveDialog('calf','${E(c.id)}','出荷')">🚚 出荷</button><button class="nui-chip" style="font-size:11.5px;padding:4px 10px;" onclick="event.stopPropagation();openMoveDialog('calf','${E(c.id)}')">🏠 移動</button><button class="nui-chip" style="font-size:11.5px;padding:4px 10px;" onclick="event.stopPropagation();recordCalfDeath('${E(c.id)}')">✕ 死亡</button></div></div>`;
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;"><button class="nui-chip" style="font-size:12px;padding:5px 12px;" onclick="event.stopPropagation();openFatRec('calf','${E(c.id)}')">➕ 記録</button><button class="nui-chip" style="font-size:12px;padding:5px 12px;" onclick="event.stopPropagation();showCalfStory('${E(c.id)}')">📖 ストーリー</button></div></div>`;
   };
   box.innerHTML = `<div style="font-size:12px;color:#94a3b8;margin:2px 2px 8px;">${M}か月齢から上の牛　<b style="color:#e2e8f0;font-size:14px;">${all.length}頭</b>（${mLab.replace('♂ ', '')} ${nM}・雌 ${nF}）</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${chip('sex', 'all', '全て ' + all.length)}${chip('sex', 'm', mLab + ' ' + nM)}${chip('sex', 'f', '♀ 雌 ' + nF)}${chip('sort', 'old', '月齢↓ 上から')}${chip('sort', 'young', '月齢↑ 若い順')}</div>
     ${L.length ? L.map(row).join('') : `<div style="color:#94a3b8;font-size:13px;padding:16px 4px;">${all.length ? '当てはまる牛がいません' : M + 'か月齢になった子牛はまだいません'}</div>`}
-    <div style="font-size:11.5px;color:#64748b;margin:10px 2px;line-height:1.6;">押すとその牛の画面が開きます。出荷・移動・死亡は下のボタンから記録します。<br>「🌟 保留（繁殖候補）」にした雌は、${M}か月をこえても子牛のほうに残ります。</div>`;
+    <div style="font-size:11.5px;color:#64748b;margin:10px 2px;line-height:1.6;">出荷・移動・死亡・治療は「➕ 記録」から入れます。<br>「🌟 保留（繁殖候補）」にした雌は、${M}か月をこえても子牛のほうに残ります。</div>`;
 }
 // ===== ★ 2026/11/24：📥 在籍牛の一覧（JA・改良組合などの表：個体識別番号_10桁・本牛名号・最新分娩日…）から取り込む =====
 // エクセル（.xlsx）・CSV・コピーして貼り付け、のどれでも読める。読んだ中身を見せて、1頭ずつ状態を直してから取り込む
@@ -27728,13 +28171,48 @@ function renderRetFatList() {
       <div style="font-size:12px;color:#e2e8f0;margin-top:3px;">肥育に入って <b>${mo ? mo + 'か月' + (rest ? rest + '日' : '') : days + '日'}</b>（${fmtDate(st)}から）</div>
       <div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${[age, c.lactation ? c.lactation + '産' : '', c.reason ? '廃用の理由：' + E(c.reason) : ''].filter(Boolean).join('・')}</div>
       ${plan ? `<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${plan}</div>` : ''}
-      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;"><button class="nui-chip" style="font-size:11.5px;padding:4px 10px;" onclick="event.stopPropagation();recordRetiredShip('${E(c.id)}')">🚚 出荷を記録</button></div></div>`;
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;"><button class="nui-chip" style="font-size:12px;padding:5px 12px;" onclick="event.stopPropagation();openFatRec('ret','${E(c.id)}')">➕ 記録</button><button class="nui-chip" style="font-size:12px;padding:5px 12px;" onclick="event.stopPropagation();showCowDetail('${E(c.id)}')">📖 ストーリー</button></div></div>`;
   };
   box.innerHTML = `<div style="font-size:12px;color:#94a3b8;margin:2px 2px 8px;">廃用にして肥育している牛（経産肥育）　<b style="color:#e2e8f0;font-size:14px;">${all.length}頭</b></div>
     ${L.length ? L.map(row).join('') : `<div style="color:#94a3b8;font-size:13px;padding:16px 4px;">${all.length ? '当てはまる牛がいません' : '経産肥育の牛はいません'}</div>`}
     <div style="font-size:11.5px;color:#64748b;margin:10px 2px;line-height:1.6;">廃用を記録するときに「廃用肥育」をえらんだ牛が入ります。押すとその牛の画面が開きます。</div>`;
 }
 function addMonthsSafe(d, n) { const [y, m, dd] = String(d).slice(0, 10).split('-').map(Number); const t = new Date(Date.UTC(y, m - 1 + n, 1)); const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate(); t.setUTCDate(Math.min(dd, last)); return t.toISOString().slice(0, 10); }
+// ★ 2026/11/24：🥩 肥育・🐄 経産肥育の「➕ 記録」。親牛と同じボタンを並べて、肥育に関係ないものはうすくして押せないようにする
+function openFatRec(kind, id) {
+  const isCalf = kind === 'calf';
+  const c = isCalf ? calves.find(x => x.id === id) : (typeof retiredCows !== 'undefined' ? retiredCows : []).find(x => x.id === id);
+  if (!c) return;
+  const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const tag = isCalf ? (c.earTagId || '') : c.id;
+  const on = isCalf
+    ? { med: `openVetTab('${E(c.earTagId || c.id)}')`, move: `openMoveDialog('calf','${E(c.id)}')`, memo: `openCalfNote('${E(c.id)}')`, dead: `recordCalfDeath('${E(c.id)}')`, ship: `openMoveDialog('calf','${E(c.id)}','出荷')` }
+    : { med: `openVetTab('${E(c.id)}')`, dead: `retFatDead('${E(c.id)}')`, ship: `recordRetiredShip('${E(c.id)}')` };
+  const T = [['ai', '💉', '種付け・移植'], ['estrus', '🔥', '発情'], ['calv', '🍼', '分娩'], ['med', '💊', '治療'], ['prog', '📅', 'プログラム'], ['move', '🏠', '移動'], ['still', '💔', '流死産'], ['memo', '📝', 'メモ'], ['dead', '💀', '死亡'], ['ship', '🚚', '出荷'], ['preg', '🔍', '妊鑑']];
+  const who = isCalf ? '🥩 肥育牛' : '🐄 経産肥育の牛';
+  const sub = isCalf ? `${who}・${_ageMonths(c.dob, today())}か月` : `${who}・肥育 ${diffDays(today(), c.retireDate || today())}日目`;
+  document.getElementById('fatrec-modal')?.remove();
+  const w = document.createElement('div'); w.id = 'fatrec-modal';
+  w.style.cssText = 'position:fixed;inset:0;z-index:9300;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:12px;';
+  w.innerHTML = `<div style="background:#0f1117;border:1px solid #2a3050;border-radius:16px;width:100%;max-width:420px;padding:16px;color:#e2e8f0;">
+    <div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:16px;">➕ 記録する　<span class="nui-mono" style="color:#4ade80;">${E(tag || '耳標なし')}</span> ${E(c.name || (isCalf ? '' : cowDisplayName(c.id) || ''))}</b><button class="modal-close" onclick="document.getElementById('fatrec-modal').remove()">✕</button></div>
+    <div style="font-size:12px;color:#94a3b8;margin:4px 0 12px;">${sub}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">${T.map(([k, i, l]) => on[k]
+      ? `<div class="nui-tile nui-n" style="padding:12px 4px;cursor:pointer;" onclick="document.getElementById('fatrec-modal').remove();${on[k]}"><div class="i">${i}</div><div class="l">${l}</div></div>`
+      : `<div class="nui-tile nui-n" style="padding:12px 4px;opacity:.32;border-style:dashed;cursor:not-allowed;" onclick="appAlert('${isCalf ? '肥育牛' : '経産肥育の牛'}には使いません')"><div class="i">${i}</div><div class="l">${l}</div></div>`).join('')}</div>
+    <div style="font-size:11.5px;color:#64748b;margin-top:10px;">うすいボタンは、肥育に関係ないので押せません</div></div>`;
+  document.body.appendChild(w);
+}
+// 経産肥育の牛が死んだ：廃用の出かたを「死亡」に変える（💀 死亡のほうに移る）
+async function retFatDead(id) {
+  const c = retiredCows.find(x => x.id === id); if (!c) return;
+  const d = await appPrompt(`${id} ${c.name || ''} が死んだ日（例 ${today()}）`, today()); if (d == null) return;
+  const dd = _zsDate(d) || (/^\d{4}-\d{2}-\d{2}$/.test(d.trim()) ? d.trim() : ''); if (!dd) { appAlert('日付は 2026-11-24 の形で入れてください'); return; }
+  const why = await appPrompt('死んだ原因（なくてもOK）', ''); if (why == null) return;
+  c.retireExit = 'dead'; c.deathDate = dd; c.retireMemo = [c.retireMemo, `廃用肥育中に死亡（${fmtDate(dd)}）${why.trim() ? '：' + why.trim() : ''}`].filter(Boolean).join(' ／ '); c._mt = Date.now();
+  try { _store.setItem('retiredCows', JSON.stringify(retiredCows)); } catch (e) {}
+  save(); renderAll(); appAlert('死亡にしました。「🚫 廃用・死亡」の「💀 死亡」に入ります');
+}
 function renderCalves() {
   try { _fatModeApply(); } catch (e) { console.error('fatMode', e); }
   { const ba = document.getElementById('birth-report-alert'); if (ba && typeof birthReportAlertHTML === 'function') ba.innerHTML = birthReportAlertHTML(); }
@@ -33797,6 +34275,11 @@ function confirmRetire() {
 }
 
 function switchRetiredTab(tab) {
+  if (tab === 'fat') tab = 'calf';   // 育成・肥育の死亡は「💀 死亡」の中へ
+  window._retView = tab === 'retfat' ? 'retfat' : 'ret';
+  { const rb = document.getElementById('retired-tab-retfat'); if (rb) { const on = tab === 'retfat'; rb.style.background = on ? '#1a1208' : 'var(--bg3)'; rb.style.borderColor = on ? '#fb923c' : 'var(--border)'; rb.style.color = on ? '#fb923c' : 'var(--muted)'; } }
+  if (tab === 'retfat' || tab === 'cow') { try { renderRetiredList(); } catch (e) {} }
+  const isRetFatV = tab === 'retfat'; if (isRetFatV) tab = 'cow';
   const isCow = tab === 'cow';
   const isCalf = tab === 'calf';
   const isMis = tab === 'miscarriage';
@@ -33813,9 +34296,9 @@ function switchRetiredTab(tab) {
   const cowBtn = document.getElementById('retired-tab-cow');
   const calfBtn = document.getElementById('retired-tab-calf');
   const misBtn = document.getElementById('retired-tab-miscarriage');
-  cowBtn.style.background  = isCow ? '#0a1a2a' : 'var(--bg3)';
-  cowBtn.style.borderColor = isCow ? 'var(--info)' : 'var(--border)';
-  cowBtn.style.color       = isCow ? 'var(--info)' : 'var(--muted)';
+  cowBtn.style.background  = isCow && !isRetFatV ? '#0a1a2a' : 'var(--bg3)';
+  cowBtn.style.borderColor = isCow && !isRetFatV ? 'var(--info)' : 'var(--border)';
+  cowBtn.style.color       = isCow && !isRetFatV ? 'var(--info)' : 'var(--muted)';
   calfBtn.style.background  = isCalf ? '#1a0808' : 'var(--bg3)';
   calfBtn.style.borderColor = isCalf ? 'var(--danger)' : 'var(--border)';
   calfBtn.style.color       = isCalf ? '#fca5a5' : 'var(--muted)';
@@ -34021,12 +34504,14 @@ function renderRetiredList() {
   }
 
   // 廃用牛セクション
-  document.getElementById('retired-count').textContent = `${retiredCows.length}頭`;
-  if (!retiredCows.length) { container.innerHTML=''; empty.style.display=''; }
-  else {
-    empty.style.display = 'none';
-    const sorted = [...retiredCows].sort((a,b)=>(b.retireDate||'').localeCompare(a.retireDate||''));
-    container.innerHTML = sorted.map(cow => {
+  // ★ 2026/11/24：何があったかで分ける（🚫 廃用／🥩 廃用肥育／💀 死亡）
+  const _isRetFat = c => c.retireExit === 'fatten' && !c.shipDate;
+  const _RV = window._retView === 'retfat' ? 'retfat' : 'ret';
+  const RCv = retiredCows.filter(c => !_retIsDead(c) && (_RV === 'retfat' ? _isRetFat(c) : !_isRetFat(c)));
+  document.getElementById('retired-count').textContent = `${retiredCows.filter(c => !_retIsDead(c) && !_isRetFat(c)).length}頭`;
+  { const e2 = document.getElementById('retfat-count'); if (e2) e2.textContent = `${retiredCows.filter(c => !_retIsDead(c) && _isRetFat(c)).length}頭`; }
+  { const em = document.getElementById('retired-empty'); if (em) em.textContent = _RV === 'retfat' ? '廃用肥育の牛はいません' : '廃用牛はいません'; }
+  const _rcard = cow => {
       const pedigree = [cow.sire, cow.maternalSire].filter(Boolean).join(' × ');
       return `<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;opacity:0.85;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
@@ -34040,8 +34525,8 @@ function renderRetiredList() {
         ${cow.retireExit === 'fatten' && !cow.shipDate ? `<div style="background:#1a0f00;border:1px dashed #b45309;border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:12px;color:var(--text);">廃用肥育 <b style="color:var(--warn);">${diffDays(today(), cow.retireDate)}日目</b>${cow.shipPlan ? `・出荷予定 <b>${fmtDate(cow.shipPlan)}</b>（${diffDays(cow.shipPlan, today()) >= 0 ? 'あと' + diffDays(cow.shipPlan, today()) + '日' : '<span style=\'color:var(--danger);\'>' + (-diffDays(cow.shipPlan, today())) + '日超過</span>'}）` : ''}</div>` : ''}
         ${cow.retireSnapshot ? `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;">廃用時：${[cow.retireSnapshot.ageYears != null ? cow.retireSnapshot.ageYears + '歳' : '', cow.retireSnapshot.lactation != null ? cow.retireSnapshot.lactation + '産' : '', cow.retireSnapshot.openDays != null ? '空胎' + cow.retireSnapshot.openDays + '日' : '', '授精' + cow.retireSnapshot.insemCount + '回', cow.retireSnapshot.rate != null ? '受胎率' + cow.retireSnapshot.rate + '%' : ''].filter(Boolean).join('・')}</div>` : ''}
         <div style="font-size:12px;color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:10px;">
-          <div>廃用日: <strong style="color:var(--text);">${fmtDate(cow.retireDate)}</strong></div>
-          <div>理由: <strong style="color:var(--warn);">${cow.reason||'—'}</strong></div>
+          <div>${_retIsDead(cow) ? '死亡日' : '廃用日'}: <strong style="color:var(--text);">${fmtDate(_retIsDead(cow) && cow.deathDate ? cow.deathDate : cow.retireDate)}</strong></div>
+          <div>${_retIsDead(cow) ? '原因' : '理由'}: <strong style="color:var(--warn);">${cow.reason||'—'}</strong></div>
           ${cow.breed?`<div>品種: <strong style="color:var(--text);">${cow.breed}</strong></div>`:''}
           ${cow.lactation?`<div>産次: <strong style="color:var(--text);">${cow.lactation}産</strong></div>`:''}
           ${cow.dob?`<div>生年月日: <strong style="color:var(--text);">${fmtDate(cow.dob)}</strong></div>`:''}
@@ -34056,21 +34541,19 @@ function renderRetiredList() {
           <button onclick="deleteRetiredCow('${cow.id}')" style="background:none;border:1px solid var(--danger);color:var(--danger);font-size:12px;padding:6px 12px;border-radius:8px;cursor:pointer;">🗑 完全削除</button>
         </div>
       </div>`;
-    }).join('');
+  };
+  window._rcard = _rcard;
+  if (!RCv.length) { container.innerHTML=''; empty.style.display=''; }
+  else {
+    empty.style.display = 'none';
+    container.innerHTML = [...RCv].sort((a,b)=>(b.retireDate||'').localeCompare(a.retireDate||'')).map(_rcard).join('');
   }
 
-  // 死亡子牛セクション
+  // ★ 2026/11/24：💀 死亡（親牛・死産・子牛・育成・肥育を、まぜずに切りかえて出す）
   const deadContainer = document.getElementById('dead-calves-container');
   const deadEmpty = document.getElementById('dead-calves-empty');
   if (!deadContainer) return;
-  // ★ 2026/11/24：死んだときの月齢で分ける（〜4か月＝子牛、5〜12か月＝育成、13か月〜＝肥育）。育成・肥育は「🐂 育成・肥育」のほうに出す
-  const deadCalvesY = deadCalves.filter(c => deathStage(c.dob, c.deathDate, '子牛') === '子牛');
-  try { renderFatDeaths(); } catch (e) {}
-  document.getElementById('dead-calves-count').textContent = `${deadCalvesY.length}頭`;
-  if (!deadCalvesY.length) { deadContainer.innerHTML=''; deadEmpty.style.display=''; return; }
-  deadEmpty.style.display = 'none';
-  const sortedDead = [...deadCalvesY].sort((a,b)=>(b.deathDate||'').localeCompare(a.deathDate||''));
-  deadContainer.innerHTML = sortedDead.map(calf => {
+  const _calfCard = calf => {
     const damName = calf.damId ? `${calf.damId} ${cowDisplayName(calf.damId)||''}` : '—';
     const pedigree = [calf.sire, calf.maternalSire].filter(Boolean).join(' × ');
     return `<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;opacity:0.85;">
@@ -34095,7 +34578,39 @@ function renderRetiredList() {
         <button class="calf-undo-death-btn" data-calfid="${calf.id}" style="background:var(--bg3);border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;">↩ 死亡取り消し</button>
       </div>
     </div>`;
-  }).join('');
+  };
+  const G = _deadGroups();
+  const tot = Object.values(G).reduce((n, L) => n + L.length, 0);
+  document.getElementById('dead-calves-count').textContent = `${tot}頭`;
+  const KEYS = [['cow', '親牛'], ['still', '死産'], ['calf', '子牛'], ['rear', '育成'], ['fat', '肥育']];
+  let k = window._deadF; if (!k || !G[k]) k = (KEYS.find(([x]) => G[x].length) || ['cow'])[0];
+  const chips = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${KEYS.map(([x, l]) => `<button onclick="window._deadF='${x}';renderRetiredList()" style="border:1px solid ${x === k ? 'var(--text)' : 'var(--border)'};background:${x === k ? 'var(--text)' : 'var(--bg3)'};color:${x === k ? 'var(--bg)' : 'var(--text)'};border-radius:16px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;">${l} ${G[x].length}</button>`).join('')}</div>`;
+  const note = { cow: '親牛の死亡（廃用のときに「💀 死亡・廃棄」をえらんだ牛、理由が死亡・事故などの牛）', still: '死産（お産の記録で「死産」にした子）', calf: '子牛の死亡（生後4か月まで・死産はのぞく）', rear: '育成牛の死亡（5〜12か月）', fat: '肥育牛の死亡（13か月から）' }[k];
+  const addBtn = (k === 'rear' || k === 'fat') ? `<button onclick="openFatDeathForm()" style="width:100%;background:var(--bg3);border:1px dashed var(--border);color:var(--text);font-size:13px;font-weight:700;padding:9px;border-radius:8px;cursor:pointer;margin-bottom:10px;">＋ 育成・肥育牛の死亡を記録（子牛の一覧にいない牛）</button>` : '';
+  const L = G[k];
+  deadEmpty.style.display = 'none';
+  const fdCard = r => `<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;"><span style="font-weight:700;">${_stEsc(r.tag || '番号なし')} <span style="font-size:11px;color:var(--muted);font-weight:400;">${_stEsc([r.breed, r.sex, r.dob ? Math.floor(diffDays(r.date, r.dob) / 30.4) + 'か月' : ''].filter(Boolean).join('・'))}</span></span><span style="font-size:12px;color:var(--muted);">${fmtDate(r.date)}</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">原因：<strong style="color:var(--warn);">${_stEsc(r.cause || '未記入')}</strong></div>
+      <div style="display:flex;gap:8px;margin-top:8px;"><button class="ann-mini" onclick="openFatDeathForm('${r.id}')">✏ 修正</button><button class="ann-mini" style="color:var(--danger);" onclick="delFatDeath('${r.id}')">削除</button></div></div>`;
+  deadContainer.innerHTML = chips + `<div style="font-size:12px;color:var(--muted);margin:0 2px 8px;">${note}</div>` + addBtn +
+    (L.length ? L.map(x => x._fd ? fdCard(x._fd) : x._cow ? window._rcard(x._cow) : _calfCard(x._calf)).join('') : `<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">いません</div>`);
+}
+// 死亡かどうか（廃用のときに「死亡・廃棄」をえらんだ、または理由が死亡・事故など）
+function _retIsDead(c) { return c && (c.retireExit === 'dead' || /死亡|事故|斃死|へい死|急死|死廃/.test(String(c.reason || ''))); }
+function _deadGroups() {
+  const G = { cow: [], still: [], calf: [], rear: [], fat: [] };
+  retiredCows.filter(_retIsDead).forEach(c => G.cow.push({ _cow: c, d: c.deathDate || c.retireDate }));
+  const FD0 = typeof fattenDeaths !== 'undefined' ? fattenDeaths : [];
+  calves.filter(c => c.deathDate).forEach(c => {
+    if (typeof _annIsStill === 'function' && _annIsStill(c)) return G.still.push({ _calf: c, d: c.deathDate });
+    const st = deathStage(c.dob, c.deathDate, '子牛');
+    (st === '子牛' ? G.calf : st === '育成' ? G.rear : G.fat).push({ _calf: c, d: c.deathDate });
+  });
+  FD0.forEach(r => { if (calves.some(c => c.deathDate && (r.calfId === c.id || (r.tag && c.earTagId && r.tag === c.earTagId)))) return;
+    const st = deathStage(r.dob, r.date, r.stage); (st === '子牛' ? G.calf : st === '育成' ? G.rear : G.fat).push({ _fd: r, d: r.date }); });
+  Object.values(G).forEach(L => L.sort((a, b) => String(b.d || '').localeCompare(String(a.d || ''))));
+  return G;
 }
 
 // 死亡日修正・取り消しボタンのイベント委任
@@ -35580,7 +36095,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112410';
+const APP_BUILD = '2026112502';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -36560,7 +37075,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const isPreg = /妊娠鑑定/.test(t.action || '');
     const g = goFor(t);
     const ck = isPreg && !done ? `nuiPreg('${jsq(t.cowId)}')` : isPreg ? '' : `toggleTask('${jsq(t.id)}')`;
-    const open = cowOf(t.cowId) ? `showCowDetail('${jsq(t.cowId)}')` : `openCowQuickView('${jsq(t.cowId)}','${jsq(t.date)}')`;
+    const _tk = cowOf(t.cowId) ? null : taskCalfOf(t.cowId, t.calfId);
+    const open = cowOf(t.cowId) ? `showCowDetail('${jsq(t.cowId)}')` : _tk ? `showCalfStory('${jsq(_tk.id)}')` : `openCowQuickView('${jsq(t.cowId)}','${jsq(t.date)}')`;
     let sub = String(t.detail || '').replace(/<[^>]*>/g, '');
     if ((t.etRecipients || []).length && String(t.action || '').startsWith('【受卵牛】')) sub = `受け牛 ${t.etRecipients.length}頭：${t.etRecipients.join('・')}（受け牛ごとの予定は別に出ます）`;   // ★ 2026/11/24
     if (sub.length > 40) sub = sub.slice(0, 40) + '…';
@@ -36568,7 +37084,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       <button class="nui-ck ${done ? 'on' : ''}" aria-label="済にする" onclick="event.stopPropagation();${ck}">${done ? '✓' : ''}</button>
       <div class="nui-a" style="flex:1;min-width:0;" onclick="${open}">
         <div style="font-size:14px;font-weight:700;text-decoration:${done ? 'line-through' : 'none'};">${esc(t.action)}</div>
-        <div style="font-size:12px;color:#94a3b8;"><span class="nui-mono" style="color:#e2e8f0;font-weight:700;">${esc(t.cowId)}</span> ${esc(nm(t.cowId))} ${showDate ? '<span style="color:#ef4444;">' + md(t.date) + '</span> ' : ''}${esc(sub)}</div>
+        <div style="font-size:12px;color:#94a3b8;"><span class="nui-mono" style="color:#e2e8f0;font-weight:700;">${esc(taskCowLabel(t.cowId, t.calfId))}</span> ${esc(taskCalfOf(t.cowId, t.calfId) ? (taskCalfOf(t.cowId, t.calfId).name || '') : nm(t.cowId))} ${showDate ? '<span style="color:#ef4444;">' + md(t.date) + '</span> ' : ''}${esc(sub)}</div>
       </div>
       ${g ? `<button class="nui-go" style="color:${g[1]};border-color:${g[1]};" onclick="event.stopPropagation();${g[2]}">${g[0]}</button>` : ''}
     </div>`;
@@ -37633,7 +38149,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     ai: ['💉', '種付け・移植', 'nui-g', 'AI・ET・自然交配'], preg: ['🔍', '妊鑑', 'nui-b', ''], et: ['🧬', '移植ET', 'nui-p', ''], calv: ['🍼', '分娩', 'nui-p', ''],
     estrus: ['🔥', '発情', 'nui-o', ''], med: ['💊', '治療', 'nui-b', ''], prog: ['📅', 'プログラム', 'nui-g', ''], move: ['🏠', '移動', 'nui-y', ''],
     still: ['💔', '流死産', 'nui-r', ''], memo: ['📝', 'メモ', 'nui-y', ''],
-    retire: ['🚫', '廃用・死亡', 'nui-r', '売却・死亡・廃棄も'], measure: ['📏', '体測', 'nui-y', '胸囲・体高・体長'], ship: ['🚚', '出荷', 'nui-y', '']
+    retire: ['🚫', '廃用・死亡', 'nui-r', '売却・死亡・廃棄も'], echo: ['🔬', '卵巣エコー', 'nui-b', ''], measure: ['📏', '体測', 'nui-y', '胸囲・体高・体長'], ship: ['🚚', '出荷', 'nui-y', '']
   };
   window.nuiAIet = function () { S.v = 'et'; S.et = null; render(); };
   // ★ 2026/11/21：予定のチェックやストーリーから「AI・移植を記録」を開いたときも、新しい画面にする（古い画面に行かない）
@@ -37667,6 +38183,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     if (k === 'move') return openMoveDialog('cow', id);
     if (k === 'still') { openStillbirthWizard(); try { selectSbWizCow(id, nm(id)); } catch (e) {} return; }
     if (k === 'memo') return openCowNote(id);
+    if (k === 'echo') return openEchoScan(id, today(), 'exam');
     if (k === 'retire') return openRetireModal(id);
     if (k === 'measure') return nuiMeasureStart([{ kind: 'cow', id }]);
     if (k === 'ship') { openRetireModal(id); try { setRetireExit('ship'); } catch (e) {} return; }   // 繁殖牛の出荷＝出荷・販売で廃用
@@ -37677,7 +38194,8 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const FAV = { wait: ['preg', 'ai'], preg: ['calv', 'med'], program: ['ai', 'med'], donor: ['ai', 'med'], fresh: ['ai', 'med'], open: ['ai', 'estrus'] }[k] || ['ai', 'med'];
     const favSub = { preg: nextPreg ? (String(nextPreg.detail || '').match(/\d+日/) || [''])[0] ? '妊娠' + String(nextPreg.detail).match(/(\d+)日/)[1] + '日の予定' : '妊鑑の予定 ' + md(nextPreg.date) : '最後の授精の結果', ai: 'AI・ET・自然交配', calv: c.dueDate ? '予定 ' + md(c.dueDate) : '', med: '薬・処置', estrus: '発情・見送り', et: '受精卵' };
     // ★ 2026/11/20：ボタンの色はぜんぶ同じにする（よく使う2つだけ緑の枠）
-    const rest = ['calv', 'estrus', 'med', 'prog', 'move', 'still', 'memo', ...(measureOn() ? ['measure'] : []), 'retire', 'ship', 'ai', 'preg'].filter(x => !FAV.includes(x)).slice(0, measureOn() ? 10 : 9);
+    const _eo = _isObaraFarm() ? 1 : 0;
+    const rest = ['calv', 'estrus', 'med', 'prog', ...(_eo ? ['echo'] : []), 'move', 'still', 'memo', ...(measureOn() ? ['measure'] : []), 'retire', 'ship', 'ai', 'preg'].filter(x => !FAV.includes(x)).slice(0, (measureOn() ? 10 : 9) + _eo);
     scrShow(`${backBtn("nuiRec(null,null)")}<span style="font-size:17px;font-weight:900;">➕ 記録する</span>`,
       `<div style="margin:12px 14px 0;" class="nui-card"><div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
         <div style="min-width:0;"><span class="nui-mono" style="font-weight:900;font-size:20px;color:#4ade80;">${esc(c.id)}</span> <span style="font-size:16px;font-weight:700;">${esc(nm(c.id))}</span><div style="font-size:12px;color:#94a3b8;">${esc(li ? insLabel(li) + ' ・ ' + diffDays(today(), li.date) + '日前' : cowSub(c))}</div></div>${stTag(c)}</div></div>
@@ -38173,7 +38691,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         const w = document.createElement('div');
         w.style.cssText = 'background:#1a1508;border:1.5px solid #b45309;border-radius:12px;padding:12px;margin:10px 0;';
         w.innerHTML = `<div style="font-size:14px;font-weight:900;color:#fbbf24;margin-bottom:6px;">⚠ プログラム中なのに、これからの予定がありません</div>
-          <div style="font-size:13px;color:#e2e8f0;line-height:1.7;">${st ? `${esc(fmtDate(st.date))} に「${esc((st.type === 'et_recipient' && st.protocol === 'takahashi' ? 'ETレシピエント（高橋式）' : LB[st.type]) || 'プログラム')}」を始めています。` : 'プログラムを始めた記録がありません。'}${lastDone ? `<br>最後に済んだ予定：${esc(fmtDate(lastDone.date))} ${esc(lastDone.action)}` : ''}</div>
+          <div style="font-size:13px;color:#e2e8f0;line-height:1.7;">${st ? `${esc(fmtDate(st.date))} に「${esc((st.type === 'et_recipient' && st.protocol === 'takahashi' ? 'ETレシピエント（高橋式）' : st.type === 'cidr_ai_start' && _aiProgLabel(st.protocol) ? _aiProgLabel(st.protocol) + '（AI）' : LB[st.type]) || 'プログラム')}」を始めています。` : 'プログラムを始めた記録がありません。'}${lastDone ? `<br>最後に済んだ予定：${esc(fmtDate(lastDone.date))} ${esc(lastDone.action)}` : ''}</div>
           <div style="font-size:12px;color:#94a3b8;margin-top:4px;">予定が消えたか、途中でやめた可能性があります。</div>
           <div style="display:flex;gap:8px;margin-top:10px;">
             <button onclick="closeModal('modal-cow');addEventForCow('${jsq(id)}','')" style="flex:1;height:42px;border-radius:10px;border:1px solid #2a3050;background:#1e2333;color:#e2e8f0;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;">📅 プログラムを入れ直す</button>
@@ -38575,6 +39093,12 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     }
     // 移植の成績
     try { etRateCard(box); } catch (e) { console.error('nuiEtRate', e); }
+    try { aiProgCard(box); } catch (e) { console.error('nuiAiProg', e); }
+    try { if (_isObaraFarm()) { box.querySelectorAll('.nui-ecs-card').forEach(x => x.remove()); const yv = ($('stats-year') || {}).value || 'all'; let from = '2019-01-01', to = '9999-12-31';
+      if (yv !== 'all') { const fy = parseInt(String(yv).replace(/\D/g, '')); if (fy) { from = (fy + 2018) + '-01-01'; to = (fy + 2018) + '-12-31'; } }
+      const el = document.createElement('div'); el.className = 'stats-card nui-ecs-card'; el.dataset.nuiSub = 'conc'; el.dataset.nuiOrd = '0';
+      el.style.cssText = 'background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;padding:14px;margin-bottom:12px;order:0;'; el.innerHTML = echoEtStatsHTML(from, to);
+      const et = box.querySelector('.nui-etr-card'); if (et) et.after(el); else box.prepend(el); } } catch (e) { console.error('nuiEchoEt', e); }
     const o = concOpen();
     [...box.children].filter(c => c.dataset.nuiSub === 'conc').forEach(c => {
       const h = c.querySelector(':scope > .stats-title'); if (!h) return;
@@ -38612,6 +39136,60 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     return { prep, P, D, N, O, pos, tr: pct(D.length, P.length), cr: pct(pos, O.length) };
   }
   window.etRateCalc = etRateCalc;
+  // ★ 2026/11/24：💉 授精のやり方別の受胎率（いつものCIDR法／E2＋P4法／発情を見て授精）
+  // 授精の日の8〜16日前に「CIDRプログラム開始（AI）」があれば、そのプログラムでの授精として数える
+  function aiProgCalc(from, to) {
+    const all = [...cows, ...(typeof retiredCows !== 'undefined' ? retiredCows : [])];
+    const byId = {}; all.forEach(c => { if (!byId[c.id]) byId[c.id] = c; });
+    const G = { cidr: [], e2p4: [], ovsynch: [], covsynch: [], none: [] };
+    let O = []; try { O = _insemOutcomes(from, to).filter(o => !o.isET && !o.excluded); } catch (e) {}
+    O.forEach(o => {
+      const d = o.rec.date || o.rec.d, c = byId[o.cowId];
+      const st = c ? (c.events || []).filter(e => e.type === 'cidr_ai_start' && e.date >= addDays(d, -16) && e.date <= addDays(d, -8)).sort((a, b) => b.date.localeCompare(a.date))[0] : null;
+      G[st ? (G[st.protocol] ? st.protocol : 'cidr') : 'none'].push({ id: o.cowId, d, pos: o.pos, st: st ? st.date : '', ov: st ? (st.ovary || '') : '' });
+    });
+    return G;
+  }
+  window.aiProgCalc = aiProgCalc;
+  function aiProgCard(box) {
+    box.querySelectorAll('.nui-aip-card').forEach(x => x.remove());
+    const yv = ($('stats-year') || {}).value || 'all';
+    let from = '2019-01-01', to = '9999-12-31';
+    if (yv !== 'all') { const fy = parseInt(String(yv).replace(/\D/g, '')); if (fy) { from = (fy + 2018) + '-01-01'; to = (fy + 2018) + '-12-31'; } }
+    const G = aiProgCalc(from, to);
+    const L = [['cidr', 'いつものCIDR法', 'D0 CIDR → D9 PG → D10 抜去 → D11 E2 → D12 授精'], ['e2p4', 'E2＋P4法', AI_PROGS.e2p4.how], ...(_isObaraFarm() ? [['ovsynch', 'オブシンク', AI_PROGS.ovsynch.how], ['covsynch', 'CIDR-オブシンク', AI_PROGS.covsynch.how]] : []), ['none', '発情を見て授精', 'プログラムを使っていない授精']];
+    const row = ([k, name, how]) => {
+      const a = G[k], n = a.length, p = a.filter(x => x.pos).length, r = n ? Math.round(p / n * 100) : null;
+      return `<div style="padding:10px 0;border-top:1px solid rgba(255,255,255,.06);">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+          <span style="font-size:14px;font-weight:700;color:#e2e8f0;">${name}</span>
+          <span><span class="nui-mono" style="font-size:22px;font-weight:900;color:${r == null ? '#64748b' : '#e2e8f0'};">${r == null ? '—' : r}</span><span style="font-size:12px;color:#94a3b8;">${r == null ? '' : '%'}</span></span></div>
+        <div style="height:6px;background:#1e2333;border-radius:3px;margin:5px 0 4px;overflow:hidden;"><div style="height:100%;width:${r || 0}%;background:#94a3b8;border-radius:3px;"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:#94a3b8;gap:8px;"><span>${how}</span><span style="white-space:nowrap;">受胎${p} ÷ 授精${n}回</span></div>
+        ${n ? `<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:11.5px;color:#64748b;">授精した牛を見る</summary>${a.slice().sort((x, y) => y.d.localeCompare(x.d)).map(x => `<div class="nui-a" onclick="showCowDetail('${jsq(x.id)}')" style="display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-top:1px solid rgba(255,255,255,.04);cursor:pointer;"><span><b class="nui-mono">${esc(x.id)}</b> ${esc(cowDisplayName(x.id) || '')}</span><span style="color:#94a3b8;">${esc(fmtDate(x.d))} ${x.pos ? '受胎' : '不受胎'}</span></div>`).join('')}</details>` : ''}</div>`;
+    };
+    const nC = G.cidr.length, nE = G.e2p4.length;
+    const unused = L.filter(([k]) => k !== 'cidr' && k !== 'none' && !G[k].length).map(x => x[1]);
+    const note = unused.length === L.length - 2 ? `${unused.join('・')}はまだ使っていません。「📅 プログラム」で「◯◯ プログラム開始」をえらぶと、ここに数が出ます。`
+      : L.some(([k]) => k !== 'none' && G[k].length && G[k].length < 20) ? `まだ回数が少ないやり方は、差が出ても偶然のことがあります。それぞれ20回以上たまってから比べてください（いま ${L.filter(([k]) => k !== 'none' && G[k].length).map(([k, n]) => n.replace('いつもの', '') + ' ' + G[k].length + '回').join('・')}）。` : '';
+    const el = document.createElement('div'); el.className = 'stats-card nui-aip-card'; el.dataset.nuiSub = 'conc'; el.dataset.nuiOrd = '0';
+    el.style.cssText = 'background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;padding:14px;margin-bottom:12px;order:0;';
+    el.innerHTML = `<div class="stats-title" style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:4px;">💉 授精のやり方別の受胎率（${yv === 'all' ? '全期間' : from.slice(0, 4) + '年'}）</div>
+      ${L.map(row).join('')}
+      ${(() => { // ★ 所見別：プログラムを始めたときの卵巣の所見ごとに、やり方別の受胎率
+        const OVL = typeof OV_LABEL !== 'undefined' ? OV_LABEL : {}; const ks = L.map(x => x[0]).filter(k => k !== 'none');
+        const ovs = Object.keys(OVL).filter(o => ks.some(k => G[k].some(x => x.ov === o))); if (!ovs.length) return '';
+        const cell = (k, o) => { const a = G[k].filter(x => x.ov === o), p = a.filter(x => x.pos).length; return a.length ? `${Math.round(p / a.length * 100)}%<span style="color:#64748b;font-size:10.5px;">（${a.length}）</span>` : '<span style="color:#475569;">—</span>'; };
+        const ks2 = ks.filter(k => ovs.some(o => G[k].some(x => x.ov === o)));
+        return `<details style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:#94a3b8;">🔍 卵巣の所見別に見る</summary>
+          <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px;"><tr><th style="text-align:left;color:#64748b;font-weight:400;padding:4px 2px;">所見</th>${ks2.map(k => `<th style="color:#64748b;font-weight:400;padding:4px 2px;">${L.find(x => x[0] === k)[1].replace('いつもの', '')}</th>`).join('')}</tr>
+          ${ovs.map(o => `<tr style="border-top:1px solid rgba(255,255,255,.05);"><td style="padding:5px 2px;color:#e2e8f0;">${OVL[o]}</td>${ks2.map(k => `<td class="nui-mono" style="text-align:center;padding:5px 2px;">${cell(k, o)}</td>`).join('')}</tr>`).join('')}</table></div>
+          <div style="font-size:11px;color:#64748b;margin-top:4px;">（ ）は授精の回数。プログラムを始めるときに所見を入れた授精だけです。</div></details>`; })()}
+      ${note ? `<div style="font-size:12px;color:#fbbf24;margin-top:8px;line-height:1.6;">${note}</div>` : ''}
+      <div style="font-size:11px;color:#64748b;margin-top:8px;line-height:1.6;">AIだけ（ETは入りません）。授精の日の8〜16日前に、それぞれの「プログラム開始」を記録していれば、そのやり方の授精として数えます。受胎・不受胎は「🎯 受胎率（記録ベース）」と同じ数え方です（連注の2回目・ドナーAIは数えません）。</div>`;
+    const et = box.querySelector('.nui-etr-card');
+    if (et) et.after(el); else box.prepend(el);
+  }
   function etRateCard(box) {
     box.querySelectorAll('.nui-etr-card').forEach(x => x.remove());
     const yv = ($('stats-year') || {}).value || 'all';
