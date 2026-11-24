@@ -149,7 +149,8 @@ html.hx-collection #gnav-collection { display: none !important; }
 html.hx-fattening .nui-fatbtn { display: none !important; }
 #page-calves.fatmode > *:not(.nui-cowbar):not(#fattab-list) { display: none !important; }
 #page-calves:not(.fatmode) #fattab-list { display: none !important; }
-.nui-cowbar .tg button.nui-fatbtn.on, #page-calves.fatmode .nui-cowbar .tg button[data-k="fat"] { background:#7c2d12; color:#fdba74; }
+.nui-cowbar .tg button.nui-fatbtn.on { background:#7c2d12; color:#fdba74; }
+.nui-cowbar{flex-wrap:wrap;} .nui-cowbar .tg{flex-wrap:wrap;} .nui-cowbar .tg button{padding:7px 10px;}
 html.hx-fattening #gnav-fattening, html.hx-fattening #nui-side [data-p="fattening"], html.hx-fattening #page-more [data-p="fattening"] { display: none !important; }
 .ib-preg-m { display: flex !important; justify-content: flex-end; }
 html.hx-syncCol #insembook-table th:nth-child(9), html.hx-syncCol #insembook-tbody td:nth-child(9), html.hx-syncCol #ib-sync-all-btn { display: none !important; }
@@ -812,6 +813,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
     </div>
     <button class="btn btn-secondary" style="width:100%;margin-bottom:14px;font-size:13px;" onclick="closeModal('modal-settings');switchTab('history')">📝 変更履歴を見る</button>
     <button class="btn btn-secondary" style="width:100%;margin-bottom:14px;font-size:13px;" onclick="closeModal('modal-settings');openFarmnoteImport()">📥 ファームノートのCSVから牛を取り込む</button>
+    <button class="btn btn-secondary" style="width:100%;margin-bottom:14px;font-size:13px;" onclick="closeModal('modal-settings');openZaisekiImport()">📥 在籍牛の一覧（JA・改良組合などのエクセル）から取り込む</button>
     <button class="btn btn-secondary" style="width:100%;margin-bottom:14px;font-size:13px;" onclick="closeModal('modal-settings');openFnStoryImport()">📋 ファームノートのストーリーを貼り付けて取り込む</button>
     <button class="btn btn-secondary only-noetcert" style="width:100%;margin-bottom:14px;font-size:13px;" onclick="closeModal('modal-settings');openEtShareIn()">🧬 獣医さんから渡された移植の記録を取り込む</button>
     <button class="btn btn-secondary" style="width:100%;margin-bottom:14px;font-size:13px;" onclick="closeModal('modal-settings');openVetRules()">💊 予定をチェックしたら薬品管理にも記録する（設定）</button>
@@ -2099,8 +2101,8 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
       <div class="form-group">
-        <label>精液番号・ロット</label>
-        <input type="text" id="semen-lot" placeholder="例: #A0012">
+        <label>精液の略号</label>
+        <input type="text" id="semen-lot" placeholder="例: HK313">
       </div>
       <div class="form-group">
         <label>現在の在庫本数</label>
@@ -7921,6 +7923,13 @@ function buildCowStory(cowId) {
     }
   });
 
+  // ★ 2026/11/24：在籍牛の一覧から取り込んだときの記録（その日の時点の数）
+  if (cow && cow.importSnap) { const z = cow.importSnap, kv = [];
+    if (z.kids != null) kv.push([z.kids + '頭', '産子数']); if (z.firstCalvAge != null) kv.push([z.firstCalvAge + 'か月', '初回分娩月齢']);
+    if (z.ci != null) kv.push([z.ci + '日', '分娩間隔']); if (z.ciAvg != null) kv.push([z.ciAvg + '日', '分娩間隔の平均']);
+    if (z.dim != null) kv.push([z.dim + '日', '分娩後日数']); if (z.daysAI != null) kv.push([z.daysAI + '日', '授精後日数']); if (z.open != null) kv.push([z.open + '日', '空胎日数']);
+    if (z.aiCount != null) kv.push([z.aiCount + '回', '授精回数']); if (z.code) kv.push([z.code, '授精卵略号']); if (z.regNo) kv.push([z.regNo, '登録番号']); if (z.deposit) kv.push([z.deposit + (z.depositTo ? '（' + z.depositTo + '）' : ''), '預託']);
+    items.push({ date: z.at, cat: 'breed', color: '#94a3b8', title: `📋 取り込んだときの記録（${fmtDate(z.at)}時点）`, badge: null, desc: '在籍牛の一覧から取り込んだときの数です', kv: kv.map(([v, l]) => [_stEsc(String(v)), l]), memo: '', acts: [] }); }
   // ---- 採卵 ----
   (typeof collectionRecordsNew !== 'undefined' ? collectionRecordsNew : []).filter(r => r.donorId === cowId).forEach(r => {
     const fz = (r.frozenEmbryos || []).length, fr = (r.freshEmbryos || []).length;
@@ -8637,7 +8646,11 @@ function renderFatDeaths() {
   const el = document.getElementById('fat-death-list');
   if (!el) return;
   const esc = _stEsc;
-  const list = [...(typeof fattenDeaths !== 'undefined' ? fattenDeaths : [])].sort((a, b) => b.date.localeCompare(a.date));
+  const FD0 = typeof fattenDeaths !== 'undefined' ? fattenDeaths : [];
+  // ★ 2026/11/24：子牛の一覧で死亡にした牛のうち、育成・肥育の月齢だった牛もここに出す（同じ牛が死亡記録にもあれば1つだけ）
+  const fromCalves = (typeof calves !== 'undefined' ? calves : []).filter(c => c.deathDate && deathStage(c.dob, c.deathDate, '子牛') !== '子牛' && !FD0.some(r => r.calfId === c.id || (r.tag && c.earTagId && r.tag === c.earTagId)))
+    .map(c => ({ id: 'calf_' + c.id, _calf: c.id, tag: c.earTagId || '', breed: c.breed || '', sex: typeof calfSexMark === 'function' ? calfSexMark(c) : c.sex, dob: c.dob, date: c.deathDate, cause: c.deathMemo || '' }));
+  const list = [...FD0, ...fromCalves].sort((a, b) => String(b.date).localeCompare(String(a.date)));
   const cnt = document.getElementById('fat-death-count');
   if (cnt) cnt.textContent = list.length ? list.length + '頭' : '';
   const col = { 子牛: '#fca5a5', 育成: '#fbbf24', 肥育: '#fb923c' };
@@ -8651,9 +8664,10 @@ function renderFatDeaths() {
         <div style="font-size:12px;color:var(--warn);">${esc(r.cause || '原因未記入')}</div>
         <div style="font-size:11px;color:var(--muted);">死亡日 ${fmtDate(r.date)}${r.dob ? '　生年月日 ' + fmtDate(r.dob) : ''}</div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:4px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">${r._calf ? `
+        <button class="ann-mini" onclick="showCalfStory('${r._calf}')">📖 ストーリー</button>` : `
         <button class="ann-mini" onclick="openFatDeathForm('${r.id}')">✏ 修正</button>
-        <button class="ann-mini" style="color:var(--danger);" onclick="delFatDeath('${r.id}')">削除</button>
+        <button class="ann-mini" style="color:var(--danger);" onclick="delFatDeath('${r.id}')">削除</button>`}
       </div>
     </div>`;
   }).join('') : '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">育成・肥育牛の死亡記録はありません</div>';
@@ -27482,7 +27496,7 @@ function _fatModeApply() {
   const pg = document.getElementById('page-calves'); if (!pg) return;
   const on = !!window._calfFat && _fatOn();
   pg.classList.toggle('fatmode', on);
-  pg.querySelectorAll('.nui-cowbar .tg button').forEach(b => { const k = b.dataset.k; if (k) b.classList.toggle('on', on ? k === 'fat' : k === 'calves'); });
+  pg.querySelectorAll('.nui-cowbar .tg button').forEach(b => { const k = b.dataset.k; if (k) b.classList.toggle('on', on ? k === (window._calfFat === 'ret' ? 'retfat' : 'fat') : k === 'calves'); });
   let box = document.getElementById('fattab-list');
   if (on) {
     if (!box) { box = document.createElement('div'); box.id = 'fattab-list'; const bar = pg.querySelector('.nui-cowbar'); pg.insertBefore(box, bar ? bar.nextSibling : pg.firstChild); }
@@ -27491,6 +27505,7 @@ function _fatModeApply() {
 }
 function setFatF(k, v) { window._fatF[k] = v; renderFatList(); }
 function renderFatList() {
+  if (window._calfFat === 'ret') return renderRetFatList();   // 経産肥育
   const box = document.getElementById('fattab-list'); if (!box) return;
   const T = today(), M = _fatMonths();
   const q = (document.getElementById('calf-search')?.value || '').trim().replace(/[-\s]/g, '');
@@ -27524,6 +27539,202 @@ function renderFatList() {
     ${L.length ? L.map(row).join('') : `<div style="color:#94a3b8;font-size:13px;padding:16px 4px;">${all.length ? '当てはまる牛がいません' : M + 'か月齢になった子牛はまだいません'}</div>`}
     <div style="font-size:11.5px;color:#64748b;margin:10px 2px;line-height:1.6;">押すとその牛の画面が開きます。出荷・移動・死亡は下のボタンから記録します。<br>「🌟 保留（繁殖候補）」にした雌は、${M}か月をこえても子牛のほうに残ります。</div>`;
 }
+// ===== ★ 2026/11/24：📥 在籍牛の一覧（JA・改良組合などの表：個体識別番号_10桁・本牛名号・最新分娩日…）から取り込む =====
+// エクセル（.xlsx）・CSV・コピーして貼り付け、のどれでも読める。読んだ中身を見せて、1頭ずつ状態を直してから取り込む
+let ZS = null;
+function _zsN(s) { return String(s == null ? '' : s).normalize('NFKC').trim(); }
+function _zsDate(v) {
+  let s = _zsN(v); if (!s) return '';
+  const p2 = n => String(n).padStart(2, '0');
+  let m = s.match(/^(令和|平成|昭和|R|H|S)\s*(\d+|元)\s*[.\/年\-]\s*(\d+)\s*[.\/月\-]\s*(\d+)/i);
+  if (m) { const e = m[1].toUpperCase(); const base = (e === '令和' || e === 'R') ? 2018 : (e === '平成' || e === 'H') ? 1988 : 1925; return `${base + (m[2] === '元' ? 1 : +m[2])}-${p2(m[3])}-${p2(m[4])}`; }
+  m = s.match(/^(?:西暦)?\s*(\d{4})\s*[.\/年\-]\s*(\d{1,2})\s*[.\/月\-]\s*(\d{1,2})/); if (m) return `${m[1]}-${p2(m[2])}-${p2(m[3])}`;
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/); if (m) return `20${m[3]}-${p2(m[1])}-${p2(m[2])}`;   // エクセルの 11/24/26 の形
+  if (/^\d{5}(\.\d+)?$/.test(s)) { const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(+s) * 86400000); return d.toISOString().slice(0, 10); }   // エクセルの日付の数
+  return '';
+}
+function _zsLoadXLSX() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise((ok, ng) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; sc.onload = () => ok(window.XLSX); sc.onerror = () => ng(new Error('エクセルを読む部品を読み込めませんでした（電波を確かめてください）')); document.head.appendChild(sc); });
+}
+function _zsCsv(text) {
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) { const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+    else if (ch === '"') q = true; else if (ch === ',' || ch === '\t') { row.push(cur); cur = ''; } else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; } else cur += ch; }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+// 表（行の配列）→ 牛の一覧
+function _zsParse(rows) {
+  const hi = rows.findIndex(r => r.some(c => /個体識別番号/.test(_zsN(c)))); if (hi < 0) return null;
+  const H = rows[hi].map(c => _zsN(c).replace(/\s/g, ''));
+  const col = (...names) => { for (const n of names) { const i = H.findIndex(h => h === n); if (i >= 0) return i; } for (const n of names) { const i = H.findIndex(h => h.includes(n)); if (i >= 0) return i; } return -1; };
+  const C = { nid: col('個体識別番号_10桁', '個体識別番号'), t5: col('個体識別番号_5桁'), t4: col('個体識別番号_4桁'), reg: col('本牛登録番号', '登録番号'), dob: col('生年月日'), name: col('本牛名号', '名号'),
+    sex: col('性別'), breed: col('品種'), par: col('産次'), kids: col('産子数'), calv: col('最新分娩日'), dim: col('分娩後日数'), fca: col('初回分娩月齢'), ai: col('最新授精日'), code: col('授精卵略号', '精液略号'),
+    sire: col('父牛名号', '父'), ms: col('母の父の名号'), gs: col('母の母の父の名号'), dai: col('授精後日数'), aic: col('授精回数'), open: col('空胎日数'), ci: col('分娩間隔'), cia: col('分娩間隔平均'), intro: col('導入日'), dep: col('預託'), depTo: col('預託先') };
+  if (C.ci >= 0 && C.ci === C.cia) C.ci = H.findIndex(h => h === '分娩間隔');
+  const g = (r, k) => C[k] >= 0 ? _zsN(r[C[k]]) : '';
+  const num = v => { const x = parseFloat(String(v).replace(/,/g, '')); return isNaN(x) ? null : x; };
+  const L = [];
+  rows.slice(hi + 1).forEach(r => {
+    const nid = g(r, 'nid').replace(/\D/g, ''); if (!/^\d{9,10}$/.test(nid)) return;
+    const n10 = nid.padStart(10, '0');
+    L.push({ nid: n10, t5: g(r, 't5') || n10.slice(5, 10), t4: g(r, 't4') || n10.slice(5, 9), reg: g(r, 'reg'), dob: _zsDate(g(r, 'dob')), name: g(r, 'name'), sex: g(r, 'sex'), breedRaw: g(r, 'breed'),
+      par: num(g(r, 'par')) || 0, kids: num(g(r, 'kids')), calv: _zsDate(g(r, 'calv')), dim: num(g(r, 'dim')), fca: num(g(r, 'fca')), ai: _zsDate(g(r, 'ai')), code: g(r, 'code').toUpperCase(),
+      sire: g(r, 'sire'), ms: g(r, 'ms'), gs: g(r, 'gs'), dai: num(g(r, 'dai')), aic: num(g(r, 'aic')), open: num(g(r, 'open')), ci: num(g(r, 'ci')), cia: num(g(r, 'cia')), intro: _zsDate(g(r, 'intro')), dep: g(r, 'dep'), depTo: g(r, 'depTo') });
+  });
+  return L;
+}
+function _zsBreed(b) { b = String(b || ''); return /黒/.test(b) ? '黒毛' : /褐|赤/.test(b) ? '褐毛' : /交|F1|乳/.test(b) ? 'F1' : b; }
+function _zsSemen(code) { if (!code) return null; const k = _zsN(code).toUpperCase(); return (semenInventory || []).find(s => _zsN(s.lot).toUpperCase() === k) || null; }
+function _zsAuto(a) {
+  if (/雄|去勢|おす|オス/.test(a.sex)) return ZS.opt.male === 'skip' ? 'skip' : 'calf';
+  const T = today();
+  if (a.ai && (!a.calv || a.ai > a.calv)) return diffDays(T, a.ai) >= ZS.opt.pregDays ? 'pregnant' : 'waiting';
+  if (a.par > 0 || a.calv) return 'open';
+  return ZS.opt.heifer === 'calf' ? 'calf' : 'heifer';
+}
+const _ZS_ST = { pregnant: ['🤰 妊娠中', '#fbbf24'], waiting: ['🔬 妊鑑待ち', '#60a5fa'], open: ['🍼 分娩後・空胎', '#a78bfa'], heifer: ['🐮 未経産（親牛）', '#4ade80'], calf: ['🍼 子牛・育成・肥育', '#fb923c'], skip: ['✕ 取り込まない', '#64748b'] };
+function openZaisekiImport() {
+  ZS = { list: [], st: {}, opt: { tag: 't4', pregDays: 60, heifer: 'cow', male: 'calf', exist: 'add' } };
+  document.getElementById('zs-modal')?.remove();
+  const w = document.createElement('div'); w.id = 'zs-modal';
+  w.style.cssText = 'position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:10px;';
+  w.innerHTML = `<div id="zs-in" style="background:#0f1117;border:1px solid #2a3050;border-radius:16px;width:100%;max-width:560px;max-height:94vh;overflow:auto;padding:16px;color:#e2e8f0;"></div>`;
+  document.body.appendChild(w); _zsStep1();
+}
+function _zsClose() { document.getElementById('zs-modal')?.remove(); }
+function _zsStep1(err) {
+  document.getElementById('zs-in').innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:16px;">📥 在籍牛の一覧から取り込む</b><button class="modal-close" onclick="_zsClose()">✕</button></div>
+    <div style="font-size:12px;color:#94a3b8;line-height:1.6;margin:6px 0 12px;">JA・改良組合などの「在籍牛一覧」（個体識別番号_10桁・本牛名号・最新分娩日…の列がある表）を取り込みます。</div>
+    <label style="display:block;border:1.5px dashed #475569;border-radius:12px;padding:18px;text-align:center;cursor:pointer;font-size:14px;">📄 ファイルをえらぶ<br><span style="font-size:11.5px;color:#94a3b8;">エクセル（.xlsx）・CSV のどちらでも</span>
+      <input type="file" accept=".xlsx,.xls,.csv,.txt" style="display:none;" onchange="_zsFile(this.files[0])"></label>
+    <div style="text-align:center;font-size:12px;color:#94a3b8;margin:10px 0 4px;">または、エクセルで表を全部えらんで <b>コピー</b> → ここに <b>貼り付け</b></div>
+    <textarea id="zs-paste" style="width:100%;height:90px;background:#0b1220;border:1px solid #334155;border-radius:10px;color:#e2e8f0;font-size:11px;padding:8px;" placeholder="個体識別番号_１０桁　個体識別番号_５桁　…"></textarea>
+    <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="_zsPaste()">次へ（中身を確かめる）</button>
+    ${err ? `<div style="color:#f87171;font-size:12.5px;margin-top:8px;">${err}</div>` : ''}
+    <div style="font-size:11px;color:#64748b;margin-top:10px;">データはこの牧場のツールにだけ入ります。ほかには送りません。</div>`;
+}
+async function _zsFile(f) {
+  if (!f) return;
+  try {
+    let rows;
+    if (/\.xlsx?$/i.test(f.name)) { const X = await _zsLoadXLSX(); const wb = X.read(await f.arrayBuffer(), { type: 'array' }); const sh = wb.Sheets[wb.SheetNames[0]]; rows = X.utils.sheet_to_json(sh, { header: 1, raw: false, defval: '' }); }
+    else { const buf = await f.arrayBuffer(); let t = new TextDecoder('utf-8').decode(buf); if (/�/.test(t)) { try { t = new TextDecoder('shift_jis').decode(buf); } catch (e) {} } rows = _zsCsv(t); }
+    _zsGo(rows);
+  } catch (e) { _zsStep1('読めませんでした：' + e.message); }
+}
+function _zsPaste() { const t = document.getElementById('zs-paste').value; if (!t.trim()) return _zsStep1('ファイルをえらぶか、表を貼り付けてください'); _zsGo(_zsCsv(t)); }
+function _zsGo(rows) {
+  const L = _zsParse(rows || []);
+  if (!L) return _zsStep1('「個体識別番号」の列が見つかりません。在籍牛一覧の表か確かめてください');
+  if (!L.length) return _zsStep1('牛の行が見つかりません（個体識別番号が10桁の行がありません）');
+  ZS.list = L; ZS.st = {}; _zsStep2();
+}
+function _zsOpt(k, v) { ZS.opt[k] = v; if (['pregDays', 'heifer', 'male'].includes(k)) ZS.st = {}; _zsStep2(); }
+function _zsSet(nid, v) { ZS.st[nid] = v; _zsStep2(); }
+function _zsStep2() {
+  const L = ZS.list, st = a => ZS.st[a.nid] || _zsAuto(a);
+  const have = new Set([...cows, ...retiredCows].map(c => String(c.nationalId || '').replace(/\D/g, '')).filter(Boolean));
+  const haveC = new Set(calves.map(c => String(c.nationalId || '').replace(/\D/g, '')).filter(Boolean));
+  const cnt = {}; L.forEach(a => { const s = st(a); cnt[s] = (cnt[s] || 0) + 1; });
+  const ex = L.filter(a => have.has(a.nid) || haveC.has(a.nid)).length;
+  const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const sel = (k, opts) => `<select onchange="_zsOpt('${k}',this.value)" style="background:#0b1220;border:1px solid #334155;color:#e2e8f0;border-radius:6px;padding:3px 6px;font-size:12px;">${opts.map(([v, l]) => `<option value="${v}" ${String(ZS.opt[k]) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  const row = a => { const s = st(a), [lab, col] = _ZS_ST[s], sm = _zsSemen(a.code), tag = a[ZS.opt.tag];
+    const sub = [a.dob ? fmtDate(a.dob) + '生' : '', a.calv ? `分娩 ${fmtDate(a.calv)}` : '', a.ai ? `授精 ${fmtDate(a.ai)} ${E(a.code)}${a.code ? (sm ? ' → ' + E(sm.name) : ' <span style="color:#fbbf24;">⚠ 在庫にない略号（略号のまま入れます）</span>') : ''}・${diffDays(today(), a.ai)}日` : '授精なし'].filter(Boolean).join('・');
+    return `<div style="border-bottom:1px solid #1e2b3a;padding:7px 2px;font-size:12.5px;"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+      <span><b class="nui-mono">${E(tag)}</b> ${E(a.name)}・${E(_zsBreed(a.breedRaw))}・${E(a.sex)}・${a.par}産${have.has(a.nid) || haveC.has(a.nid) ? ' <span style="color:#94a3b8;font-size:11px;">（もういる牛）</span>' : ''}</span>
+      <select onchange="_zsSet('${a.nid}',this.value)" style="background:#0b1220;border:1px solid ${col};color:${col};border-radius:6px;padding:2px 4px;font-size:11.5px;">${Object.entries(_ZS_ST).map(([k, [l]]) => `<option value="${k}" ${k === s ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${sub}</div></div>`; };
+  document.getElementById('zs-in').innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:16px;">✓ ${L.length}頭 読めました</b><button class="modal-close" onclick="_zsClose()">✕</button></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0;">${Object.entries(_ZS_ST).filter(([k]) => cnt[k]).map(([k, [l, c]]) => `<div style="background:#1a1f2e;border:1px solid #2a3050;border-radius:9px;padding:7px 9px;font-size:12px;">${l}<b style="display:block;font-size:17px;color:${c};">${cnt[k]}頭</b></div>`).join('')}</div>
+    <div style="background:#121c2b;border:1px solid #2a3a4a;border-radius:10px;padding:9px 10px;font-size:12.5px;line-height:2;">
+      耳標にする番号 ${sel('tag', [['t4', '4桁（例 ' + E(L[0].t4) + '）'], ['t5', '5桁（例 ' + E(L[0].t5) + '）']])}<br>
+      授精から <input type="number" value="${ZS.opt.pregDays}" style="width:56px;background:#0b1220;border:1px solid #334155;color:#e2e8f0;border-radius:6px;padding:2px 4px;" onchange="_zsOpt('pregDays',+this.value||60)"> 日以上たっている牛は <b>妊娠中</b> にする<br>
+      <span style="font-size:11px;color:#94a3b8;">それより短い牛は「妊鑑待ち」にして、妊鑑のタスクを作ります</span><br>
+      産次0の雌 ${sel('heifer', [['cow', '親牛（未経産）にする'], ['calf', '子牛・育成にする']])}　雄 ${sel('male', [['calf', '子牛・肥育に入れる'], ['skip', '取り込まない']])}<br>
+      ${ex ? `もういる牛 ${ex}頭：新しい分娩・授精の記録だけ足します（牛の情報は書きかえません）` : ''}</div>
+    <div style="font-size:11px;color:#94a3b8;margin:8px 0 2px;">状態は1頭ずつ直せます</div>
+    <div>${L.map(row).join('')}</div>
+    <button class="btn btn-primary" style="width:100%;margin-top:12px;" onclick="_zsApply()">✓ ${L.filter(a => st(a) !== 'skip').length}頭を取り込む</button>
+    <div style="text-align:center;font-size:12px;color:#94a3b8;margin-top:8px;cursor:pointer;" onclick="_zsStep1()">‹ もどる</div>`;
+}
+async function _zsApply() {
+  const T = today(), st = a => ZS.st[a.nid] || _zsAuto(a);
+  const nidOfX = c => String(c.nationalId || '').replace(/\D/g, '');
+  let nCow = 0, nCalf = 0, nAdd = 0, nIb = 0;
+  const fy = d => 'R' + (parseInt(String(d).slice(0, 4)) - 2018);
+  ZS.list.forEach(a => {
+    const s = st(a); if (s === 'skip') return;
+    const sm = _zsSemen(a.code), sireName = sm ? sm.name : a.code;
+    const breed = _zsBreed(a.breedRaw), tag = a[ZS.opt.tag] || a.t4;
+    const snap = { at: T, kids: a.kids, firstCalvAge: a.fca, ci: a.ci, ciAvg: a.cia, dim: a.dim, daysAI: a.dai, open: a.open, aiCount: a.aic, code: a.code, deposit: a.dep, depositTo: a.depTo, regNo: a.reg, gs: a.gs };
+    const preg = s === 'pregnant', withAI = a.ai && (!a.calv || a.ai > a.calv) && (s === 'pregnant' || s === 'waiting');
+    const ibRow = id => ({ d: a.ai, t: id, c: `${a.nid}[${a.name}]`, s: sireName, n: '', q: '', m: `在籍牛一覧から${a.code ? '（略号 ' + a.code + (a.aic ? '・授精回数 ' + a.aic : '') + '）' : ''}`, op: '', y: fy(a.ai), _new: true, donorAI: false, insemType: 'ai', pregResult: preg ? 'positive' : null, _mt: Date.now() });
+    if (s === 'calf') {
+      if (calves.some(c => nidOfX(c) === a.nid)) return;
+      calves.push({ id: 'zs' + a.nid, earTagId: tag, nationalId: a.nid, name: a.name, dob: a.dob, sex: /雄|去勢|おす|オス/.test(a.sex) ? '雄' : '雌', breed, damId: '', sire: a.sire, maternalSire: a.ms, maternalGrandSire: a.gs,
+        insemType: 'ai', embryoNo: '', donor: '', weight: '', castrated: /去勢/.test(a.sex), memo: '在籍牛一覧から', status: 'moved', moves: [], calvingRecordId: '' });
+      nCalf++; return;
+    }
+    const old = cows.find(c => nidOfX(c) === a.nid) || retiredCows.find(c => nidOfX(c) === a.nid);
+    if (old) {   // もういる牛：足りない分娩・授精だけ足す
+      old.events = old.events || [];
+      if (a.calv && !old.events.some(e => e.type === 'calving' && e.date === a.calv)) { old.events.push({ type: 'calving', date: a.calv, memo: '在籍牛一覧から' }); nAdd++; }
+      if (withAI && !old.events.some(e => ['ai_done', 'et_done'].includes(e.type) && e.date === a.ai)) { old.events.push({ type: 'ai_done', date: a.ai, donorAI: false, memo: `精液:${sireName} ／ 在籍牛一覧から` }); nAdd++; }
+      if (withAI && !insemBookRecords.some(r => r.t === old.id && r.d === a.ai)) { insemBookRecords.push(ibRow(old.id)); nIb++; }
+      if (!old.importSnap) old.importSnap = snap;
+      old.events.sort((x, y) => x.date.localeCompare(y.date)); old._mt = Date.now();
+      return;
+    }
+    let id = tag; if (cows.some(c => c.id === id) || retiredCows.some(c => c.id === id)) id = `${tag}-${a.nid.slice(-2)}`;
+    const ev = [];
+    if (a.calv) ev.push({ type: 'calving', date: a.calv, memo: '在籍牛一覧から' });
+    if (withAI) { ev.push({ type: 'ai_done', date: a.ai, donorAI: false, memo: `精液:${sireName} ／ 在籍牛一覧から` });
+      if (preg) ev.push({ type: 'preg_positive', date: addDays(a.ai, 45) < T ? addDays(a.ai, 45) : T, insemDate: a.ai, memo: '在籍牛一覧から（妊娠中として入れた）' }); }
+    ev.sort((x, y) => x.date.localeCompare(y.date));
+    const cow = { id, name: a.name, nationalId: a.nid, dob: a.dob, ageYears: a.dob ? Math.floor(diffDays(T, a.dob) / 365.25) : null, lactation: a.par || 0, breed,
+      sire: a.sire, maternalSire: a.ms, dam: '', regOrg: breed === '褐毛' ? '日本あか牛登録協会' : breed === '黒毛' ? '全国和牛登録協会' : '', regNo: a.reg,
+      status: preg ? 'pregnant' : 'open', events: ev, memo: [a.gs ? '母の母の父:' + a.gs : '', a.dep && a.dep !== '対象外' ? '預託:' + a.dep + (a.depTo ? '（' + a.depTo + '）' : '') : '', '在籍牛一覧から'].filter(Boolean).join(' ／ '), importSnap: snap, _mt: Date.now() };
+    if (a.intro) cow.introDate = a.intro;
+    if (a.calv) cow.calvingDate = a.calv;
+    if (withAI) cow.aiDate = a.ai;
+    if (preg) { cow.dueDate = addDays(a.ai, 285); tasks.push({ id: 'zsd_' + id, cowId: id, date: cow.dueDate, action: '分娩予定', detail: '分娩予定日', color: '#a78bfa', priority: 'high', done: false }); }
+    cows.push(cow); nCow++;
+    if (withAI) { insemBookRecords.push(ibRow(id)); nIb++; }
+  });
+  try { ensureInsemIds(); resetInsemSnap(); } catch (e) {}
+  try { repairMissingPregTasks(); } catch (e) {}
+  save(); _zsClose(); renderAll();
+  appAlert(`取り込みました。\n親牛 ${nCow}頭・子牛など ${nCalf}頭\n授精簿に ${nIb}行${nAdd ? `\nもういる牛に足した記録 ${nAdd}件` : ''}`);
+}
+function renderRetFatList() {
+  const box = document.getElementById('fattab-list'); if (!box) return;
+  const T = today(), E = s => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const q = (document.getElementById('calf-search')?.value || '').trim().replace(/[-\s]/g, '');
+  const all = (typeof retiredCows !== 'undefined' ? retiredCows : []).filter(c => c.retireExit === 'fatten' && !c.shipDate);
+  let L = q ? all.filter(c => cowQueryMatch(q, { id: c.id, name: c.name, nationalId: c.nationalId })) : all.slice();
+  L.sort((a, b) => String(a.retireDate || '').localeCompare(String(b.retireDate || '')));
+  const row = c => {
+    const st = c.retireDate || T, days = diffDays(T, st), mo = _ageMonths(st, T), rest = diffDays(T, addMonthsSafe(st, mo));
+    const plan = c.shipPlan ? (c.shipPlan >= T ? `🚚 出荷予定 ${fmtDate(c.shipPlan)}（あと${diffDays(c.shipPlan, T)}日）` : `<span style="color:#f87171;">⚠ 出荷予定 ${fmtDate(c.shipPlan)} を${diffDays(T, c.shipPlan)}日すぎています</span>`) : '';
+    const age = c.dob ? Math.floor(diffDays(T, c.dob) / 365.25) + '歳' : '';
+    return `<div class="nui-card" style="padding:10px 12px;margin-bottom:8px;cursor:pointer;" onclick="showCowDetail('${E(c.id)}')">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;">
+        <span style="min-width:0;"><span class="nui-mono" style="font-weight:700;">${E(c.id)}</span> <span style="color:#4ade80;">${E(c.name || cowDisplayName(c.id) || '')}</span>${c.breed ? `<span style="font-size:11px;border:1px solid #475569;border-radius:5px;padding:1px 5px;margin-left:4px;">${E(c.breed)}</span>` : ''}</span>
+        <span style="color:#fb923c;font-weight:700;white-space:nowrap;">肥育 ${days}日目</span></div>
+      <div style="font-size:12px;color:#e2e8f0;margin-top:3px;">肥育に入って <b>${mo ? mo + 'か月' + (rest ? rest + '日' : '') : days + '日'}</b>（${fmtDate(st)}から）</div>
+      <div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${[age, c.lactation ? c.lactation + '産' : '', c.reason ? '廃用の理由：' + E(c.reason) : ''].filter(Boolean).join('・')}</div>
+      ${plan ? `<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${plan}</div>` : ''}
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;"><button class="nui-chip" style="font-size:11.5px;padding:4px 10px;" onclick="event.stopPropagation();recordRetiredShip('${E(c.id)}')">🚚 出荷を記録</button></div></div>`;
+  };
+  box.innerHTML = `<div style="font-size:12px;color:#94a3b8;margin:2px 2px 8px;">廃用にして肥育している牛（経産肥育）　<b style="color:#e2e8f0;font-size:14px;">${all.length}頭</b></div>
+    ${L.length ? L.map(row).join('') : `<div style="color:#94a3b8;font-size:13px;padding:16px 4px;">${all.length ? '当てはまる牛がいません' : '経産肥育の牛はいません'}</div>`}
+    <div style="font-size:11.5px;color:#64748b;margin:10px 2px;line-height:1.6;">廃用を記録するときに「廃用肥育」をえらんだ牛が入ります。押すとその牛の画面が開きます。</div>`;
+}
+function addMonthsSafe(d, n) { const [y, m, dd] = String(d).slice(0, 10).split('-').map(Number); const t = new Date(Date.UTC(y, m - 1 + n, 1)); const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate(); t.setUTCDate(Math.min(dd, last)); return t.toISOString().slice(0, 10); }
 function renderCalves() {
   try { _fatModeApply(); } catch (e) { console.error('fatMode', e); }
   { const ba = document.getElementById('birth-report-alert'); if (ba && typeof birthReportAlertHTML === 'function') ba.innerHTML = birthReportAlertHTML(); }
@@ -30633,7 +30844,7 @@ function renderSemen() {
             ${s.name}
             ${s.breed ? `<span style="font-size:11px;font-weight:700;background:${s.breed==='褐毛'?'#3b0000':s.breed==='黒毛'?'#111827':'#1e293b'};border:1px solid ${s.breed==='褐毛'?'#7f1d1d':s.breed==='黒毛'?'#374151':'#334155'};color:${s.breed==='褐毛'?'#fca5a5':s.breed==='黒毛'?'#d1d5db':'#94a3b8'};padding:1px 7px;border-radius:4px;">${s.breed==='褐毛'?'🟥':'⬛'} ${s.breed}</span>` : ''}
           </div>
-          ${s.lot?`<div style="font-size:11px;color:var(--muted);">ロット: ${s.lot}</div>`:''}
+          ${s.lot?`<div style="font-size:11px;color:var(--muted);">精液の略号: ${s.lot}</div>`:''}
           ${_canList().length && (s.canisters || []).length ? `<div style="display:flex;align-items:center;gap:5px;margin-top:4px;flex-wrap:wrap;font-size:11px;color:var(--muted);">${s.canisters.map(c => `<span style="display:inline-flex;align-items:center;gap:3px;">${_canDot(c, 14)}${c}</span>`).join('')}</div>` : ''}
         </div>
         <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
@@ -33852,10 +34063,13 @@ function renderRetiredList() {
   const deadContainer = document.getElementById('dead-calves-container');
   const deadEmpty = document.getElementById('dead-calves-empty');
   if (!deadContainer) return;
-  document.getElementById('dead-calves-count').textContent = `${deadCalves.length}頭`;
-  if (!deadCalves.length) { deadContainer.innerHTML=''; deadEmpty.style.display=''; return; }
+  // ★ 2026/11/24：死んだときの月齢で分ける（〜4か月＝子牛、5〜12か月＝育成、13か月〜＝肥育）。育成・肥育は「🐂 育成・肥育」のほうに出す
+  const deadCalvesY = deadCalves.filter(c => deathStage(c.dob, c.deathDate, '子牛') === '子牛');
+  try { renderFatDeaths(); } catch (e) {}
+  document.getElementById('dead-calves-count').textContent = `${deadCalvesY.length}頭`;
+  if (!deadCalvesY.length) { deadContainer.innerHTML=''; deadEmpty.style.display=''; return; }
   deadEmpty.style.display = 'none';
-  const sortedDead = [...deadCalves].sort((a,b)=>(b.deathDate||'').localeCompare(a.deathDate||''));
+  const sortedDead = [...deadCalvesY].sort((a,b)=>(b.deathDate||'').localeCompare(a.deathDate||''));
   deadContainer.innerHTML = sortedDead.map(calf => {
     const damName = calf.damId ? `${calf.damId} ${cowDisplayName(calf.damId)||''}` : '—';
     const pedigree = [calf.sire, calf.maternalSire].filter(Boolean).join(' × ');
@@ -35366,7 +35580,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112407';
+const APP_BUILD = '2026112409';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -37849,7 +38063,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       const pg = $('page-' + p); if (!pg || pg.querySelector('.nui-cowbar')) return;
       const d = document.createElement('div'); d.className = 'nui-cowbar';
       const isC = p === 'calves';
-      d.innerHTML = `<div class="tg"><button data-k="cows" class="${isC ? '' : 'on'}" onclick="window._calfFat=false;switchTab('cows');window.scrollTo(0,0)">🐄 親牛</button><button data-k="calves" class="${isC ? 'on' : ''}" onclick="window._calfFat=false;switchTab('calves');window.scrollTo(0,0)">🍼 子牛</button><button data-k="fat" class="nui-fatbtn" onclick="window._calfFat=true;switchTab('calves');window.scrollTo(0,0)">🥩 肥育</button></div>
+      d.innerHTML = `<div class="tg"><button data-k="cows" class="${isC ? '' : 'on'}" onclick="window._calfFat=false;switchTab('cows');window.scrollTo(0,0)">🐄 親牛</button><button data-k="calves" class="${isC ? 'on' : ''}" onclick="window._calfFat=false;switchTab('calves');window.scrollTo(0,0)">🍼 子牛</button><button data-k="fat" class="nui-fatbtn" onclick="window._calfFat=true;switchTab('calves');window.scrollTo(0,0)">🥩 肥育</button><button data-k="retfat" class="nui-fatbtn" onclick="window._calfFat='ret';switchTab('calves');window.scrollTo(0,0)">🐄 経産肥育</button></div>
         ${p === 'herd' ? '<span style="flex:1;"></span>' : `<input type="search" placeholder="🔍 耳標・名前でさがす" oninput="nuiCowQ('${p}',this.value)">`}`;
       pg.insertBefore(d, pg.firstChild);
     });
@@ -38861,6 +39075,9 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     ['牛のこと', 'add', '➕ 牛を足したい', '導入 追加 新規', [
       '親牛：<b>🐄 牛</b> → <b>＋ 新規導入</b>', '子牛：<b>🐄 牛</b> → <b>🍼 子牛</b> → <b>＋ 子牛を追加</b>'],
       'お産を記録すると、子牛は自動で入ります。'],
+    ['牛のこと', 'import', '📥 牛の一覧（エクセル）をまとめて入れたい', '取り込み 一覧 エクセル JA 在籍', [
+      '<b>⚙ 設定・データ管理</b>（右上の ⚙）を開く', '<b>📥 在籍牛の一覧（JA・改良組合などのエクセル）から取り込む</b> を押す', 'エクセルのファイルをえらぶ（または表をコピーして貼り付け）', '1頭ずつの状態（妊娠中・妊鑑待ちなど）を確かめて <b>取り込む</b>'],
+      'ファームノートの一覧なら <b>📥 ファームノートのCSVから牛を取り込む</b> を使います。'],
     ['牛のこと', 'retire', '🚫 廃用・死亡・出荷を記録したい', '廃用 死亡 出荷 売る', [
       '<b>＋記録</b> → 牛をえらぶ', '<b>🚫 廃用・死亡</b> または <b>🚚 出荷</b> を押して記録'],
       '廃用にした牛は <b>☰ その他</b> → <b>🚫 廃用・死亡</b> にあります。まちがえたときは、そこの <b>↩ 個体タブに戻す</b> で戻せます。'],
@@ -38928,7 +39145,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     today: ['✅ タスク（今日の予定）', ['左の <b>□</b> を押すと「済み」。もう一度押すと元に戻ります', '妊娠鑑定は □（または <b>入れる</b>）で結果を入れます', '右のボタン（<b>記録</b> など）で、その記録の画面が開きます', '牛のところを押すと、その牛の画面が開きます', '上の <b>‹ ›</b> で前の日・次の日。「⚠ 前の日からのこり」はまだ済んでいない予定です'], ['task', 'preg', 'fix']],
     rec: ['➕ 記録する', ['① 牛 → ② 何をした → ③ 内容 の順に進みます', '牛は耳標・名前・個体識別番号の下4けたで探せます', '<b>🏠 牛群リストから選ぶ</b> で何頭もえらぶと、まとめて記録できます', '最後に <b>💾 記録する</b> を押すと保存されます'], ['ai', 'et', 'calv', 'multi']],
     insembook: ['📒 授精簿', ['授精・移植の記録が1行ずつ並びます。上の年（R8 など）と月で絞れます', '行の <b>▼</b> で直したり、くわしく見たりできます。<b>🔬 妊鑑</b> で結果も入れられます', '<b>No. を続き番号で入れる</b> で、まだ番号がない行に番号を付けられます', '<b>☁ 消えた行を戻す</b> で、消えてしまった行を戻せることがあります'], ['ai', 'preg', 'cert', 'lost']],
-    cows: ['🐄 牛', ['上で <b>🐄 親牛</b>・<b>🍼 子牛</b>・<b>🥩 肥育</b> を切りかえます（肥育は、決めた月齢になった子牛）', '品種や状態のボタンで絞り、並べ方も変えられます', '牛を押すと、その牛の画面（ストーリー）が開きます', '<b>＋ 新規導入</b> で牛を足せます', '<b>🏷 タグ</b> でタグを付けたり、色を決めたりできます'], ['find', 'add', 'tag']],
+    cows: ['🐄 牛', ['上で <b>🐄 親牛</b>・<b>🍼 子牛</b>・<b>🥩 肥育</b>・<b>🐄 経産肥育</b> を切りかえます（肥育は決めた月齢になった子牛、経産肥育は廃用して肥育している牛）', '品種や状態のボタンで絞り、並べ方も変えられます', '牛を押すと、その牛の画面（ストーリー）が開きます', '<b>＋ 新規導入</b> で牛を足せます', '<b>🏷 タグ</b> でタグを付けたり、色を決めたりできます'], ['find', 'add', 'tag']],
     calves: ['🍼 子牛', ['生まれた子牛の一覧です。<b>＋ 子牛を追加</b> で足せます', '上のボタンで「移動待ち」「離乳済」などに絞れます', '<b>📊 産仔の内訳</b> で、今年生まれた子牛のET・AIの数がわかります', '「出生報告がまだの子牛」から、らくちく出生報告へ進めます'], ['birth', 'cert', 'add']],
     more: ['☰ その他', ['予定・成績・記録簿・書類など、ほかの画面への入口です', '<b>📄 証明書</b> の右に、まだ出していない数が出ます', '<b>⚙ 牧場の設定</b> で、はじめの設定をいつでも直せます', '<b>🔧 困ったとき</b> に、データを調べたり直したりする道具があります'], ['settings', 'cert', 'syncred']],
     preg: ['🍼 お産予定', ['妊娠中の牛を、お産が近い順・月ごとに見られます', '<b>🔬 妊鑑待ち</b> は、妊娠鑑定がまだの牛です', '<b>🗓 分娩頭数</b> で、月ごとに生まれた数（済）と予定（予）がわかります', '<b>📊 産仔の内訳</b> を開くと、ETの割合やこれから生まれる予定も出ます'], ['calv', 'preg']],
