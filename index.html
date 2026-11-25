@@ -152,7 +152,11 @@ html.hx-fattening .nui-fatbtn { display: none !important; }
 #page-calves.fatmode > *:not(.nui-cowbar):not(#fattab-list) { display: none !important; }
 #page-calves:not(.fatmode) #fattab-list { display: none !important; }
 .nui-cowbar .tg button.nui-fatbtn.on { background:#7c2d12; color:#fdba74; }
-.nui-cowbar{flex-wrap:wrap;} .nui-cowbar .tg{flex-wrap:wrap;} .nui-cowbar .tg button{padding:7px 10px;}
+.nui-cowbar{flex-wrap:wrap;} .nui-cowbar .tg{display:grid !important;grid-template-columns:repeat(5,minmax(0,1fr));width:100%;box-sizing:border-box;flex-shrink:1 !important;gap:2px;}
+.nui-cowbar .tg button{padding:6px 1px !important;font-size:12px !important;display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.25;white-space:nowrap;min-width:0;}
+.nui-cowbar .tg button .i{font-size:16px;line-height:1.1;}
+.nui-cowbar input{flex:1 1 100% !important;}
+.nui-cowbar .tg button.nui-rearbtn.on { background:#1e3a5f; color:#93c5fd; }
 html.hx-fattening #gnav-fattening, html.hx-fattening #nui-side [data-p="fattening"], html.hx-fattening #page-more [data-p="fattening"] { display: none !important; }
 .ib-preg-m { display: flex !important; justify-content: flex-end; }
 html.hx-syncCol #insembook-table th:nth-child(9), html.hx-syncCol #insembook-tbody td:nth-child(9), html.hx-syncCol #ib-sync-all-btn { display: none !important; }
@@ -866,6 +870,7 @@ html.feat-barnlist .view-seg button{padding:5px 8px;}
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">毎日クラウドに取っているバックアップ（8日分）と今の授精簿を比べ、今は無い行だけを戻します。今ある行はそのままです。</div>
       <button onclick="closeModal('modal-settings');openSyncDiag()" style="margin-bottom:6px;background:#0a1a2a;border:1px solid var(--info);color:var(--info);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">🔎 同期のようすを調べる（版・保存場所）</button>
       <button onclick="closeModal('modal-settings');openLostRecover()" style="margin-bottom:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">🩹 消えた記録を取り戻す（授精・予定・お産・移動・タグ・チェック）</button>
+      <button onclick="closeModal('modal-settings');openTbRestore()" style="margin-bottom:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">☁ 消えた移植記録（外部授精簿・農家さんに渡した移植）を戻す</button>
       <button onclick="closeModal('modal-settings');openIbRestore()" style="background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">☁ バックアップを調べる</button>
       <button onclick="closeModal('modal-settings');openInvRestore()" style="margin-top:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">☁ 消えた在庫の記録（使用・入荷など）を戻す</button>
       <button onclick="closeModal('modal-settings');openInvMissing()" style="margin-top:6px;background:#0a2a1a;border:1px solid var(--accent2);color:var(--accent);font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;cursor:pointer;width:100%;">📦 在庫に入っていない授精・移植を調べる</button>
@@ -7831,6 +7836,12 @@ function buildCowStory(cowId) {
       descs.push('授精簿の記録');
       if (!isRetired) acts.push(`<button class="st-act" onclick="closeModal('modal-cow');openInsemBookFor('${_stEsc(cowId)}','${_stEsc(ins.rec.y || ('R' + (+ins.date.slice(0, 4) - 2018)))}')">📒 授精簿で直す・消す</button>`);
     }
+    // ★ 2026/11/26：移植の黄体（あとからでも入れられる）
+    if (ins.isEt && !ins.donorAI && !isRetired && typeof _isObaraFarm === 'function' && _isObaraFarm()) {
+      const sc = typeof _scanForET === 'function' ? _scanForET(cowId, ins.date) : null;
+      if (sc && sc.sum) descs.push(`🔬 黄体 組織${sc.sum.tis}cm²${sc.sum.cav ? '・腔' + sc.sum.ratio + '%' : ''}`);
+      else acts.push(`<button class="st-act" onclick="openEchoScan('${_stEsc(cowId)}','${ins.date}','et',()=>showCowDetail('${_stEsc(cowId)}'))">🔬 この移植の黄体を入れる</button>`);
+    }
     items.push({
       date: ins.date, cat: 'breed',
       color: ins.isEt ? '#a78bfa' : '#f87171',
@@ -8082,7 +8093,7 @@ function buildCowStory(cowId) {
 
   // 薬品管理の治療歴（繁殖処置はAI・ETの記録と重なるので除く）
   if (typeof _vetData !== 'undefined' && _vetData) {
-    try { vetTreatmentsFor(cowId).filter(t => !t.hanshoku).forEach(t => { const it = vetStoryItem(t); if (it) items.push(it); }); } catch (e) {}
+    try { const VL = vetTreatmentsFor(cowId).filter(t => !t.hanshoku), DU = _vetDupIds(VL); VL.forEach(t => { const it = vetStoryItem(t, DU.has(t.id) ? 'cow' : ''); if (it) items.push(it); }); } catch (e) {}
   }
   // 廃用牛の記録は個体タブの関数では編集できないので、修正・削除ボタンは出さない
   if (isRetired) items.forEach(it => { it.acts = []; });
@@ -11939,8 +11950,15 @@ function vetTreatmentsFor(cowId) {
   const asCalf = cf ? vetTreatmentsForCalf(cf).filter(t => !own.some(o => o.id === t.id)) : [];
   return [...own, ...asCalf].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 }
+// ★ 2026/11/26：同じ牛・同じ日・同じ薬と量・同じ区分の治療が2つ以上あるとき、2つ目からを「重なり」とする
+function _vetSig(t) { return [String(t.cowId || '').toLowerCase(), _normYMD(t.date), t.kubun || '', t.complaint || '', (t.drugs || []).map(x => x.drugId + ':' + (+x.qty || 0)).sort().join(',')].join('|'); }
+function _vetDupIds(list) { const seen = new Set(), dup = new Set(); (list || []).slice().sort((a, b) => String(a.id).localeCompare(String(b.id))).forEach(t => { const k = _vetSig(t); if (seen.has(k)) dup.add(t.id); else seen.add(k); }); return dup; }
+async function deleteVetDup(id, back) {
+  if (!await appConfirm('同じ日に同じ治療が2つ入っています。重なっている分（この1つ）を消しますか？\n（薬品管理の記録からも消えます。もう1つは残ります）')) return;
+  if (_vfWrite({ ['treatments/' + id]: null })) { try { if (_vetData && _vetData.treatments) delete _vetData.treatments[id]; } catch (e) {} appAlert('重なっていた治療の記録を1つ消しました'); try { back && back(); } catch (e) {} }
+}
 // 治療1件をストーリーのカードにする
-function vetStoryItem(t) {
+function vetStoryItem(t, dup) {
   const d = _normYMD(t.date);
   if (!d) return null;
   const dn = id => (_vetData.drugs && _vetData.drugs[id]) || {};
@@ -11956,7 +11974,9 @@ function vetStoryItem(t) {
     : t.hanshoku ? `繁殖処置${t.hanshokuType ? '（' + t.hanshokuType + '）' : ''}` : (t.diseaseName || t.complaint || '治療');
   const nbNote = String(t.cowId || '').startsWith('newborn_') ? '（耳標を付ける前に新生子として記録）' : '';
   return { date: d, cat: 'treat', color: '#f472b6', title: '💊 ' + what, badge: null, desc: drugs + (nbNote ? ' ' + nbNote : ''), kv, memo: t.memo || '',
-    acts: [`<button class="st-act" onclick="openVetTab('${_stEsc(t.cowId)}')">💊 ${_vfOn() ? '薬の記録を開く' : '薬品管理で見る・直す'}</button>`] };
+    ...(dup ? { badge: ['⚠ 重なり', '#fbbf24', 'rgba(251,191,36,.12)'] } : {}),
+    acts: [...(dup ? [`<button class="st-act del" onclick="deleteVetDup('${_stEsc(t.id)}', ${dup === 'calf' ? `()=>showCalfStory(window._lastCalfStoryId)` : `()=>showCowDetail('${_stEsc(t.cowId)}')`})">🗑 重なっている分を消す</button>`] : []),
+      `<button class="st-act" onclick="openVetTab('${_stEsc(t.cowId)}')">💊 ${_vfOn() ? '薬の記録を開く' : '薬品管理で見る・直す'}</button>`] };
 }
 // 食肉の休薬終了日（記録に保存された値を優先、無ければ薬品の休薬日数から計算）
 function vetMeatEnd(t) {
@@ -12152,7 +12172,7 @@ function saveFarmTreat(again) {
   _vfSnap(); const F = _vfF;
   // ★ まとめて記録：選んだ牛それぞれに同じ記録を入れる
   if (F.multi && F.multi.length > 1) {
-    const ids = F.multi.slice(); let ok = 0;
+    const ids = [...new Set(F.multi.map(x => String(x).split(/\s/)[0]))]; let ok = 0;   // 同じ牛を2回選んでいても1回だけ
     for (const id of ids) { _vfF = Object.assign({}, F, { cow: id, multi: null, _bulk: true, items: F.items.map(x => ({ ...x })) }); if (saveFarmTreat._one(again)) ok++; }
     _vfF = _vfBlank({ date: F.date, worker: F.worker }); renderFarmVet();
     appAlert(`💊 ${ok}頭に記録しました`); return;
@@ -12176,6 +12196,9 @@ saveFarmTreat._one = function (again) {
     ...(F.status ? { status: F.status } : {}), ...(F.worker ? { worker: F.worker.trim() } : {}), ...(F.temp ? { temp: F.temp } : {}),
     ...(rep ? { hanshoku: true, hanshokuType: F.kubun } : {}), ...((F.kubun === 'ワクチン' || F.kubun === '予防的投与') ? { preventive: true } : {}) };
   if (F.move) rec.moveTo = F.move;
+  // ★ 2026/11/26：同じ牛・同じ日・同じ薬の治療がもう入っていたら、二重に入れない（保存を2回押した・同じ牛を2回選んだ など）
+  try { const sig = _vetSig(rec), ex = Object.values(d.treatments || {}).some(t => _vetSig(t) === sig);
+    if (ex) { if (F._bulk) return false; if (!confirm(`${cowId} には ${fmtDate(F.date)} に同じ治療がもう入っています。もう1回入れますか？`)) return; } } catch (e) {}
   if (!_vfWrite({ ['treatments/f_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)]: rec })) return;
   try { if (F.worker) localStorage.setItem('_vfWorker', F.worker.trim()); } catch (e) {}
   // 移動先の牛群：その日に牛群を移した記録を残す
@@ -12276,7 +12299,10 @@ function barnKindOf(b, l) { const hasC = l.some(x => x.kind === 'cow'), hasK = l
 function barnVisible(b, l) { const k = barnKindOf(b, l); return !k ? l : l.filter(x => (x.kind === 'cow') === (k === 'cow')); }
 function barnGroupHTML(l, rowFn, b, setJs) {
   const key = x => String(x.kind === 'cow' ? x.c.id : (x.c.earTagId || ''));
-  const by = (a, z) => key(a).localeCompare(key(z), 'ja', { numeric: true });
+  const byTag = (a, z) => key(a).localeCompare(key(z), 'ja', { numeric: true });
+  // ★ 2026/11/26：繁殖の牛舎（名前に「繁殖」）は耳標の順、それ以外は月齢の高い順（生年月日の古い順）
+  const dob = x => String((x.c && x.c.dob) || '9999');
+  const by = /繁殖/.test(String(b || '')) ? byTag : (a, z) => dob(a).localeCompare(dob(z)) || byTag(a, z);
   const kd = barnKindOf(b, l);
   if (!kd) return l.slice().sort(by).map(rowFn).join('');
   const C = l.filter(x => x.kind === 'cow'), K = l.filter(x => x.kind !== 'cow');
@@ -13455,6 +13481,52 @@ function installUndoHooks() {
 // ===== クラウドのバックアップ（毎日・8日分）から、消えた授精簿の行だけを戻す =====
 const _ibIdent = x => `${x.d}|${x.t}|${x.s}|${x._seq || ''}`;
 let _ibRestoreData = null;
+// ★ 2026/11/26：☁ クラウドのバックアップ（8日分）から、消えた移植記録（外部授精簿・農家さんに渡した移植）を戻す
+let _tbRestoreData = null;
+async function openTbRestore() {
+  const db = window._fbDb;
+  if (!db || !window._DATA_PATH) { appAlert('ログインして、電波のある所で使ってください'); return; }
+  const key = String(window._DATA_PATH).split('/').pop();
+  const cur = new Set((transferBook || []).map(t => t.id));
+  const same = t => (transferBook || []).some(x => x.transferDate === t.transferDate && String(x.recipientNationalId || x.recipientEarTag || '') === String(t.recipientNationalId || t.recipientEarTag || '') && (x.embryoNo || '') === (t.embryoNo || ''));
+  appAlert('バックアップを調べています…');
+  const found = new Map();
+  for (let i = 0; i <= 9; i++) {
+    const d = addDays(today(), -i);
+    try {
+      const v = (await db.ref(`backups/${key}/${d}/transferBook`).once('value')).val(); if (!v) continue;
+      const L = typeof v === 'string' ? JSON.parse(v) : v; if (!Array.isArray(L)) continue;
+      L.forEach(t => { if (t && t.id && !cur.has(t.id) && !same(t) && !found.has(t.id)) found.set(t.id, { t, from: d }); });
+    } catch (e) { console.warn('tb backup', d, e); }
+  }
+  try { closeModal('modal-confirm'); } catch (e) {}
+  const L = [...found.values()].sort((a, b) => String(b.t.transferDate).localeCompare(String(a.t.transferDate)));
+  _tbRestoreData = L;
+  if (!L.length) { appAlert('バックアップと比べて、消えた移植記録は見つかりませんでした（今の外部授精簿に全部あります）'); return; }
+  document.getElementById('tbr-modal')?.remove();
+  const E = _stEsc, w = document.createElement('div'); w.id = 'tbr-modal';
+  w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9300;display:flex;align-items:center;justify-content:center;padding:12px;';
+  w.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;width:100%;max-width:520px;max-height:92vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><b>📥 消えた移植記録を戻す</b><button class="modal-close" onclick="document.getElementById('tbr-modal').remove()">✕</button></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.6;">クラウドのバックアップにはあって、今の外部授精簿（渡した移植）に無い記録です。戻したいものにチェックしてください。今ある記録はそのままです。</div>
+    ${L.map((x, i) => { const t = x.t; return `<label style="display:flex;gap:10px;align-items:flex-start;justify-content:flex-start;text-align:left;padding:8px 2px;border-top:1px solid var(--border);font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text);cursor:pointer;">
+      <input type="checkbox" class="tbr-ck" data-i="${i}" checked style="width:20px;height:20px;flex:none;margin:2px 0 0;">
+      <span><b>${E(fmtDate(t.transferDate))}</b>　${E(t.farmName || '')}　${E(t.recipientEarTag || '')} ${E(t.recipientName || '')}<br>
+      <span style="font-size:12px;color:var(--muted);">${E([t.embryoType, t.embryoNo ? '胚 ' + t.embryoNo : '', t.donor ? 'ドナー ' + t.donor : '', t.sire ? '父 ' + t.sire : '', t.pregResult ? '妊鑑 ' + t.pregResult : ''].filter(Boolean).join('・'))}　（${E(fmtDate(x.from))}のバックアップ）</span></span></label>`; }).join('')}
+    <button class="btn btn-primary" style="width:100%;margin-top:10px;" onclick="runTbRestore()">チェックした記録を戻す</button>
+  </div>`;
+  document.body.appendChild(w);
+}
+function runTbRestore() {
+  const L = _tbRestoreData || [], sel = [...document.querySelectorAll('#tbr-modal .tbr-ck')].filter(x => x.checked).map(x => L[+x.dataset.i]).filter(Boolean);
+  if (!sel.length) { appAlert('戻す記録にチェックしてください'); return; }
+  armUndo('移植記録を戻しました');
+  sel.forEach(x => { const t = Object.assign({}, x.t, { _mt: Date.now() }); delete t.auto; transferBook.push(t); });   // 戻した記録は、採卵記録の保存で自動で消えないようにする
+  save(); try { renderAll(); } catch (e) {}
+  try { if (typeof _shareTick === 'function') _shareTick(); } catch (e) {}
+  document.getElementById('tbr-modal')?.remove();
+  appAlert(`${sel.length}件の移植記録を戻しました。農家さんのツールへも、つながっていれば自動で届きます`);
+}
 async function openIbRestore() {
   const db = window._fbDb;
   if (!db || !window._DATA_PATH) { appAlert('ログインして、電波のある所で使ってください'); return; }
@@ -15576,7 +15648,7 @@ function _echoRender() {
   const cow = cows.find(c => c.id === _EC.cowId);
   w.innerHTML = `<div style="max-width:680px;margin:0 auto;padding:12px 14px 40px;">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b style="font-size:17px;">🔬 卵巣エコー　<span class="nui-mono" style="color:#4ade80;">${E(_EC.cowId)}</span> ${E(cow ? cowDisplayName(cow.id) || '' : '')}</b><button class="modal-close" onclick="_echoClose()">✕</button></div>
-    <div style="font-size:12px;color:#94a3b8;margin:4px 0 10px;">${E(fmtDate(_EC.date))}　画像は保存しません（印の形と大きさだけ残します）</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:#94a3b8;margin:6px 0 10px;"><span>見た日</span><input type="date" value="${E(_EC.date)}" max="${today()}" onchange="if(this.value){_EC.date=this.value;}" style="width:150px;margin:0;height:34px;font-size:13px;"><span>画像は保存しません（印の形と大きさだけ残します）</span></div>
     <div style="display:flex;gap:6px;margin-bottom:10px;">${chip(sd === 'R', "_echoTab('R')", '右の卵巣' + (_EC.scan.R.seen ? ' ✓' : ''))}${chip(sd === 'L', "_echoTab('L')", '左の卵巣' + (_EC.scan.L.seen ? ' ✓' : ''))}</div>
     <label style="display:block;text-align:center;border:1.5px dashed #2a3050;border-radius:12px;padding:${A ? '8px' : '28px'} 10px;cursor:pointer;font-size:14px;color:#cbd5e1;margin-bottom:10px;">📷 ${A ? '画像をかえる' : (sd === 'R' ? '右' : '左') + 'の卵巣のスクショを読み込む'}<input type="file" accept="image/*" style="display:none;" onchange="_echoLoad(this.files[0])"></label>
     ${pic}
@@ -15584,10 +15656,26 @@ function _echoRender() {
       ${hint ? `<div style="font-size:12.5px;color:#4ade80;margin-top:6px;">${hint}</div>` : `<div style="font-size:12px;color:#94a3b8;margin-top:6px;line-height:1.6;">水色＝自動で見つけた黒い所（腔・卵胞）。ちがうものは「− 消す」。黄体は「＋ 黄体」でふちを4か所タップ。</div>`}
       ${A.ppc ? '' : '<div style="font-size:12.5px;color:#fbbf24;margin-top:6px;">目盛りが自動で見つかりませんでした。「📏 目盛りを手で」で1マスの両はしをタップしてください</div>'}
       <label style="display:flex;align-items:center;justify-content:flex-start;text-align:left;gap:8px;font-size:12px;color:#94a3b8;margin-top:8px;"><input type="checkbox" style="width:18px;height:18px;flex:none;margin:0;" ${_EC.scan[sd].seen ? 'checked' : ''} onchange="_EC.scan['${sd}'].seen=this.checked;_echoRender()">この卵巣は見た（黄体も卵胞もなくても、見たら入れる）</label>` : `<label style="display:flex;align-items:center;justify-content:flex-start;text-align:left;gap:8px;font-size:12px;color:#94a3b8;"><input type="checkbox" style="width:18px;height:18px;flex:none;margin:0;" ${_EC.scan[sd].seen ? 'checked' : ''} onchange="_EC.scan['${sd}'].seen=this.checked;_echoRender()">画像はないが、この卵巣は見た（なにもなかった）</label>`}
+    <details ${A ? '' : 'open'} style="margin-top:10px;border:1px solid #2a3050;border-radius:10px;padding:8px 10px;"><summary style="cursor:pointer;font-size:13px;color:#cbd5e1;">✏ 画像がないとき：数字で入れる（${sd === 'R' ? '右' : '左'}）</summary>
+      ${(() => { const ip = (id, ph) => `<input id="${id}" inputmode="decimal" placeholder="${ph}" style="width:64px;margin:0;height:36px;font-size:14px;text-align:center;">`;
+        return `<div style="font-size:12px;color:#94a3b8;margin:8px 0 4px;">黄体（たて×よこ cm）</div><div style="display:flex;gap:6px;align-items:center;">${ip('ecn-cl1', '2.5')}×${ip('ecn-cl2', '2.2')}</div>
+        <div style="font-size:12px;color:#94a3b8;margin:8px 0 4px;">黄体の腔（たて×よこ cm・なければ空）</div><div style="display:flex;gap:6px;align-items:center;">${ip('ecn-cv1', '')}×${ip('ecn-cv2', '')}</div>
+        <div style="font-size:12px;color:#94a3b8;margin:8px 0 4px;">卵胞の直径（cm・いくつでも「1.2 0.8」のように空けて）</div><input id="ecn-fl" inputmode="decimal" placeholder="例 1.2 0.8" style="width:100%;margin:0;height:36px;font-size:14px;">
+        <button type="button" onclick="_echoNum()" style="margin-top:8px;width:100%;height:40px;border-radius:10px;border:1px solid #4ade80;background:none;color:#4ade80;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;">この数字で${sd === 'R' ? '右' : '左'}の卵巣に入れる</button>
+        <div style="font-size:11px;color:#64748b;margin-top:4px;">入れると、この卵巣の印は数字の分に入れかわります。黄体も卵胞もなかったときは、空のまま押してください。</div>`; })()}</details>
     <div class="nui-card" style="padding:12px;margin-top:14px;background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;">
       <div style="font-size:13px;font-weight:700;color:#94a3b8;">結果</div>${_echoSvg(_EC.scan, 300)}${_echoSumHTML(_EC.scan, J)}</div>
     <button type="button" onclick="_echoSave()" ${_EC.scan.R.seen || _EC.scan.L.seen ? '' : 'disabled'} style="width:100%;margin-top:14px;height:50px;border-radius:12px;border:none;background:${_EC.scan.R.seen || _EC.scan.L.seen ? '#22c55e' : '#334155'};color:#0f1117;font-weight:900;font-size:15px;cursor:pointer;font-family:inherit;">この所見を保存する</button>
   </div>`;
+}
+// 画像がないとき：数字から形を作る（黄体と腔はだ円、卵胞は円。位置は並べて描くための仮の位置）
+function _echoNum() {
+  if (!_EC) return; const sd = _EC.side, v = id => { const x = parseFloat(String((document.getElementById(id) || {}).value || '').normalize('NFKC')); return x > 0 && x < 10 ? x : 0; };
+  const sh = [], c1 = v('ecn-cl1'), c2 = v('ecn-cl2') || c1, k1 = v('ecn-cv1'), k2 = v('ecn-cv2') || k1;
+  let x = 0.5;
+  if (c1) { sh.push({ t: 'cl', x: x + c1 / 2, y: 1.5, rx: c1 / 2, ry: c2 / 2 }); if (k1) sh.push({ t: 'fl', x: x + c1 / 2, y: 1.5, rx: k1 / 2, ry: k2 / 2, a: Math.PI * k1 * k2 / 4 }); x += c1 + 0.3; }
+  String((document.getElementById('ecn-fl') || {}).value || '').normalize('NFKC').split(/[\s,、・]+/).map(parseFloat).filter(d => d > 0 && d < 10).forEach(d => { sh.push({ t: 'fl', x: x + d / 2, y: 1.5, rx: d / 2, ry: d / 2, a: Math.PI * d * d / 4 }); x += d + 0.2; });
+  _EC.scan[sd] = { seen: true, ppc: 0, shapes: sh, num: 1 }; _EC.mode = ''; _EC.taps = []; _echoRender();
 }
 function _echoTab(k) { _EC.side = k; _EC.mode = ''; _EC.taps = []; _echoRender(); }
 function _echoMode(m) { _EC.mode = _EC.mode === m ? '' : m; _EC.taps = []; _echoRender(); }
@@ -15664,6 +15752,10 @@ function echoEtStatsHTML(from, to) {
       <div style="font-size:12px;color:#94a3b8;margin-top:10px;">腔のしめる割合</div>${B2.map(row).join('')}
       <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:#94a3b8;">受胎した黄体・しなかった黄体の図を見る（${M.length}回）</summary>${pics}</details>`
       : '<div style="font-size:12.5px;color:#94a3b8;line-height:1.6;">まだ黄体を測った移植がありません。移植の日（か前日）に「🔬 卵巣エコー」で黄体を測っておくと、ここに出ます。</div>'}
+    ${(() => { const N = O.filter(o => !_scanForET(o.cowId, o.rec.date || o.rec.d) && cows.some(c => c.id === o.cowId)).sort((a, b) => String(b.rec.date || b.rec.d).localeCompare(String(a.rec.date || a.rec.d)));
+      if (!N.length) return '';
+      return `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:#94a3b8;">🔬 黄体をまだ入れていない移植（${N.length}回）→ あとから入れる</summary>${N.slice(0, 60).map(o => { const d = o.rec.date || o.rec.d;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:12.5px;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);"><span><b class="nui-mono">${o.cowId}</b> ${cowDisplayName(o.cowId) || ''}　${fmtDate(d)}　<span style="color:${o.pos ? '#4ade80' : '#94a3b8'};">${o.pos ? '受胎' : '不受胎'}</span></span><button class="nui-chip" style="font-size:12px;padding:4px 10px;white-space:nowrap;" onclick="openEchoScan('${o.cowId}','${d}','et',()=>{try{nuiYear((document.getElementById('stats-year')||{}).value||'all')}catch(e){}})">入れる</button></div>`; }).join('')}</details>`; })()}
     <div style="font-size:11px;color:#64748b;margin-top:8px;line-height:1.6;">移植の日か前日に測った黄体（組織がいちばん大きいもの）で数えます。受胎・不受胎は「🎯 受胎率（記録ベース）」のETと同じ数え方です。</div>`;
 }
 
@@ -23426,7 +23518,11 @@ function saveCollection() {
       _ofDone.push(t);
     });
     // 移植先を他農家の牛から外した胚は、自動で入れた記録を消す
-    transferBook = transferBook.filter(x => !(x.auto === 'colFresh' && x.colRecId === rec.id && !keep.has(x.embryoNo)));
+    // ★ 2026/11/26：消すのは「同じ番号の胚がこの採卵記録にまだあって、他農家の牛を外した」ときだけ。
+    //   胚の番号が変わった・行が見つからない、などのときは消さない（農家さんに渡した記録が消えないように）
+    const allNos = new Set(OFL.map(x => x.no));
+    const gone = transferBook.filter(x => x.auto === 'colFresh' && x.colRecId === rec.id && !keep.has(x.embryoNo) && allNos.has(x.embryoNo) && !x.pregResult);
+    if (gone.length) { transferBook = transferBook.filter(x => !gone.includes(x)); console.log('ofFresh: 他農家の牛を外した胚の記録を消しました', gone.map(x => x.embryoNo)); }
   } catch (e) { console.error('ofFresh', e); }
   // 新鮮胚の処理
   freshEmbryos.forEach((fe, i) => {
@@ -27937,18 +28033,60 @@ function _isFatCalf(c) {
 window._fatF = window._fatF || { sex: 'all', sort: 'old' };
 function _fatModeApply() {
   const pg = document.getElementById('page-calves'); if (!pg) return;
-  const on = !!window._calfFat && _fatOn();
+  const on = !!window._calfFat && (window._calfFat === 'rear' || _fatOn());
   pg.classList.toggle('fatmode', on);
-  pg.querySelectorAll('.nui-cowbar .tg button').forEach(b => { const k = b.dataset.k; if (k) b.classList.toggle('on', on ? k === (window._calfFat === 'ret' ? 'retfat' : 'fat') : k === 'calves'); });
+  pg.querySelectorAll('.nui-cowbar .tg button').forEach(b => { const k = b.dataset.k; if (k) b.classList.toggle('on', on ? k === (window._calfFat === 'ret' ? 'retfat' : window._calfFat === 'rear' ? 'rear' : 'fat') : k === 'calves'); });
   let box = document.getElementById('fattab-list');
   if (on) {
     if (!box) { box = document.createElement('div'); box.id = 'fattab-list'; const bar = pg.querySelector('.nui-cowbar'); pg.insertBefore(box, bar ? bar.nextSibling : pg.firstChild); }
     renderFatList();
   }
 }
+// ===== ★ 2026/11/26：🌱 育成タブ（◯か月齢〜肥育に入る前の子牛と、保留（繁殖候補）の雌） =====
+function _rearMonths() { return (window.FARM_CFG && +FARM_CFG.rearMonths > 0) ? +FARM_CFG.rearMonths : 5; }
+function _isKeptCalf(c) { return !!(c && (c.status === 'kept' || c.isBreedingCandidate)); }
+function _isRearCalf(c) {
+  if (!c || !c.dob || _calfGone(c)) return false;
+  if (typeof cows !== 'undefined' && c.earTagId && cows.some(x => x.id === c.earTagId)) return false;   // 親牛になった牛は親牛のほう
+  if (_ageMonths(c.dob, today()) < _rearMonths()) return false;
+  return _isKeptCalf(c) || !_isFatCalf(c);
+}
+window._rearF = window._rearF || { kind: 'all', sort: 'old' };
+function setRearF(k, v) { window._rearF[k] = v; renderRearList(); }
+function renderRearList() {
+  const box = document.getElementById('fattab-list'); if (!box) return;
+  const T = today(), R = _rearMonths(), M = _fatMonths(), fatOn = _fatOn();
+  const q = (document.getElementById('calf-search')?.value || '').trim().replace(/[-\s]/g, '');
+  const all = calves.filter(_isRearCalf);
+  const kept = all.filter(_isKeptCalf), rest = all.filter(c => !_isKeptCalf(c));
+  let L = _rearF.kind === 'kept' ? kept : _rearF.kind === 'rest' ? rest : all;
+  if (q) L = L.filter(c => cowQueryMatch(q, { id: c.earTagId, name: c.name, nationalId: c.nationalId }));
+  L = L.slice().sort((a, b) => _rearF.sort === 'old' ? String(a.dob).localeCompare(String(b.dob)) : String(b.dob).localeCompare(String(a.dob)));
+  const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const sx = c => (typeof calfSexMark === 'function' ? calfSexMark(c) : (c.sex === '雄' ? '♂' : '♀'));
+  const chip = (k, v, l) => `<button class="nui-chip ${_rearF[k] === v ? 'on' : ''}" style="font-size:12px;padding:5px 11px;${_rearF[k] === v ? 'border-color:#93c5fd;color:#93c5fd;font-weight:700;' : ''}" onclick="setRearF('${k}','${v}')">${l}</button>`;
+  const row = c => {
+    const mo = _ageMonths(c.dob, T), dam = c.damId ? `${c.damId} ${cowDisplayName(c.damId) || ''}`.trim() : '', kp = _isKeptCalf(c);
+    let loc = ''; try { loc = calfLocation(c); } catch (e) {}
+    const next = kp ? '🌟 保留（繁殖候補）' : fatOn ? `🥩 肥育まで あと${Math.max(0, M - mo)}か月（${M}か月で肥育へ）` : '';
+    return `<div class="nui-card" style="padding:10px 12px;margin-bottom:8px;cursor:pointer;" onclick="showCalfStory('${E(c.id)}')">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;">
+        <span style="min-width:0;"><span class="nui-mono" style="font-weight:700;">${E(c.earTagId || '耳標なし')}</span> <span style="color:#4ade80;">${E(c.name || '')}</span>
+          <span style="font-size:11px;border:1px solid #475569;border-radius:5px;padding:1px 5px;margin-left:3px;">${E(sx(c))}</span>${c.breed ? `<span style="font-size:11px;border:1px solid #475569;border-radius:5px;padding:1px 5px;margin-left:3px;">${E(c.breed)}</span>` : ''}</span>
+        <span style="color:#93c5fd;font-weight:700;white-space:nowrap;">${mo}か月</span></div>
+      <div style="font-size:11.5px;color:#94a3b8;margin-top:3px;">${E(fmtDate(c.dob))}生まれ${dam ? '・母 ' + E(dam) : ''}${c.sire ? '・父 ' + E(c.sire) : ''}${loc ? '・🏠 ' + E(loc) : ''}</div>
+      ${next ? `<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${next}</div>` : ''}
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;"><button class="nui-chip" style="font-size:12px;padding:5px 12px;" onclick="event.stopPropagation();showCalfStory('${E(c.id)}')">📖 ストーリー</button></div></div>`;
+  };
+  box.innerHTML = `<div style="font-size:12px;color:#94a3b8;margin:2px 2px 8px;">${R}か月齢から${fatOn ? `肥育（${M}か月）の前まで・保留の雌` : '上'}　<b style="color:#e2e8f0;font-size:14px;">${all.length}頭</b>（保留 ${kept.length}）</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${chip('kind', 'all', '全て ' + all.length)}${chip('kind', 'kept', '🌟 保留 ' + kept.length)}${fatOn ? chip('kind', 'rest', '🥩 肥育になる牛 ' + rest.length) : ''}${chip('sort', 'old', '月齢↓ 上から')}${chip('sort', 'young', '月齢↑ 若い順')}</div>
+    ${L.length ? L.map(row).join('') : `<div style="color:#94a3b8;font-size:13px;padding:16px 4px;">${all.length ? '当てはまる牛がいません' : '育成の牛はいません'}</div>`}
+    <div style="font-size:11.5px;color:#64748b;margin:10px 2px;line-height:1.6;">${R}か月齢になった子牛は「🍼 子牛」の「全て」からこちらに移ります（子牛の「保留」「証明書まだ」などの絞り込みには、今までどおり全部出ます）。押すとその牛のストーリーです。</div>`;
+}
 function setFatF(k, v) { window._fatF[k] = v; renderFatList(); }
 function renderFatList() {
   if (window._calfFat === 'ret') return renderRetFatList();   // 経産肥育
+  if (window._calfFat === 'rear') return renderRearList();    // 育成
   const box = document.getElementById('fattab-list'); if (!box) return;
   const T = today(), M = _fatMonths();
   const q = (document.getElementById('calf-search')?.value || '').trim().replace(/[-\s]/g, '');
@@ -27980,7 +28118,7 @@ function renderFatList() {
   box.innerHTML = `<div style="font-size:12px;color:#94a3b8;margin:2px 2px 8px;">${M}か月齢から上の牛　<b style="color:#e2e8f0;font-size:14px;">${all.length}頭</b>（${mLab.replace('♂ ', '')} ${nM}・雌 ${nF}）</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${chip('sex', 'all', '全て ' + all.length)}${chip('sex', 'm', mLab + ' ' + nM)}${chip('sex', 'f', '♀ 雌 ' + nF)}${chip('sort', 'old', '月齢↓ 上から')}${chip('sort', 'young', '月齢↑ 若い順')}</div>
     ${L.length ? L.map(row).join('') : `<div style="color:#94a3b8;font-size:13px;padding:16px 4px;">${all.length ? '当てはまる牛がいません' : M + 'か月齢になった子牛はまだいません'}</div>`}
-    <div style="font-size:11.5px;color:#64748b;margin:10px 2px;line-height:1.6;">出荷・移動・死亡・治療は「➕ 記録」から入れます。<br>「🌟 保留（繁殖候補）」にした雌は、${M}か月をこえても子牛のほうに残ります。</div>`;
+    <div style="font-size:11.5px;color:#64748b;margin:10px 2px;line-height:1.6;">出荷・移動・死亡・治療は「➕ 記録」から入れます。<br>「🌟 保留（繁殖候補）」にした雌は、${M}か月をこえても「🌱 育成」のほうに残ります。</div>`;
 }
 // ===== ★ 2026/11/24：📥 在籍牛の一覧（JA・改良組合などの表：個体識別番号_10桁・本牛名号・最新分娩日…）から取り込む =====
 // エクセル（.xlsx）・CSV・コピーして貼り付け、のどれでも読める。読んだ中身を見せて、1頭ずつ状態を直してから取り込む
@@ -28224,7 +28362,8 @@ function renderCalves() {
   const calfSearchVal = (document.getElementById('calf-search')?.value || '').trim().replace(/[-\s]/g, '');
 
   const _cbase = calves.filter(c => !_isFatCalf(c));   // ★ 2026/11/24：肥育の月齢になった牛は「🥩 肥育」のほうに出す
-  let filtered = _cbase;
+  // ★ 2026/11/26：「全て」は子牛（◯か月まで）だけ。それより上は「🌱 育成」に出す（ほかの絞り込みは今までどおり全部から）
+  let filtered = calfFilter === 'all' || !calfFilter ? _cbase.filter(c => !_isRearCalf(c)) : _cbase;
   if (calfFilter === 'pending') filtered = _cbase.filter(c => c.status === 'active');
   else if (calfFilter === 'kept') filtered = _cbase.filter(c => c.status === 'kept' || c.isBreedingCandidate);
   else if (calfFilter === 'moved') filtered = _cbase.filter(c => c.status === 'moved');
@@ -28797,7 +28936,7 @@ function showCalfStory(calfId) {
   if (calf.dob) items.push({ date: calf.dob, color: '#a855f7', title: '🍼 誕生', desc, kv, memo: calf.memo || (cr && cr.memo) || '', acts: [] });
   // 治療（獣医の在庫アプリの記録）
   if (typeof _vetData === 'undefined' || !_vetData) { try { startVetSync(); } catch (e) {} }
-  else vetTreatmentsForCalf(calf).forEach(t => { const it = vetStoryItem(t); if (it) items.push(it); });
+  else { window._lastCalfStoryId = calf.id; const VL = vetTreatmentsForCalf(calf), DU = _vetDupIds(VL); VL.forEach(t => { const it = vetStoryItem(t, DU.has(t.id) ? 'calf' : ''); if (it) items.push(it); }); }
   // 死亡
   const fd = calfDeathRec(calf);
   if (calf.nosePrint && calf.nosePrintDate) items.push({ date: calf.nosePrintDate, color: '#c4b5fd', title: '鼻紋とり', desc: '', kv: [], memo: '', acts: [] });
@@ -28856,7 +28995,7 @@ function showCalfStory(calfId) {
         <div class="st-date">${fmtDateShort(it.date)}</div>
         <div class="st-rail"><div class="st-dot" style="border-color:${it.color}"></div></div>
         <div class="st-card">
-          <div class="st-head"><div class="st-title">${it.title}</div>${more}</div>
+          <div class="st-head"><div class="st-title">${it.title}${it.badge ? ` <span class="st-badge" style="color:${it.badge[1]};background:${it.badge[2]};">${it.badge[0]}</span>` : ''}</div>${more}</div>
           ${it.desc ? `<div class="st-desc">${esc(it.desc)}</div>` : ''}
           ${kvHTML}
           ${it.memo ? `<div class="tl-memo">📝 ${esc(it.memo)}</div>` : ''}
@@ -36095,7 +36234,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112502';
+const APP_BUILD = '2026112601';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -38581,7 +38720,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       const pg = $('page-' + p); if (!pg || pg.querySelector('.nui-cowbar')) return;
       const d = document.createElement('div'); d.className = 'nui-cowbar';
       const isC = p === 'calves';
-      d.innerHTML = `<div class="tg"><button data-k="cows" class="${isC ? '' : 'on'}" onclick="window._calfFat=false;switchTab('cows');window.scrollTo(0,0)">🐄 親牛</button><button data-k="calves" class="${isC ? 'on' : ''}" onclick="window._calfFat=false;switchTab('calves');window.scrollTo(0,0)">🍼 子牛</button><button data-k="fat" class="nui-fatbtn" onclick="window._calfFat=true;switchTab('calves');window.scrollTo(0,0)">🥩 肥育</button><button data-k="retfat" class="nui-fatbtn" onclick="window._calfFat='ret';switchTab('calves');window.scrollTo(0,0)">🐄 経産肥育</button></div>
+      d.innerHTML = `<div class="tg"><button data-k="cows" class="${isC ? '' : 'on'}" onclick="window._calfFat=false;switchTab('cows');window.scrollTo(0,0)"><span class="i">🐄</span>親牛</button><button data-k="calves" class="${isC ? 'on' : ''}" onclick="window._calfFat=false;switchTab('calves');window.scrollTo(0,0)"><span class="i">🍼</span>子牛</button><button data-k="rear" class="nui-rearbtn" onclick="window._calfFat='rear';switchTab('calves');window.scrollTo(0,0)"><span class="i">🌱</span>育成</button><button data-k="fat" class="nui-fatbtn" onclick="window._calfFat=true;switchTab('calves');window.scrollTo(0,0)"><span class="i">🥩</span>肥育</button><button data-k="retfat" class="nui-fatbtn" onclick="window._calfFat='ret';switchTab('calves');window.scrollTo(0,0)"><span class="i">🐄</span>経産肥育</button></div>
         ${p === 'herd' ? '<span style="flex:1;"></span>' : `<input type="search" placeholder="🔍 耳標・名前でさがす" oninput="nuiCowQ('${p}',this.value)">`}`;
       pg.insertBefore(d, pg.firstChild);
     });
