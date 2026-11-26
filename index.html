@@ -16,54 +16,15 @@
 <script>
 // ===== 農場の設定 =====
 // farm-config.js（window.FARM_CONFIG）があればそれを使う。ない場合：
-//   ・小原農場のページ（obara-farm.github.io）と、手元のファイルで開いたとき → 小原農場の値
-//   ・それ以外 → 前に読めた設定（端末に保存）を使う。それもなければ「設定ファイルがありません」と出して止める
+//   前に読めた設定（端末に保存）を使う。それもなければ「設定ファイルがありません」と出して止める
 (function () {
-  const OBARA = {
-    farmId: 'obara',
-    firebase: {
-      apiKey: "AIzaSyCer9Gz8nMbP3hBod3O_66oVQGEKsUfXVo",
-      authDomain: "breeding-manager5.firebaseapp.com",
-      databaseURL: "https://breeding-manager5-default-rtdb.asia-southeast1.firebasedatabase.app",
-      projectId: "breeding-manager5",
-      storageBucket: "breeding-manager5.firebasestorage.app",
-      messagingSenderId: "663663293010",
-      appId: "1:663663293010:web:eaef68dee692fe1322258b"
-    },
-    dataPath: 'data/FhVF92oHJXMwK01gakK1Mms4HGP2',     // 繁殖データの置き場所
-    vetPath: 'vet/FhVF92oHJXMwK01gakK1Mms4HGP2',       // 薬品管理データの置き場所
-    farm: {
-      name: '小原農場',                         // 農場名
-      owner: '小原秀樹',                        // 飼養者（農場の代表）
-      ownerSpaced: '小原　秀樹',                // 証明書に書く飼養者名（姓と名の間は全角スペース）
-      zip: '〒083-0042',
-      address: '北海道中川郡池田町字千代田697番地',
-      addressShort: '池田町字千代田697番地',      // 証明書の欄が狭いところに書く住所
-      addressCounty: '中川郡池田町字千代田697番地',
-      addressArea: '池田町千代田',
-      vetName: '小原千佳',                      // 獣医師（授精・移植をする人）
-      vetNameSpaced: '小原　千佳',
-      vetRegNo: '60937',                        // 獣医師の登録番号
-      license: '01L237',                        // 家畜人工授精所の番号（胚番号の頭にも付く）
-      clinicName: '小原家畜診療所',
-      aiStationName: '小原家畜人工授精所'
-    },
-    // 妊鑑の日程（妊娠日数。ETは移植日の7日前から数える）。陽性ならリストの次の日に再妊鑑。最後の日で陽性なら終わり
-    // ？保留のときは、次の日（なければ60日、それも過ぎていれば2週間後）にもう一度
-    preg: { ai: [30, 45], et: [30, 45] },
-    // ET受胎率の集計から外す期間と、外す年の胚
-    etRateExclude: [{ from: '2026-01-01', to: '2026-02-28', label: 'R8年1〜2月（融解方法の誤りのため）' }],
-    excludeEmbryoYear: 'R6'
-  };
+  // ★ 2026/11/26：小原農場の値は farm-config.js に移した（本体にはどの農場の情報も入れない）
   const DEFAULT_PREG = { ai: [45], et: [45, 60] };   // ほかの農家さんの最初の値
   const host = (location && location.hostname) || '';
-  const isObaraHost = /^obara-farm\.github\.io$/i.test(host) || location.protocol === 'file:' || host === 'localhost' || host === '127.0.0.1';
   // ★ 2026/11/26：どこから設定を読んだかを残す（file＝farm-config.js／cache＝前に読めた設定／builtin＝本体の予備）
   let cfg = window.FARM_CONFIG || null, src = cfg ? 'file' : '';
   if (cfg) { try { localStorage.setItem('_farmConfigCache', JSON.stringify(cfg)); } catch (e) {} }
   if (!cfg) { try { cfg = JSON.parse(localStorage.getItem('_farmConfigCache') || 'null'); if (cfg) src = 'cache'; } catch (e) {} }
-  // 小原農場の値は、farm-config.js に移すまでの予備（ファイルで読めているのを確かめたら、本体から消す）
-  if (!cfg && isObaraHost) { cfg = OBARA; src = 'builtin'; }
   window.FARM_CFG_SRC = src || 'missing';
   if (!cfg) { window.FARM_MISSING = true; cfg = { farm: {}, preg: DEFAULT_PREG }; }
   // ★ 2026/11/26：前から使っている2つの農場の「その農場だけの決まり」を、ここ1か所にまとめる。
@@ -36423,7 +36384,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112611';
+const APP_BUILD = '2026112612';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
