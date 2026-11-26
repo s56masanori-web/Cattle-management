@@ -28076,7 +28076,7 @@ function renderRearList() {
         <span style="color:#93c5fd;font-weight:700;white-space:nowrap;">${mo}か月</span></div>
       <div style="font-size:11.5px;color:#94a3b8;margin-top:3px;">${E(fmtDate(c.dob))}生まれ${dam ? '・母 ' + E(dam) : ''}${c.sire ? '・父 ' + E(c.sire) : ''}${loc ? '・🏠 ' + E(loc) : ''}</div>
       ${next ? `<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${next}</div>` : ''}
-      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;"><button class="nui-chip" style="font-size:12px;padding:5px 12px;" onclick="event.stopPropagation();showCalfStory('${E(c.id)}')">📖 ストーリー</button></div></div>`;
+      <div class="nui-cc-act" onclick="event.stopPropagation()"><button onclick="showCalfStory('${E(c.id)}')">📖 ストーリー</button><button class="g" onclick="nuiRecCalf('${E(c.id)}')">＋ 記録</button></div></div>`;
   };
   box.innerHTML = `<div style="font-size:12px;color:#94a3b8;margin:2px 2px 8px;">${R}か月齢から${fatOn ? `肥育（${M}か月）の前まで・保留の雌` : '上'}　<b style="color:#e2e8f0;font-size:14px;">${all.length}頭</b>（保留 ${kept.length}）</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${chip('kind', 'all', '全て ' + all.length)}${chip('kind', 'kept', '🌟 保留 ' + kept.length)}${fatOn ? chip('kind', 'rest', '🥩 肥育になる牛 ' + rest.length) : ''}${chip('sort', 'old', '月齢↓ 上から')}${chip('sort', 'young', '月齢↑ 若い順')}</div>
@@ -28113,7 +28113,7 @@ function renderFatList() {
         <span style="color:#fb923c;font-weight:700;white-space:nowrap;">${mo}か月</span></div>
       <div style="font-size:11.5px;color:#94a3b8;margin-top:3px;">${E(fmtDate(c.dob))}生まれ${dam ? '・母 ' + E(dam) : ''}${c.sire ? '・父 ' + E(c.sire) : ''}${loc ? '・🏠 ' + E(loc) : ''}</div>
       ${ship ? `<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${ship}</div>` : ''}${just}
-      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;"><button class="nui-chip" style="font-size:12px;padding:5px 12px;" onclick="event.stopPropagation();openFatRec('calf','${E(c.id)}')">➕ 記録</button><button class="nui-chip" style="font-size:12px;padding:5px 12px;" onclick="event.stopPropagation();showCalfStory('${E(c.id)}')">📖 ストーリー</button></div></div>`;
+      <div class="nui-cc-act" onclick="event.stopPropagation()"><button onclick="showCalfStory('${E(c.id)}')">📖 ストーリー</button><button class="g" onclick="openFatRec('calf','${E(c.id)}')">＋ 記録</button></div></div>`;
   };
   box.innerHTML = `<div style="font-size:12px;color:#94a3b8;margin:2px 2px 8px;">${M}か月齢から上の牛　<b style="color:#e2e8f0;font-size:14px;">${all.length}頭</b>（${mLab.replace('♂ ', '')} ${nM}・雌 ${nF}）</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${chip('sex', 'all', '全て ' + all.length)}${chip('sex', 'm', mLab + ' ' + nM)}${chip('sex', 'f', '♀ 雌 ' + nF)}${chip('sort', 'old', '月齢↓ 上から')}${chip('sort', 'young', '月齢↑ 若い順')}</div>
@@ -28309,7 +28309,7 @@ function renderRetFatList() {
       <div style="font-size:12px;color:#e2e8f0;margin-top:3px;">肥育に入って <b>${mo ? mo + 'か月' + (rest ? rest + '日' : '') : days + '日'}</b>（${fmtDate(st)}から）</div>
       <div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${[age, c.lactation ? c.lactation + '産' : '', c.reason ? '廃用の理由：' + E(c.reason) : ''].filter(Boolean).join('・')}</div>
       ${plan ? `<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${plan}</div>` : ''}
-      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;"><button class="nui-chip" style="font-size:12px;padding:5px 12px;" onclick="event.stopPropagation();openFatRec('ret','${E(c.id)}')">➕ 記録</button><button class="nui-chip" style="font-size:12px;padding:5px 12px;" onclick="event.stopPropagation();showCowDetail('${E(c.id)}')">📖 ストーリー</button></div></div>`;
+      <div class="nui-cc-act" onclick="event.stopPropagation()"><button onclick="showCowDetail('${E(c.id)}')">📖 ストーリー</button><button class="g" onclick="openFatRec('ret','${E(c.id)}')">＋ 記録</button></div></div>`;
   };
   box.innerHTML = `<div style="font-size:12px;color:#94a3b8;margin:2px 2px 8px;">廃用にして肥育している牛（経産肥育）　<b style="color:#e2e8f0;font-size:14px;">${all.length}頭</b></div>
     ${L.length ? L.map(row).join('') : `<div style="color:#94a3b8;font-size:13px;padding:16px 4px;">${all.length ? '当てはまる牛がいません' : '経産肥育の牛はいません'}</div>`}
@@ -28565,11 +28565,12 @@ function renderCalves() {
             <span id="calf-chev-${calf.id}" style="color:var(--muted);font-size:14px;transition:transform .2s;">▼</span>
           </div>
         </div>
+        ${document.documentElement.classList.contains('nui') ? `<div class="nui-cc-act" style="margin:0 14px 12px;" onclick="event.stopPropagation()">
+          <button onclick="showCalfStory('${calf.id}')">📖 ストーリー</button>
+          <button class="g" onclick="nuiRecCalf('${calf.id}')">＋ 記録</button></div>` : ''}
         <!-- 詳細（展開時表示） -->
         <div id="calf-detail-${calf.id}" style="display:none;padding:0 14px 14px 14px;border-top:1px solid var(--border);">
-          ${document.documentElement.classList.contains('nui') ? `<div class="nui-cc-act" style="margin-top:10px;" onclick="event.stopPropagation()">
-            <button onclick="showCalfStory('${calf.id}')">📖 ストーリー</button>
-            <button class="g" onclick="nuiRecCalf('${calf.id}')">＋ 記録</button></div>` : ''}
+
           <div style="font-size:12px;color:var(--muted);margin-bottom:8px;margin-top:8px;">
             ${!isEtCalf && pedigreeStr ? `<div>系統: <strong style="color:var(--text);">${pedigreeStr}</strong></div>` : ''}
             ${calf.insemDate ? `<div>${isEtCalf?'🧬 ET':'💉 AI'}年月日: <strong style="color:var(--text);">${fmtDate(calf.insemDate)}</strong></div>` : ''}
@@ -36234,7 +36235,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112601';
+const APP_BUILD = '2026112602';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
