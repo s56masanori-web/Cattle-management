@@ -55,9 +55,7 @@ window.FARM_CONFIG = {
   hide: ['collection', 'breedHistory', 'vetTab', 'etCol', 'syncCol'],
   // 産室は使わない：「🏠 産室移動」のタスクを出さない
   sanshitsuTask: false,
-  autoNegReinsem: true,
-  // 新しい画面の作り（下のメニュー：ホーム／タスク／＋記録／牛／その他）を使う
-  newUI: true,   // もう一度授精したら、前の授精を自動で「不受胎」にする
+  autoNegReinsem: true,   // もう一度授精したら、前の授精を自動で「不受胎」にする
   // 色の見分けがつきにくい人向け：授精簿のAI・ETを色ではなく「AI」「ET」の札で見分ける
   colorSafe: true,
   // タスク画面の上のお知らせと、ホームの「要注意の牛」を、たたんで見出しと頭数だけにする
@@ -70,5 +68,15 @@ window.FARM_CONFIG = {
   // 妊鑑：AIは妊娠45日の1回、ETは45日と60日
   preg: { ai: [45], et: [45, 60] },
   etRateExclude: [],
-  excludeEmbryoYear: ''
+  excludeEmbryoYear: '',
+  // ===== この農場だけの決まり（2026/11/26 に本体から移した。本体にも同じ値があるので、ここに無くても今と同じに動く） =====
+  legacyFixes: true,           // 前の版の不具合の直しを動かす（前から使っている農場だけ）
+  measure: true,               // 体の測定を使う
+  calfTagFormat: 'dam',        // 自家耳標の付け方：母の耳標(何番目の子)
+  aiCertWhen: 'insem',         // 授精証明書は授精した日に出す
+  contactName: '千佳さん',
+  donorProgName: '小原式',
+  regOrgDefault: '日本あか牛登録協会',
+  fnBreedRule: { F: 'F1', '*': '褐毛' },   // ファームノートの取り込み：Fで始まる耳標＝F1、ほか＝褐毛
+  activeFarmers: ['小原', '朝川', '長島', '市川', '太田', '納'],
 };
