@@ -6208,7 +6208,7 @@ function renderPregList() {
     ${(() => { // ★ 2026/11/27：今年の内訳（年内の見込みも）と、来年の見込み。どちらもたたんで出す
       const h = calfBirthSummaryHTML(pregYear, 'renderPregList()', '_pregSumOpen', dueCows);
       const ny = String(+pregYear + 1), h2 = dueCows.some(c => String(c.dueDate || '').startsWith(ny)) ? calfBirthSummaryHTML(ny, 'renderPregList()', '_pregSumOpen2', dueCows) : '';
-      const box = x => x ? `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:12px;">${x}</div>` : '';
+      const box = x => x ? `<div class="preg-sum" style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:12px;">${x}</div>` : '';
       return box(h) + box(h2); })()}`;
   })();
 
@@ -16801,6 +16801,7 @@ function calfBirthSummaryHTML(thisYear, RR, OK, dueList) {
           DBR.map(([key,label,col]) => { const L = dueL.filter(c => dueCalfBreed(c) === key); if (!L.length) return ''; const e = L.filter(_dueIsET).reduce((t, c) => t + nD(c), 0), n = L.reduce((t, c) => t + nD(c), 0); return '<span><span style="color:'+col+';font-weight:700;">'+label+'</span> <strong>'+n+'頭</strong>（ET '+e+'・AI '+(n - e)+'）</span>'; }).join('')+
         '</div>'+ratioBar(dEt, dAi, '生まれる予定のうち')+'</div>'+
         '<div style="margin-top:8px;font-size:12px;color:var(--muted);text-align:right;">'+thisYear+'年 全部（生まれた＋予定）'+(allC.length + dEt + dAi)+'頭のうち ET <strong style="color:var(--purple);font-size:14px;">'+_pct(total + dEt, allC.length + dEt + dAi)+'</strong>（'+(total + dEt)+'頭）</div>';
+      if (sumOpen && !(total + aiTotal)) return head + dueHTML;   // ★ まだ1頭も生まれていない年（来年の見込み）は、見込みだけ
       return sumOpen ? head + totHTML + dueHTML + etHTML + aiHTML : head;
 }
 // 保留（繁殖候補）の内訳：品種ごとに ET産仔・AI産仔・ゲノミックの判定
@@ -36413,7 +36414,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112702';
+const APP_BUILD = '2026112703';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -39097,7 +39098,10 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     head.innerHTML = `<div class="nui-hd">${backBtn("switchTab('home')")}<span class="t" style="color:#a78bfa;">🍼 お産予定</span><span style="font-size:12px;color:#94a3b8;">妊娠中 ${preg.length}頭</span></div>
       <div class="nui-seg" style="margin-bottom:10px;">${[['月ごと', 1], ['1年の頭数', 2]].map(([l, i]) => `<button class="${_pv === i ? 'on' : ''}" onclick="nuiPV(${i})">${l}</button>`).join('')}</div>`;
     box.insertBefore(head, box.firstChild);
-    kids.forEach(x => {
+    // ★ 2026/11/27：産仔の内訳（今年・来年の見込み）は「月ごと」「1年の頭数」のどちらでも、いちばん上にたたんで出す
+    const sums = kids.filter(x => x.classList.contains('preg-sum'));
+    sums.slice().reverse().forEach(x => { x.classList.remove('nui-hidden'); head.after(x); });
+    kids.filter(x => !x.classList.contains('preg-sum')).forEach(x => {
       const isMonth = /^preg-month-/.test(x.id || ''), txt = x.textContent || '';
       const isYear = !isMonth && (/分娩頭数|産仔の内訳/.test(txt) || /印刷する/.test(txt));
       const show = _pv === 1 ? isMonth : _pv === 2 ? isYear : false;
