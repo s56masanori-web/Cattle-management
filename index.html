@@ -58,11 +58,27 @@
   const DEFAULT_PREG = { ai: [45], et: [45, 60] };   // ほかの農家さんの最初の値
   const host = (location && location.hostname) || '';
   const isObaraHost = /^obara-farm\.github\.io$/i.test(host) || location.protocol === 'file:' || host === 'localhost' || host === '127.0.0.1';
-  let cfg = window.FARM_CONFIG || null;
+  // ★ 2026/11/26：どこから設定を読んだかを残す（file＝farm-config.js／cache＝前に読めた設定／builtin＝本体の予備）
+  let cfg = window.FARM_CONFIG || null, src = cfg ? 'file' : '';
   if (cfg) { try { localStorage.setItem('_farmConfigCache', JSON.stringify(cfg)); } catch (e) {} }
-  if (!cfg && !isObaraHost) { try { cfg = JSON.parse(localStorage.getItem('_farmConfigCache') || 'null'); } catch (e) {} }
-  if (!cfg && isObaraHost) cfg = OBARA;
+  if (!cfg) { try { cfg = JSON.parse(localStorage.getItem('_farmConfigCache') || 'null'); if (cfg) src = 'cache'; } catch (e) {} }
+  // 小原農場の値は、farm-config.js に移すまでの予備（ファイルで読めているのを確かめたら、本体から消す）
+  if (!cfg && isObaraHost) { cfg = OBARA; src = 'builtin'; }
+  window.FARM_CFG_SRC = src || 'missing';
   if (!cfg) { window.FARM_MISSING = true; cfg = { farm: {}, preg: DEFAULT_PREG }; }
+  // ★ 2026/11/26：前から使っている2つの農場の「その農場だけの決まり」を、ここ1か所にまとめる。
+  //   本体のほかの所は農場の名前で分けず、この設定（FARM_CFG）を読む。新しい農場は、どれも入らない（ふつうの動き）
+  const LEGACY = {
+    obara: { legacyFixes: true, role: 'vet', newUI: true, vetTool: true, baseData: true, advRepro: true, noSetupPrompt: true, contactName: '千佳さん', donorProgName: '小原式', defaultOperator: 'TBS', regOrgDefault: '日本あか牛登録協会', ownFarmMatch: '小原',
+      activeFarmers: ['小原', '朝川', '長島', '市川', '太田', '納'], fnBreedRule: { F: 'F1', '*': '褐毛' } },
+    nagashima: { legacyFixes: true, newUI: false, measure: true, calfTagFormat: 'dam', aiCertWhen: 'insem', contactName: '千佳さん', donorProgName: '小原式', regOrgDefault: '日本あか牛登録協会', fnBreedRule: { F: 'F1', '*': '褐毛' },
+      activeFarmers: ['小原', '朝川', '長島', '市川', '太田', '納'] },
+  };
+  //   ・role：'vet'＝獣医さんのツール（つなぐ・渡す側）／ほか＝農家さんのツール
+  //   ・newUI：新しい画面（新しい農場は最初から使う）・vetTool：薬品管理ツールを埋め込む・baseData：昔の台帳の基礎データを使う
+  //   ・advRepro：くわしい繁殖の機能（オブシンク・卵巣の所見・エコー・黄体）。獣医さんのツールは最初から使う
+  cfg = Object.assign({}, LEGACY[cfg.farmId] || {}, cfg);
+  if (cfg.advRepro === undefined) cfg.advRepro = cfg.role === 'vet';
   // ★ 2026/11/24：「はじめの設定」（⚙ 牧場の設定）で農家さんが選んだ内容を、farm-config.js の値の上にかぶせる
   window._FARM_CFG0 = JSON.parse(JSON.stringify(cfg));
   window._applyFarmSettings = function (c0, s) {
@@ -137,7 +153,7 @@
   window.ANY_LIC_RE = '\\d{2}[A-Z]\\d{3}';
   // 使わない機能を隠す（features.etCert:false → 移植証明書を出さない）
   // vetTool：小原家畜診療所の薬品管理ツールを埋め込むか。ほかの農場は、繁殖管理の中の「薬の記録」を使う
-  window.FARM_FEAT = Object.assign({ etCert: true, vetTool: (cfg.farmId || '') === 'obara' }, cfg.features || {});
+  window.FARM_FEAT = Object.assign({ etCert: true, vetTool: !!cfg.vetTool }, cfg.features || {});
   if (window.FARM_FEAT.etCert === false) document.documentElement.classList.add('no-etcert');
   // barnList：個体タブの上に牛群ごとの頭数を出す。calfFlags：子牛の去勢・除角を記録して表示する
   if (window.FARM_FEAT.barnList) document.documentElement.classList.add('feat-barnlist');
@@ -146,7 +162,7 @@
   if (window.FARM_FEAT.extInsem === false) document.documentElement.classList.add('no-extinsem');
   (Array.isArray(window.FARM_CFG && window.FARM_CFG.hide) ? window.FARM_CFG.hide : []).forEach(k => document.documentElement.classList.add('hx-' + k));
   // 新しい画面の作り（下のメニュー5つ・＋記録・ホーム・その他）。小原農場は使う。ほかの農場は設定 newUI: true のときだけ
-  try { const _fid = (window.FARM_CFG && window.FARM_CFG.farmId) || 'obara'; const _nu = (window.FARM_CFG && 'newUI' in window.FARM_CFG) ? !!window.FARM_CFG.newUI : _fid === 'obara'; if (_nu) { document.documentElement.classList.add('nui'); if (window.FARM_FEAT && !('barnList' in ((window.FARM_CFG && window.FARM_CFG.features) || {}))) { window.FARM_FEAT.barnList = true; document.documentElement.classList.add('feat-barnlist'); } } } catch (e) {}
+  try { const _nu = (window.FARM_CFG && 'newUI' in window.FARM_CFG) ? !!window.FARM_CFG.newUI : true; /* 新しい農場は新しい画面 */ if (_nu) { document.documentElement.classList.add('nui'); if (window.FARM_FEAT && !('barnList' in ((window.FARM_CFG && window.FARM_CFG.features) || {}))) { window.FARM_FEAT.barnList = true; document.documentElement.classList.add('feat-barnlist'); } } } catch (e) {}
 })();
 </script>
 <style>html.no-extinsem div:has(> #ibsub-ext) { display: none !important; }
@@ -3283,8 +3299,7 @@ function applyBaseData(json) {
 // 自分の牧場の肥育成績か（生産者名で判定）。小原は今までどおり「小原」を含むもの、ほかの牧場は設定の飼養者名で
 function _ownFarmer(f) {
   f = String(f || '');
-  const fid = (window.FARM_CFG && window.FARM_CFG.farmId) || 'obara';
-  if (fid === 'obara') return f.includes('小原');
+  if (window.FARM_CFG && FARM_CFG.ownFarmMatch) return f.includes(FARM_CFG.ownFarmMatch);
   const o = String((window.FARM && FARM.owner) || '').replace(/[\s　]/g, '');
   return !!o && f.replace(/[\s　]/g, '').includes(o);
 }
@@ -3449,7 +3464,7 @@ const _store = (() => {
     if (document.getElementById('store-full-banner')) return;
     const d = document.createElement('div'); d.id = 'store-full-banner';
     d.style.cssText = 'position:fixed;left:8px;right:8px;top:8px;z-index:99999;background:#7f1d1d;color:#fff;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5;box-shadow:0 4px 16px rgba(0,0,0,.5);';
-    d.innerHTML = '⚠ この端末の保存場所がいっぱいで、いま入れた内容が保存できていません。電波のある所でページを開き直してください。直らないときは千佳さんに連絡してください。 <button onclick="this.parentNode.remove()" style="margin-left:6px;background:#fff;color:#7f1d1d;border:none;border-radius:6px;padding:2px 8px;font-weight:700;">閉じる</button>';
+    d.innerHTML = '⚠ この端末の保存場所がいっぱいで、いま入れた内容が保存できていません。電波のある所でページを開き直してください。直らないときは' + ((window.FARM_CFG && FARM_CFG.contactName) || '管理している人') + 'に連絡してください。 <button onclick="this.parentNode.remove()" style="margin-left:6px;background:#fff;color:#7f1d1d;border:none;border-radius:6px;padding:2px 8px;font-weight:700;">閉じる</button>';
     (document.body || document.documentElement).appendChild(d);
   }
   const watchLost = (k, oldS, newS) => {
@@ -3873,6 +3888,7 @@ function addStrawRows(cowId, date, n, sire) {
 }
 // 前に「2本」と入れて1行しかできなかった授精を、在庫の使用本数に合わせて行を足す（2026/10/01以降）
 function repairStrawRows() {
+  if (!(window.FARM_CFG && FARM_CFG.legacyFixes)) return false;   // 前の版の不具合の直し：前から使っている農場だけ
   const need = new Map(), dar = new Map();
   (semenInventory || []).forEach(item => (item.history || []).forEach(h => {
     if (!h || !h.date || h.date < '2026-10-01' || !['use', 'transfer'].includes(h.type)) return;
@@ -3896,6 +3912,7 @@ function repairStrawRows() {
 // ★ 2026/11/17：上の不具合で、ETの日に精液の使用が入ってしまったものを戻す（2026/09/01以降）。
 //   その牛のその日に ET の記録があって AI の記録がない「精液の使用」は、在庫に1本ずつ戻し、ETのメモと授精簿からその精液を外す
 function repairEtSemenMisuse() {
+  if (!(window.FARM_CFG && FARM_CFG.legacyFixes)) return false;   // 前の版の不具合の直し：前から使っている農場だけ
   let changed = false;
   const all = cows.concat(typeof retiredCows !== 'undefined' ? retiredCows : []);
   (semenInventory || []).forEach(item => {
@@ -4051,6 +4068,7 @@ function repairEmb0042Once() {
   return true;
 }
 function repairDonorFlagsOnce() {
+  if (!(window.FARM_CFG && FARM_CFG.legacyFixes)) return false;   // 前の版の不具合の直し：前から使っている農場だけ
   if (typeof farmTargets === 'undefined' || farmTargets._donorFlagFix1) return 0;
   let n = 0;
   (typeof collectionRecordsNew !== 'undefined' ? collectionRecordsNew : []).forEach(cr => {
@@ -4548,7 +4566,8 @@ const AI_PROGS = {
   ovsynch: { opt: 'cidr_ai_ovsynch', sched: 'ovsynch', label: 'オブシンク', how: 'D0 GnRH → D7 PG → D9夕 GnRH → D10朝 授精', obara: true },
   covsynch: { opt: 'cidr_ai_covsynch', sched: 'cidr_ovsynch', label: 'CIDR-オブシンク', how: 'D0 CIDR＋GnRH → D7 PG・抜去 → D9夕 GnRH → D10朝 授精', obara: true },
 };
-function _isObaraFarm() { return ((window.FARM_CFG && FARM_CFG.farmId) || 'obara') === 'obara'; }
+// くわしい繁殖の機能（オブシンク・卵巣の所見・エコー・黄体）を使う農場か（設定 advRepro。獣医さんのツールは最初から使う）
+function _isObaraFarm() { return !!(window.FARM_CFG && FARM_CFG.advRepro); }
 function _aiProtoOfOpt(opt) { const k = Object.keys(AI_PROGS).find(k => AI_PROGS[k].opt === opt); return k && (!AI_PROGS[k].obara || _isObaraFarm()) ? k : ''; }
 function _aiSchedOf(proto) { return (AI_PROGS[proto] && AI_PROGS[proto].sched) || 'cidr_ai'; }
 function _aiProgLabel(proto) { return (AI_PROGS[proto] && AI_PROGS[proto].label) || ''; }
@@ -4696,7 +4715,7 @@ function initApp() {
   setTimeout(() => { window._histAuto = false; try { _histReset(); } catch (e) {} }, 3000);
   // 基礎データ：同期で _store に入った _base を読み込む（無ければ警告）
   // 小原農場だけ：昔の台帳を移したときの基礎データ（_base）。ほかの農場にはもともと無いので警告しない
-  if (!applyBaseData(_store.getItem('_base')) && ((window.FARM_CFG && window.FARM_CFG.farmId) || 'obara') === 'obara') {
+  if (!applyBaseData(_store.getItem('_base')) && window.FARM_CFG && FARM_CFG.baseData) {
     setTimeout(() => { try { appAlert('⚠ 基礎データ（牛の一覧・昔の授精簿）がまだクラウドにありません。\n移行用のファイル（手順1）を一度開いてから、このファイルに差し替えてください。'); } catch (e) {} }, 800);
   }
   document.getElementById('reg-date').value = today();
@@ -4712,7 +4731,7 @@ function initApp() {
   try { syncRecipientPlaceholders(); } catch (e) {}
   syncAbortionRecords();
   try { if (repairDonorFlagsOnce()) save(); } catch (e) { console.error('repairDonorFlags', e); }
-  try { if (repairEmb0042Once()) save(); } catch (e) { console.error('repairEmb0042', e); }
+  // （25J16B1 の 01L237R7-0042 だけを直す1回きりの処理は、済んだので外した 2026/11/26）
   try { if (repairEtShareRowsOnce()) save(); } catch (e) { console.error('repairEtShare', e); }
   // ★ 2026/11/23：獣医さんから届いた移植の行の年度を1月始まりにそろえる（前は4月始まりで入っていた）
   try { let fx = false; (insemBookRecords || []).forEach(r => { if (r && r.fromVet && r.d) { const y = 'R' + (parseInt(String(r.d).slice(0, 4)) - 2018); if (r.y !== y) { r.y = y; r._mt = Date.now(); fx = true; } } }); if (fx) save(); } catch (e) { console.error('fixVetFy', e); }
@@ -4762,6 +4781,7 @@ function migrateTakahashiTaskText() {
 }
 // 重複登録の「しおん」（r34 むつみ と同じ個体識別番号）を1回だけ取り除く
 function removeDuplicateShion() {
+  if (!(window.FARM_CFG && FARM_CFG.legacyFixes)) return;
   const dup = cows.find(c => c.id === 'しおん');
   const real = cows.find(c => c.id !== 'しおん' && String(c.nationalId) === '1687438759');
   if (!dup || !real) return;
@@ -8033,7 +8053,7 @@ function buildCowStory(cowId) {
   // ---- 発情・プログラム開始・その他イベント ----
   const progLabel = {
     cidr_ai_start: 'CIDRプログラム開始（AI）', et_recipient: 'ETレシピエント プログラム開始',
-    donor_et_start: '採卵プログラム開始（小原式・自然発情）', donor_et_pretreat_start: '採卵プログラム開始（小原式・前処置）',
+    donor_et_start: `採卵プログラム開始（${_dpn()}自然発情）`, donor_et_pretreat_start: `採卵プログラム開始（${_dpn()}前処置）`,
     donor_et_takahashi_start: '採卵プログラム開始（高橋式）', pg_rescue: '🚨 PGレスキュー開始',
     estrus_et: '自然発情 → ET予定（発情確認）',
   };
@@ -9977,7 +9997,7 @@ function _dcRows(scope) {
   Object.values(V.movements || {}).forEach(m => {
     if (!m || !m.date) return;
     const date = _normYMD(m.date), d = V.drugs[m.drugId];
-    const farm = _dcFarm(m), own = !farm || /小原/.test(farm);
+    const farm = _dcFarm(m), own = !farm || farm.includes(_ownFarmKey());
     let ok = false;
     if (scope === 'own') ok = (m.type === 'use' && own) || m.type === 'dispose';
     else if (scope === 'other') ok = (m.type === 'use' && !own) || m.type === 'dispense';
@@ -10048,7 +10068,7 @@ function renderDrugCost(el, Y) {
   // 値段が入っていない薬
   const np = {}; cur.filter(r => r.noPrice).forEach(r => { np[r.name] = (np[r.name] || 0) + 1; });
   const npL = Object.entries(np).sort((a, b) => b[1] - a[1]);
-  const SC = [['pay', '🏦 通帳の振込額'], ['own', '小原牧場で使った分'], ['other', 'ほかの農場の分'], ['buy', '仕入れ（入庫）']];
+  const SC = [['pay', '🏦 通帳の振込額'], ['own', `${(window.FARM && FARM.name) || '自分の牧場'}で使った分`], ['other', 'ほかの農場の分'], ['buy', '仕入れ（入庫）']];
   const isPay = S.scope === 'pay';
   // 振込額の入力（月を選んで、会社ごとに入れる）
   let payIn = '';
@@ -10149,7 +10169,7 @@ const ADV_REF = {
 function advisorOn() { return !(typeof farmTargets !== 'undefined' && farmTargets._advisor === 0); }
 function setAdvisor(on) { farmTargets._advisor = on ? 1 : 0; save(); try { renderAnnual(); } catch (e) {} try { renderAdvisorSetting(); } catch (e) {} }
 // ★ 2026/11/20：📏 体測（メジャーで胸囲・体高・体長を測って、推定体重と増体を出す）。設定でオン・オフ（長島牧場ははじめからオン）
-function measureOn() { const v = typeof farmTargets !== 'undefined' ? farmTargets._measure : undefined; if (v === 1 || v === 0) return v === 1; return !!(window.FARM_CFG && FARM_CFG.farmId === 'nagashima'); }
+function measureOn() { const v = typeof farmTargets !== 'undefined' ? farmTargets._measure : undefined; if (v === 1 || v === 0) return v === 1; return !!(window.FARM_CFG && FARM_CFG.measure); }   // 体の測定（設定 measure。長島牧場は前から使う）
 function setMeasure(on) { farmTargets._measure = on ? 1 : 0; save(); try { renderMeasureSetting(); } catch (e) {} try { renderAll(); } catch (e) {} }
 function renderMeasureSetting() {
   const el = document.getElementById('measure-setting'); if (!el) return;
@@ -12609,7 +12629,12 @@ function _fnDate(s) {
   return '';
 }
 function _fnFY(d) { const y = +d.slice(0, 4), mo = +d.slice(5, 7); return 'R' + ((mo >= 4 ? y : y - 1) - 2018); }
-function _fnBreed(tag) { return /^F/i.test(tag || '') ? 'F1' : '褐毛'; }   // 長島牧場：耳標がFで始まる牛はF1、それ以外は褐毛
+// ファームノートの取り込み：耳標の頭の文字から品種（設定 fnBreedRule。長島牧場は「Fで始まる＝F1、ほか＝褐毛」）。設定がない牧場は、飼っている品種の1つめ
+function _fnBreed(tag) {
+  const R = (window.FARM_CFG && FARM_CFG.fnBreedRule) || null, t = String(tag || '');
+  if (R) { const k = Object.keys(R).find(k => k !== '*' && t.toUpperCase().startsWith(k.toUpperCase())); return k ? R[k] : (R['*'] || ''); }
+  return ((window.FARM_CFG && FARM_CFG.breeds) || [])[0] || '';
+}
 // タグ「3産目/K-50/秋桜/自然分娩」から父牛を拾う（父牛の列が無い一覧のとき）
 function _fnSireFromTag(tagText, ear) {
   const m = String(ear || '').match(/^(.+)\((\d+)\)$/); if (!m || !tagText) return '';
@@ -12699,7 +12724,7 @@ function buildFarmnoteImport(texts) {
     ev.sort((x, y) => x.date.localeCompare(y.date));
     const age = a.dob ? Math.floor(diffDays(td, a.dob) / 365.25) : null;
     const cow = { id, name: a.name, nationalId: a.nat, dob: a.dob, ageYears: age, lactation: a.parity || 0, breed: _fnBreed(a.tag),
-      sire: a.sire, maternalSire: a.mSire, dam: '', regOrg: _fnBreed(a.tag) === '褐毛' ? '日本あか牛登録協会' : '', regNo: '',
+      sire: a.sire, maternalSire: a.mSire, dam: '', regOrg: regOrgByBreed(_fnBreed(a.tag)), regNo: '',
       status: pregnant ? 'pregnant' : 'open', events: ev, memo: [a.gSire ? '祖母の父:' + a.gSire : '', 'ファームノートID:' + a.fid].filter(Boolean).join(' ／ '), fnId: a.fid };
     if (lastCalv) cow.calvingDate = lastCalv;
     if (a.lastAI) cow.aiDate = a.lastAI;
@@ -12954,7 +12979,7 @@ function _etShareText(farm) {
 //   クラウドの設定に "share": { "$t": { ".read": true, ".write": "auth != null" } } を書き足してもらう
 function _shareToken() { if (!farmTargets._shareToken) { farmTargets._shareToken = 's' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); save(); } return farmTargets._shareToken; }
 function _shareBase() { const u = (window._fbDb && window._fbDb.app && window._fbDb.app.options.databaseURL) || ''; return u ? u.replace(/\/$/, '') + '/share/' + _shareToken() : ''; }
-function _isVetFarm() { return ((window.FARM_CFG || {}).farmId || 'obara') === 'obara'; }
+function _isVetFarm() { return (window.FARM_CFG || {}).role === 'vet'; }   // 獣医さんのツール（つなぐ・渡す側）
 async function _sharePut(sub, obj) {
   if (!window._fbDb) return false;
   const sig = _syncHashLite(JSON.stringify(obj)), k = 'shareSig_' + sub;
@@ -15962,7 +15987,14 @@ function _ovEcho() {
 }
 function _ovUse(opt) { const s = document.getElementById('qr-event'); if (!s) return; s.value = opt; onQrEventChange(); }
 // 長島さんなど小原農場でないところでは、オブシンク系のえらび肢を出さない
-setTimeout(() => { try { if (!_isObaraFarm()) document.querySelectorAll('#qr-event option.obara-only').forEach(o => o.remove()); } catch (e) {} }, 0);
+setTimeout(() => { try { if (!_isObaraFarm()) document.querySelectorAll('#qr-event option.obara-only').forEach(o => o.remove()); } catch (e) {}
+  // ★ 2026/11/26：農場ごとの言葉に直す（採卵プログラムの「小原式」・入力欄の例の授精所番号）
+  try {
+    if (!(window.FARM_CFG && FARM_CFG.donorProgName)) document.querySelectorAll('option').forEach(o => { if (/小原式・/.test(o.textContent)) o.textContent = o.textContent.replace('小原式・', ''); });
+    const lic = (window.FARM && FARM.license) || '';
+    if (lic !== '01L237') document.querySelectorAll('input[placeholder*="01L237"]').forEach(i => { i.placeholder = lic ? i.placeholder.replace(/01L237/g, lic) : i.placeholder.replace(/01L237/g, '◯◯◯◯◯◯'); });
+  } catch (e) {}
+}, 0);
 // プログラム開始日から計算した授精・移植の予定日（未来なら、使う精液・受精卵の欄は出さない）
 function _qrInsemPlan(ev0, date) {
   const P = { cidr_ai_start: 'cidr_ai', cidr_ai_e2p4: 'cidr_ai_e2p4', cidr_ai_ovsynch: 'ovsynch', cidr_ai_covsynch: 'cidr_ovsynch', estrus_et: 'estrus_et', et_recipient: 'et_cidr', et_recipient_takahashi: 'et_cidr_takahashi' }[ev0];
@@ -20817,7 +20849,7 @@ function renderDeliveryTargetRows() {
   if (!_deliveryTargets.length) { _deliveryTargets = [{name:'',addr:''}]; }
   wrap.innerHTML = _deliveryTargets.map(function(t,i){
     return '<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">' +
-      '<input type="text" value="'+_esc(t.name)+'" oninput="_deliveryTargets['+i+'].name=this.value" placeholder="譲渡先名（例：長島牧場）" style="flex:1;">' +
+      '<input type="text" value="'+_esc(t.name)+'" oninput="_deliveryTargets['+i+'].name=this.value" placeholder="譲渡先名（例：○○牧場）" style="flex:1;">' +
       '<input type="text" value="'+_esc(t.addr)+'" oninput="_deliveryTargets['+i+'].addr=this.value" placeholder="住所（任意）" style="flex:1.3;">' +
       '<button onclick="_deliveryTargets.splice('+i+',1);renderDeliveryTargetRows()" style="background:none;border:1px solid var(--danger);color:var(--danger);font-size:12px;padding:6px 9px;border-radius:6px;cursor:pointer;">🗑</button>' +
     '</div>';
@@ -23627,7 +23659,7 @@ function saveCollection() {
       if (!t) { t = { id: 'tb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), recordedAt: today(), pregResult: '', pregDate: '', vet: FARM.vetName, vetLicense: FARM.license }; transferBook.push(t); }
       Object.assign(t, { transferDate: tDate, farmName: o.farm, feeder: farm.feeder || o.feeder || '', recipientName: o.name, recipientNationalId: o.nid, recipientEarTag: o.id, recipientDob: o.dob,
         donor: donorNm, sire: rec.sire || '', embryoNo: no, embryoType: '新鮮', stage: st || '', rank: rk || '',
-        regOrg: t.regOrg || farm.regOrg || '日本あか牛登録協会', breed: t.breed || (/黒/.test((cows.find(c => c.id === donorId) || {}).breed || '') ? '黒毛和種' : '褐毛和種'),
+        regOrg: t.regOrg || farm.regOrg || _regOrgDef(), breed: t.breed || (/黒/.test((cows.find(c => c.id === donorId) || {}).breed || '') ? '黒毛和種' : '褐毛和種'),
         colRecId: rec.id, auto: 'colFresh', _mt: Date.now() });
       _ofDone.push(t);
     });
@@ -24680,13 +24712,13 @@ function onOtherFarmPick(){
   const tagEl = document.getElementById('ofpick-cow-eartag'); if (tagEl) tagEl.value = '';
   // 登録機関：農家に保存済みがあればそれ、なければデフォルト（日本あか牛登録協会）
   const orgSel = document.getElementById('ofpick-regorg');
-  if (orgSel) orgSel.value = (f.regOrg && ['日本あか牛登録協会','全国和牛登録協会'].includes(f.regOrg)) ? f.regOrg : '日本あか牛登録協会';
+  if (orgSel) orgSel.value = (f.regOrg && ['日本あか牛登録協会','全国和牛登録協会'].includes(f.regOrg)) ? f.regOrg : _regOrgDef();
 }
 function confirmOtherFarmCert(){
   const i = document.getElementById('ofpick-farm').value;
   const f = otherFarms[i]; if(!f) return;
   window._etCertFeeder = f.feeder || '';
-  window._etCertRegOrg = document.getElementById('ofpick-regorg')?.value || f.regOrg || '日本あか牛登録協会';
+  window._etCertRegOrg = document.getElementById('ofpick-regorg')?.value || f.regOrg || _regOrgDef();
   window._etCertRegNo = f.regNo || '';
   window._etCertBreed = document.getElementById('ofpick-breed')?.value || '褐毛和種';
   const moveDate = document.getElementById('ofpick-movedate')?.value || '';
@@ -24734,7 +24766,7 @@ function confirmOtherFarmCert(){
       return {
         t: '__other__',
         s: (donor && cr.sire) ? (donor+'×'+cr.sire) : (no||''),
-        n: no || '', d: '', m: '', op: 'TBS',
+        n: no || '', d: '', m: '', op: (window.FARM_CFG && FARM_CFG.defaultOperator) || '',
         _embryoType: embType(no),
         _stage: sr.stage,
         _rank: sr.rank,
@@ -24971,14 +25003,14 @@ function editTransferBook(id){
   document.getElementById('tb-e-type').value=t.embryoType||'';
   document.getElementById('tb-e-stage').value=t.stage||'';
   document.getElementById('tb-e-rank').value=t.rank||'';
-  document.getElementById('tb-e-regorg').value=t.regOrg||'日本あか牛登録協会';  document.getElementById('tb-e-breed').value=t.breed||'褐毛和種';
+  document.getElementById('tb-e-regorg').value=t.regOrg||_regOrgDef();  document.getElementById('tb-e-breed').value=t.breed||_breedDefWa();
   document.getElementById('tb-e-vet').value=t.vet||'';
   document.getElementById('tb-e-siregrade').value=t.sireGrade||'';
   openModal('modal-tb-edit');
 }
 function addTransferBookManual(){
   const id='tb_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
-  transferBook.push({ id, transferDate:'', recordedAt:today(), farmName:'', feeder:'', recipientName:'', recipientNationalId:'', recipientEarTag:'', recipientDob:'', donor:'', sire:'', embryoNo:'', embryoType:'', regOrg:'日本あか牛登録協会', breed:'褐毛和種', pregResult:'', pregDate:'', vet:FARM.vetName, vetLicense:FARM.license, colRecId:'' });
+  transferBook.push({ id, transferDate:'', recordedAt:today(), farmName:'', feeder:'', recipientName:'', recipientNationalId:'', recipientEarTag:'', recipientDob:'', donor:'', sire:'', embryoNo:'', embryoType:'', regOrg:_regOrgDef(), breed:_breedDefWa(), pregResult:'', pregDate:'', vet:FARM.vetName, vetLicense:FARM.license, colRecId:'' });
   save();
   editTransferBook(id);
 }
@@ -25035,7 +25067,7 @@ function reissueCertFromTransferBook(){
   // 保存済み情報を証明書用のグローバルに反映
   const farm = otherFarms.find(f=>f.name===t.farmName) || {};
   window._etCertFeeder = farm.feeder || t.feeder || '';
-  window._etCertRegOrg = t.regOrg || '日本あか牛登録協会';
+  window._etCertRegOrg = t.regOrg || _regOrgDef();
   window._etCertRegNo = farm.regNo || '';
   window._etCertBreed = t.breed || '褐毛和種';
   window._etCertRecipient = { name: t.recipientName||'', nationalId: t.recipientNationalId||'', earTag: tbEarTag(t), dob: t.recipientDob||'' };
@@ -25871,6 +25903,12 @@ function autoFillRegOrg(){
   }
 }
 // 品種から家畜登録機関を判定する（褐毛＝日本あか牛登録協会／黒毛＝全国和牛登録協会）
+// 登録協会の最初の値：牧場の設定（regOrgDefault）→ 飼っている品種の1つめから
+function _regOrgDef() { const C = window.FARM_CFG || {}; return C.regOrgDefault || regOrgByBreed(((C.breeds || [])[0]) || '') || ''; }
+function _breedDefWa() { const b = ((window.FARM_CFG || {}).breeds || [])[0] || ''; if (window.FARM_CFG && FARM_CFG.regOrgDefault === '日本あか牛登録協会') return '褐毛和種';   // 前からの2農場は今までどおり褐毛
+  if (/黒/.test(b)) return '黒毛和種'; if (/F1|交雑/.test(b)) return '交雑種'; if (/褐|あか/.test(b)) return '褐毛和種'; return ''; }
+function _ownFarmKey() { const C = window.FARM_CFG || {}; return C.ownFarmMatch || String((window.FARM && FARM.name) || '').replace(/(農場|牧場|ファーム)$/, '') || '\u0000'; }
+function _dpn() { const n = window.FARM_CFG && FARM_CFG.donorProgName; return n ? n + '・' : ''; }   // 採卵プログラムの名前（小原農場は「小原式・」）
 function regOrgByBreed(breed){
   const b = String(breed||'');
   if (b.includes('褐毛') || b.includes('あか')) return '日本あか牛登録協会';
@@ -29587,7 +29625,7 @@ function openAddCalf() {
   openModal('modal-calf-edit');
 }
 // ★ 2026/11/19：子牛の自家耳標の書き方。長島牧場は「母の耳標(何番目の子)」（例：K-38(7)）、小原は「YY-c番号」
-function calfTagStyle() { const f = window.FARM_CFG || {}; return f.calfTagFormat || (f.farmId === 'nagashima' ? 'dam' : 'year'); }
+function calfTagStyle() { const f = window.FARM_CFG || {}; return f.calfTagFormat || 'year'; }
 // 母の何番目の子か：母の産次（今回の分娩が入っていなければ＋1）から、この子より後に生まれた子の数を引く
 function damCalfNo(damId, dob, calfId) {
   if (!damId) return null;
@@ -32333,7 +32371,8 @@ function updateFatYearFilter() {
 }
 let fatSelectedFarmers = []; // 空=全農家
 // 現役の生産者（廃業した神谷・坂東などを除く）
-const ACTIVE_FARMERS = ['小原','朝川','長島','市川','太田','納'];
+// 現役の生産者の名前は、牧場の設定（activeFarmers）から。設定がない牧場は、全部の生産者
+const ACTIVE_FARMERS = (window.FARM_CFG && FARM_CFG.activeFarmers) || [''];
 function selectActiveFarmers(){
   const all = [...new Set(fatteningRecords.map(r=>r.farmer).filter(Boolean))];
   fatSelectedFarmers = all.filter(f => ACTIVE_FARMERS.some(a => f.includes(a)));
@@ -35439,7 +35478,7 @@ try {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
         <div class="form-group">
           <label>術者（空欄=自分）</label>
-          <input type="text" id="col-operator" placeholder="例: 十勝BS" style="font-size:13px;">
+          <input type="text" id="col-operator" placeholder="例: 術者の名前" style="font-size:13px;">
         </div>
         <div class="form-group">
           <label>AI日（授精日）</label>
@@ -35901,8 +35940,8 @@ try {
     <div style="background:var(--bg3);border-radius:8px;padding:12px;">
       <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;">農家を追加 / 編集</div>
       <input type="hidden" id="ofm-editidx" value="">
-      <div class="form-group" style="margin-bottom:8px;"><label style="font-size:11px;">農家名（呼び名）</label><input type="text" id="ofm-name" placeholder="例: 長島牧場" style="font-size:12px;"></div>
-      <div class="form-group" style="margin-bottom:8px;"><label style="font-size:11px;">住所＋氏名または名称（飼養者欄に入る文字列）</label><input type="text" id="ofm-feeder" placeholder="例: 帯広市○○町1番地　長島　正典" style="font-size:12px;"></div>
+      <div class="form-group" style="margin-bottom:8px;"><label style="font-size:11px;">農家名（呼び名）</label><input type="text" id="ofm-name" placeholder="例: ○○牧場" style="font-size:12px;"></div>
+      <div class="form-group" style="margin-bottom:8px;"><label style="font-size:11px;">住所＋氏名または名称（飼養者欄に入る文字列）</label><input type="text" id="ofm-feeder" placeholder="例: ○○町○○1番地　山田　太郎" style="font-size:12px;"></div>
       <div class="form-group" style="margin-bottom:8px;"><label style="font-size:11px;">家畜登録機関名</label><input type="text" id="ofm-regorg" placeholder="例: 全国和牛登録協会" style="font-size:12px;"></div>
       <div class="form-group" style="margin-bottom:10px;"><label style="font-size:11px;">登録番号</label><input type="text" id="ofm-regno" placeholder="例: 褐-1234567" style="font-size:12px;"></div>
       <div class="form-group" style="margin-bottom:10px;"><label style="font-size:11px;">在籍牛リストと連携（受け牛を選べるようにする）</label>
@@ -36384,7 +36423,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112608';
+const APP_BUILD = '2026112611';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -36683,7 +36722,7 @@ function undoBirthReported(id) { const c = calves.find(x => x.id === id); if (!c
 // ★ 2026/11/21：授精証明書を「授精した日」に出す農場（長島牧場）。設定 aiCertWhen: 'insem' | 'calf'（書かなければ長島は授精の日）
 //   授精簿の1行ごとに発行済み（certAt）を付ける。子牛が生まれたときには証明書は出さない
 const AI_CERT_INSEM_FROM = (window.FARM_CFG && FARM_CFG.aiCertFrom) || '2026-11-21';   // この日から後の授精を「まだ」に出す（前の分はもう出してある）
-function aiCertOnInsem() { const C = window.FARM_CFG || {}; return C.aiCertWhen ? C.aiCertWhen === 'insem' : C.farmId === 'nagashima'; }
+function aiCertOnInsem() { const C = window.FARM_CFG || {}; return C.aiCertWhen === 'insem'; }
 function calfNeedsCert(c) {
   if (!c || c.authCertIssued || c.status === 'dead') return false;
   if (aiCertOnInsem()) return false;
@@ -36832,6 +36871,7 @@ function markCalfCertIssued() {
 // 開くたびに見る：古い版の端末が子牛の一覧を上書きして印が消えても、9/30生まれまでは発行済みに戻す
 // （千佳さんが「取り消し」にした子牛＝ false は、そのままにする）
 function initCalfCertIssuedOnce() {
+  if (!(window.FARM_CFG && FARM_CFG.legacyFixes)) return;   // 2026/11/9 の千佳さんの指示（前からの2農場だけ）。新しい農場の子牛を「発行済み」にしない
   try {
     let n = 0;
     calves.forEach(c => { if (c.dob && c.dob <= '2026-09-30' && c.authCertIssued === undefined) { let own = true; try { own = _brAuth(c); } catch (e) {} if (own) { c.authCertIssued = '2026-11-09'; n++; } } });
@@ -36953,7 +36993,7 @@ document.addEventListener('visibilitychange', function() {
     <!-- 術者 -->
     <div class="form-group" style="margin-bottom:10px;">
       <label style="font-size:11px;">👤 術者（空欄 = 自分が実施）</label>
-      <input type="text" id="dar-operator" placeholder="例: 十勝BS" style="font-size:13px;width:100%;" oninput="onDarOperatorInput()">
+      <input type="text" id="dar-operator" placeholder="例: 術者の名前" style="font-size:13px;width:100%;" oninput="onDarOperatorInput()">
     </div>
 
     <!-- 精液出所（術者入力時のみ表示） -->
@@ -39588,12 +39628,12 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
         <div onclick="openHelpGuide()"><span>📖 使い方</span><span style="color:#64748b;">›</span></div>
         <div onclick="openFarmSetup(true)"><span>⚙ 牧場の設定（はじめの設定）</span><span style="color:#64748b;">›</span></div>
         <div onclick="openModal('modal-settings')"><span>⚙ 設定・データ管理</span><span style="color:#64748b;">›</span></div>
-        ${((window.FARM_CFG || {}).farmId || 'obara') !== 'obara' ? `<div onclick="openVetLink()"><span>🔗 獣医さんのツールとつなぐ</span><span style="color:#64748b;">›</span></div>` : ''}
+        ${(window.FARM_CFG || {}).role !== 'vet' ? `<div onclick="openVetLink()"><span>🔗 獣医さんのツールとつなぐ</span><span style="color:#64748b;">›</span></div>` : ''}
       </div>
       <details style="margin-top:16px;" ${(() => { try { return localStorage.getItem('nuiFixOpen') === '1' ? 'open' : ''; } catch (e) { return ''; } })()} ontoggle="try{localStorage.setItem('nuiFixOpen',this.open?'1':'0')}catch(e){}">
         <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#64748b;letter-spacing:2px;margin:0 2px 6px;">🔧 困ったとき（データの修復）▼</summary>
         <div class="lst">
-          <div onclick="openSyncDiag()"><span>🔎 同期のようすを調べる</span><span style="color:#64748b;">${'版 ' + String(window.APP_BUILD || '').slice(-4)} ›</span></div>
+          <div onclick="openSyncDiag()"><span>🔎 同期のようすを調べる</span><span style="color:#64748b;">${'版 ' + String(window.APP_BUILD || '').slice(-4)}${({ file: '・設定ファイル✓', cache: '・設定は前に読めた分', builtin: '・設定は本体の予備' })[window.FARM_CFG_SRC] || ''} ›</span></div>
           <div onclick="openLostRecover()"><span>🩹 消えた記録を取り戻す（授精・予定・お産・移動・タグ・チェック）</span><span style="color:#64748b;">›</span></div>
           <div onclick="openIbRestore()"><span>☁ 消えた授精簿の行を戻す（バックアップから）</span><span style="color:#64748b;">›</span></div>
           <div onclick="openNidCheck()"><span>🔢 個体識別番号の打ちまちがいをさがす</span>${(() => { let n = 0; try { n = [...calves, ...cows].filter(c => { const d = String(c.nationalId || '').replace(/\D/g, ''); return d.length === 10 && !nidValid(d); }).length; } catch (e) {} return `<span style="color:${n ? '#f59e0b' : '#64748b'};font-weight:${n ? 700 : 400};">${n ? n + '頭 ›' : '›'}</span>`; })()}</div>
@@ -39787,7 +39827,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
 (function () {
   const PAGES = 7;
   const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const isObara = () => ((window.FARM_CFG || {}).farmId || 'obara') === 'obara';
+  const isObara = () => (window.FARM_CFG || {}).role === 'vet';   // 獣医さんのツール（つなぐ質問を出さない）
   function savedFS() { try { return JSON.parse(_store.getItem('farmSettings') || 'null'); } catch (e) { return null; } }
   // 今の設定（farm-config.js ＋ 前に答えた内容）から、画面の最初の値を作る
   function initial() {
@@ -39804,11 +39844,11 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       startTab: c.startTab || (document.documentElement.classList.contains('nui') ? 'home' : 'tasks'),
       donor: !hide.includes('collection'), sanshitsu: c.sanshitsuTask !== false, sanshitsuDays: c.sanshitsuDays || 10, vwp: c.vwp || 45,
       autoNeg: c.autoNegReinsem !== false, calfEse: c.calfEse !== false, calfCastr: !!ft.calfFlags, calfNose: c.calfNose !== false,
-      aiLicense: !!sg.length || (c.farmId || 'obara') === 'obara', aiStation: !!f.aiStationName, aiStationName: f.aiStationName || '', etLicense: ft.etCert !== false,
+      aiLicense: !!sg.length || c.role === 'vet', aiStation: !!f.aiStationName, aiStationName: f.aiStationName || '', etLicense: ft.etCert !== false,
       licNo: String(sg[0] || '').replace(/^.*免許番号[\s　]*/, ''), certAddr: String(sg[1] || '').replace(/^住[\s　]*所[\s　]*/, '') || (f.addressCounty || f.address || ''),
       certName: String(sg[2] || '').replace(/^氏[\s　]*名[\s　]*/, '').replace(/[\s　]*㊞[\s　]*$/, '') || f.vetNameSpaced || f.ownerSpaced || '',
       otherFarms: ft.extInsem !== false, carryIn: false,
-      aiCertWhen: c.aiCertWhen || ((c.farmId || 'obara') === 'nagashima' ? 'insem' : 'birth'), etCert: ft.etCert !== false, etCertWhen: c.etCertWhen || 'birth',
+      aiCertWhen: c.aiCertWhen || 'birth', etCert: ft.etCert !== false, etCertWhen: c.etCertWhen || 'birth',
       pregAi: (pg.ai || [45])[0], pregEt: ((pg.et || [45])[0]) - 7, preg2: (pg.ai || []).length > 1 || (pg.et || []).length > 1,
       preg2Ai: (pg.ai || [])[1] || '', preg2Et: (pg.et || [])[1] ? pg.et[1] - 7 : '',   // 空欄＝2回目はしない
       barns, calfBarn: c.calfBarn || (barns.find(b => /子牛/.test(b)) || ''), colorSafe: !!c.colorSafe, vetLink: !!((window.farmTargets || {})._vetShareUrl),
@@ -39888,7 +39928,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     const prev = savedFS() || {};
     const s = Object.assign({}, W, extra || {}, { v: 1, at: Date.now() }); delete s._edit; delete s.vetLink; delete s._tip;
     // 授精した日に出す形に変えたときは、変えた日から後の授精だけを「まだ」に出す（前の分は出してあるはず）
-    const cur = (window.FARM_CFG || {}).aiCertWhen || ((window.FARM_CFG || {}).farmId === 'nagashima' ? 'insem' : 'birth');
+    const cur = (window.FARM_CFG || {}).aiCertWhen || 'birth';
     if (s.aiCertWhen === 'insem' && cur !== 'insem' && !prev.aiCertFrom) s.aiCertFrom = today();
     try { if (Array.isArray(W.barns) && typeof farmTargets !== 'undefined') farmTargets._barns = W.barns.slice(); } catch (e) {}
     _store.setItem('farmSettings', JSON.stringify(s));
@@ -39962,7 +40002,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
 <script>
 // ===== ★ 2026/11/24：ヘルプ（① 画面ごとの「？」 ② その他 → 📖 使い方 ③ はじめの設定の「？」） =====
 (function () {
-  const isObara = () => ((window.FARM_CFG || {}).farmId || 'obara') === 'obara';
+  const isObara = () => (window.FARM_CFG || {}).role === 'vet';   // 獣医さんのツール（つなぐ質問を出さない）
   const hx = k => document.documentElement.classList.contains('hx-' + k);
   const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
