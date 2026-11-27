@@ -7274,7 +7274,8 @@ function renderCowList() {
       const _sub = [[cow.sire, cow.maternalSire].filter(Boolean).join(' × '), _ageTxt, cow.lactation ? cow.lactation + '産' : ''].filter(Boolean).join(' ・ ');
       let _key = '';
       if (cow.status === 'pregnant' && cow.dueDate) { const dl = diffDays(cow.dueDate, today()); _key = `<div class="nui-cc-key">🍼 分娩予定 <b style="color:var(--purple);">${fmtDate(cow.dueDate)}</b> <span style="color:${dl < 0 ? 'var(--danger)' : 'var(--muted)'};">${dl < 0 ? '（' + (-dl) + '日超過）' : '（あと' + dl + '日）'}</span></div>`; }
-      else if (openDays !== null && cow.status === 'open' && !isPregWaiting) _key = `<div class="nui-cc-key">空胎 <b style="color:${openDays > 90 ? 'var(--danger)' : openDays > 60 ? 'var(--warn)' : 'var(--text)'};">${openDays}日</b>${nextEstrusLabel ? ' ・ ' + nextEstrusLabel.replace(/<\/?div[^>]*>/g, '') : ''}</div>`;
+      // ★ 2026/11/28：妊娠中でない経産牛は「最終分娩日（分娩後◯日）」を出す（空胎の牛は日数を色分け）
+      else if (openDays !== null && openDays >= 0) { const _op = cow.status === 'open' && !isPregWaiting; _key = `<div class="nui-cc-key">🐄 最終分娩 <b>${fmtDate(cow.calvingDate)}</b> <span style="color:var(--muted);">（分娩後</span><b style="color:${_op && openDays > 90 ? 'var(--danger)' : _op && openDays > 60 ? 'var(--warn)' : 'var(--text)'};">${openDays}日</b><span style="color:var(--muted);">）</span>${_op && nextEstrusLabel ? ' ・ ' + nextEstrusLabel.replace(/<\/?div[^>]*>/g, '') : ''}</div>`; }
       return `<div class="cow-card nui-cc" data-cowid="${cow.id}" style="${cardStyle}cursor:pointer;" onclick="cowCardClick('${cow.id}')">
         ${(cow.tags || []).length ? `<div class="nui-tags nui-tags-top" onclick="event.stopPropagation()">${sortTagsByColor(cow.tags).map(t => `<button class="nui-tagc" style="${nuiTagStyle(t)}" onclick="nuiTagFilter('${String(t).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')}')">🏷 ${_stEsc(t)}</button>`).join('')}</div>` : ''}
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
@@ -7284,7 +7285,7 @@ function renderCowList() {
         ${_sub ? `<div style="font-size:12px;color:var(--muted);margin-top:3px;">${_sub}</div>` : ''}
         ${_key}
         ${cowCalvingIntervalText(cow)}
-        ${cow.status === 'pregnant' ? '' : lastInsemLabel}
+        ${cow.status === 'pregnant' || (lastAiEt && cow.calvingDate && lastAiEt.date < cow.calvingDate) ? '' : lastInsemLabel}
         ${insemHistoryLabel}
         ${donorStopBanner(cow)}
         ${cow.memo ? `<div style="background:var(--bg3);border-left:3px solid var(--accent);padding:6px 10px;font-size:12px;color:var(--muted);margin:6px 0;border-radius:0 6px 6px 0;">📌 ${cow.memo}</div>` : ''}
@@ -32086,11 +32087,11 @@ function renderSemen() {
         return `
         <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.5px;margin:14px 0 6px;padding-left:2px;">${g.label} ${live.length}種${zero.length ? `<span style="font-weight:400;">（在庫0 ${zero.length}種）</span>` : ''}</div>
         ${g.breed === 'その他' ? live.map(renderCard).join('') : (() => {
-          // ★ 2026/11/27：品種の中を系統ごとにまとめる（折りたたみ）
+          // ★ 2026/11/27：品種の中を系統ごとにまとめる（見出しだけ。折りたたまず、いつも全部見せる）
           const by = {}; live.forEach(x => { const l = sireLineOf(x) || ''; (by[l] = by[l] || []).push(x); });
           const ord = [..._lnOrder(g.breed).filter(l => by[l]), ...Object.keys(by).filter(l => l && !_lnOrder(g.breed).includes(l)), ...(by[''] ? [''] : [])];
           return ord.map(l => { const a = by[l], st = a.reduce((t, x) => t + (Number(x.stock) || 0), 0);
-            return `<details ${l ? '' : 'open'} style="margin:0 0 6px;"><summary style="cursor:pointer;padding:7px 4px;font-size:13px;font-weight:700;color:${l ? 'var(--text)' : 'var(--warn)'};">${l ? _stEsc(l) : '系統が分からない'} <span style="font-weight:400;font-size:11.5px;color:var(--muted);">${a.length}種・在庫${st}本</span></summary>${a.map(renderCard).join('')}</details>`; }).join('');
+            return `<div style="margin:0 0 6px;"><div style="padding:7px 4px;font-size:13px;font-weight:700;color:${l ? 'var(--text)' : 'var(--warn)'};">${l ? _stEsc(l) : '系統が分からない'} <span style="font-weight:400;font-size:11.5px;color:var(--muted);">${a.length}種・在庫${st}本</span></div>${a.map(renderCard).join('')}</div>`; }).join('');
         })()}
         ${zero.length ? `<details style="margin:2px 0 8px;"><summary style="font-size:11px;color:var(--muted);cursor:pointer;padding:4px 2px;">📦 在庫0の種雄牛 ${zero.length}種（タップで表示）</summary>${zero.map(renderCard).join('')}</details>` : ''}`;
       }).join('');
