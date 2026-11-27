@@ -12404,13 +12404,25 @@ window._barnKind = window._barnKind || {};
 function barnKindOf(b, l) { const hasC = l.some(x => x.kind === 'cow'), hasK = l.some(x => x.kind !== 'cow'); if (!(hasC && hasK)) return ''; return _barnKind[b] || 'cow'; }
 // 今見えている牛（全部選ぶ もこの中だけ）
 function barnVisible(b, l) { const k = barnKindOf(b, l); return !k ? l : l.filter(x => (x.kind === 'cow') === (k === 'cow')); }
+// ★ 2026/11/27：産室の牛には「分娩後◯日」（10日たったら「繁殖舎へ戻す頃」）・まだの牛は「分娩予定まで あと◯日」を出す
+function _isSanshitsuBarn(b) { return /産室|分娩/.test(String(b || '')); }
+function _barnCalvBadge(c) {
+  const td = today(), back = (window.FARM_CFG && +FARM_CFG.sanshitsuBackDays > 0) ? +FARM_CFG.sanshitsuBackDays : 10;
+  const lc = _examLastCalving(c), pill = (t, col, bg) => `<span style="font-size:11.5px;font-weight:700;color:${col};background:${bg};border-radius:6px;padding:2px 7px;white-space:nowrap;">${t}</span>`;
+  if (lc && c.status !== 'pregnant') { const n = diffDays(td, lc); if (n >= 0 && n <= 90) return n >= back ? pill(`分娩後${n}日・繁殖舎へ戻す頃`, '#fbbf24', 'rgba(251,191,36,.14)') : pill(`分娩後${n}日`, '#4ade80', 'rgba(74,222,128,.12)'); }
+  if (c.status === 'pregnant' && c.dueDate) { const n = diffDays(c.dueDate, td); return n >= 0 ? pill(`分娩予定まで あと${n}日`, '#a78bfa', 'rgba(167,139,250,.12)') : pill(`予定日を${-n}日すぎ`, '#f87171', 'rgba(248,113,113,.12)'); }
+  return '';
+}
 function barnGroupHTML(l, rowFn, b, setJs) {
   const key = x => String(x.kind === 'cow' ? x.c.id : (x.c.earTagId || ''));
   const byTag = (a, z) => key(a).localeCompare(key(z), 'ja', { numeric: true });
   // ★ 2026/11/26：繁殖の牛舎（名前に「繁殖」）は耳標の順、それ以外は月齢の高い順（生年月日の古い順）
   const dob = x => String((x.c && x.c.dob) || '9999');
-  const by = /繁殖/.test(String(b || '')) ? byTag : (a, z) => dob(a).localeCompare(dob(z)) || byTag(a, z);
+  const calvKey = x => { const c = x.c; if (x.kind !== 'cow') return '9'; const lc = _examLastCalving(c); return c.status === 'pregnant' && c.dueDate ? '1' + c.dueDate : lc ? '0' + lc : '2'; };
+  const by = _isSanshitsuBarn(b) ? (a, z) => calvKey(a).localeCompare(calvKey(z)) || byTag(a, z)   // 産室：分娩の早かった牛（戻す頃の牛）から、そのあと予定日の近い順
+    : /繁殖/.test(String(b || '')) ? byTag : (a, z) => dob(a).localeCompare(dob(z)) || byTag(a, z);
   const kd = barnKindOf(b, l);
+  const rf0 = rowFn; rowFn = x => { window._barnCur = b; return rf0(x); };   // 行の中で「いまどの牛舎か」が分かるように（産室の表示）
   if (!kd) return l.slice().sort(by).map(rowFn).join('');
   const C = l.filter(x => x.kind === 'cow'), K = l.filter(x => x.kind !== 'cow');
   const tab = (k, label, n) => { const on = kd === k; return `<button type="button" onclick="event.stopPropagation();${setJs(k)}" style="flex:1;height:40px;border-radius:10px;border:1.5px solid ${on ? '#22c55e' : '#2a3050'};background:${on ? 'rgba(34,197,94,.15)' : 'transparent'};color:${on ? '#4ade80' : '#94a3b8'};font-size:14px;font-weight:800;cursor:pointer;">${label} ${n}頭</button>`; };
@@ -12558,7 +12570,7 @@ function renderBarnBoard() {
   const row = x => {
     const ck = (k) => `<input type="checkbox" ${_barnSel.has(k) ? 'checked' : ''} onclick="event.stopPropagation()" onchange="_barnToggle('${E(k)}',this.checked)" style="width:20px;height:20px;flex-shrink:0;margin:0;">`;
     if (x.kind === 'cow') { const c = x.c; let st = ''; try { st = cowDisplayStatus(c).label; } catch (e) {}
-      return `<div data-barn-hit="cow:${E(c.id)}" onclick="showCowDetail('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('cow:' + c.id)}<b style="min-width:60px;">${E(c.id)}</b>${(() => { let d = ''; try { const mc = getMasterCow(c.id); d = String((mc && mc.nationalId) || c.nationalId || '').replace(/\D/g, ''); } catch (e) {} return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;">${E(c.name || '')}</span><span style="color:var(--muted);font-size:11px;">${E(st)}${c.dueDate && c.status === 'pregnant' ? ' 予定' + fmtDateShort(c.dueDate) : ''}</span></div>`; }
+      return `<div data-barn-hit="cow:${E(c.id)}" onclick="showCowDetail('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('cow:' + c.id)}<b style="min-width:60px;">${E(c.id)}</b>${(() => { let d = ''; try { const mc = getMasterCow(c.id); d = String((mc && mc.nationalId) || c.nationalId || '').replace(/\D/g, ''); } catch (e) {} return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;">${E(c.name || '')}</span>${_isSanshitsuBarn(window._barnCur) ? _barnCalvBadge(c) : `<span style="color:var(--muted);font-size:11px;">${E(st)}${c.dueDate && c.status === 'pregnant' ? ' 予定' + fmtDateShort(c.dueDate) : ''}</span>`}</div>`; }
     const c = x.c, mo = c.dob ? Math.floor(diffDays(td, c.dob) / 30.4) : null;
     return `<div data-barn-hit="calf:${E(c.id)}" onclick="goCalfCard('${E(c.id)}')" style="display:flex;gap:8px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;">${ck('calf:' + c.id)}<b style="min-width:60px;">${E(c.earTagId || '')}</b>${(() => { const d = String(c.nationalId || '').replace(/\D/g, ''); return d.length >= 5 ? `<span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#cbd5e1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:0 5px;white-space:nowrap;">${d.slice(-5, -1)}-${d.slice(-1)}</span>` : ''; })()}<span style="flex:1;display:flex;gap:5px;flex-wrap:wrap;">${calfWeanLate(c) ? '<span style="font-size:11px;font-weight:800;color:#f59e0b;border:1px solid #b45309;padding:0 6px;border-radius:5px;white-space:nowrap;">⚠ 離乳まだ</span>' : ''}${calfFlagChips(c, true)}</span><span style="color:${calfWeanLate(c) ? '#f59e0b' : 'var(--muted)'};font-size:11px;font-weight:${calfWeanLate(c) ? 800 : 400};">${mo !== null ? mo + 'か月' : ''}</span></div>`;
   };
@@ -36438,7 +36450,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112704';
+const APP_BUILD = '2026112705';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -37580,7 +37592,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     return `<div class="nui-a" onclick="${direct ? `nuiPick('${jsq(c.id)}')` : `nuiBP('tog','${jsq(k)}')`}" style="display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid rgba(255,255,255,.06);${on ? 'background:rgba(34,197,94,.08);' : ''}">
       ${direct ? '' : `<span class="nui-ck ${on ? 'on' : ''}" style="flex-shrink:0;">${on ? '✓' : ''}</span>`}
       <span style="flex:1;min-width:0;"><span class="nui-mono" style="font-weight:700;font-size:15px;">${esc(tag)}</span>${nid.length >= 5 ? ` <span class="nui-nid">${esc(nid.slice(-5, -1) + '-' + nid.slice(-1))}</span>` : ''} <span style="font-size:12px;color:${isCow ? '#4ade80' : '#94a3b8'};font-weight:700;">${esc(isCow ? sub : '子牛 ' + sub)}</span>
-        ${!isCow && calfWeanLate(c) ? '<span style="font-size:11px;font-weight:800;color:#f59e0b;"> ⚠ 離乳まだ</span>' : ''}</span></div>`;
+        ${!isCow && calfWeanLate(c) ? '<span style="font-size:11px;font-weight:800;color:#f59e0b;"> ⚠ 離乳まだ</span>' : ''}${isCow && _isSanshitsuBarn(window._barnCur) ? ' ' + _barnCalvBadge(c) : ''}</span></div>`;
   }
   function barnPickHTML() {
     if (!(window.FARM_FEAT && FARM_FEAT.barnList)) return '';
