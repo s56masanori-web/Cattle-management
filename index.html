@@ -31956,6 +31956,7 @@ function renderSemen() {
 
   if (!filtered.length) { container.innerHTML=`<div style="text-align:center;color:var(--muted);padding:20px;">「${q}」に一致する精液がありません</div>`; return; }
 
+  _kxLoad();
   // 品種別グループ化
   const breedGroups = [
     { breed: '褐毛', label: '🟥 褐毛和種', items: filtered.filter(s => s.breed === '褐毛') },   // ★ 2026/11/21：褐毛を先に
@@ -32041,6 +32042,7 @@ function renderSemen() {
         <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
           <button class="btn btn-primary" style="font-size:12px;flex:1;" onclick="openRestock('${s.id}')">📦 入荷・補充</button>
           <button class="btn btn-secondary" style="font-size:12px;flex:1;" onclick="openEditSemen('${s.id}')">✏ 編集</button>
+          ${s.breed === '褐毛' || s.breed === '黒毛' ? `<button onclick="openSireLine('${s.id}')" style="background:none;border:1px solid var(--border);color:var(--muted);font-size:12px;padding:7px 12px;border-radius:8px;cursor:pointer;">🧬 ${_stEsc(sireLineOf(s) || '系統')}</button>` : ''}
           <button onclick="openUseRecord('semen','${s.id}')" style="background:#0a1a2a;border:1px solid var(--info);color:var(--info);font-size:12px;padding:7px 12px;border-radius:8px;cursor:pointer;">📝 使用記録</button>
           <button onclick="confirmDeleteSemen('${s.id}')" style="background:none;border:1px solid var(--danger);color:var(--danger);font-size:12px;padding:7px 12px;border-radius:8px;cursor:pointer;">削除</button>
         </div>
@@ -32055,10 +32057,64 @@ function renderSemen() {
         const live = g.items.filter(x => (Number(x.stock) || 0) > 0), zero = g.items.filter(x => !((Number(x.stock) || 0) > 0));
         return `
         <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.5px;margin:14px 0 6px;padding-left:2px;">${g.label} ${live.length}種${zero.length ? `<span style="font-weight:400;">（在庫0 ${zero.length}種）</span>` : ''}</div>
-        ${live.map(renderCard).join('')}
+        ${g.breed === 'その他' ? live.map(renderCard).join('') : (() => {
+          // ★ 2026/11/27：品種の中を系統ごとにまとめる（折りたたみ）
+          const by = {}; live.forEach(x => { const l = sireLineOf(x) || ''; (by[l] = by[l] || []).push(x); });
+          const ord = [..._lnOrder(g.breed).filter(l => by[l]), ...Object.keys(by).filter(l => l && !_lnOrder(g.breed).includes(l)), ...(by[''] ? [''] : [])];
+          return ord.map(l => { const a = by[l], st = a.reduce((t, x) => t + (Number(x.stock) || 0), 0);
+            return `<details ${l ? '' : 'open'} style="margin:0 0 6px;"><summary style="cursor:pointer;padding:7px 4px;font-size:13px;font-weight:700;color:${l ? 'var(--text)' : 'var(--warn)'};">${l ? _stEsc(l) : '系統が分からない'} <span style="font-weight:400;font-size:11.5px;color:var(--muted);">${a.length}種・在庫${st}本</span></summary>${a.map(renderCard).join('')}</details>`; }).join('');
+        })()}
         ${zero.length ? `<details style="margin:2px 0 8px;"><summary style="font-size:11px;color:var(--muted);cursor:pointer;padding:4px 2px;">📦 在庫0の種雄牛 ${zero.length}種（タップで表示）</summary>${zero.map(renderCard).join('')}</details>` : ''}`;
       }).join('');
 }
+
+// ===== ★ 2026/11/27：種雄牛の系統（褐毛＝交配くんDXと同じ分け方。父をさかのぼって決める）=====
+//   ① 精液に自分で決めた系統（s.line）があればそれ ② 交配くんDXの「公式の系統」の表 ③ 父→父の父…とさかのぼって、公式の表か系統の祖に当たったところ
+//   父のつながりは交配くんDXのマスタ（下の表）＋交配くんDXで足した牛（クラウドの koubai/farms/obara）。精液の「父」欄でも足せる
+const AKA_LINE = {"off":{"秋桜":"光武系","重川6の4":"重川系","光晴重":"光武系","弦球":"光武系","春山栄":"春玉系","重波泉":"重波系","第二十二光重":"光武系","第一光晴":"光武系","光重球磨七":"重波系","福栄豊":"朝栄系","波中島ETI":"重波系","第二光晴":"光武系","菊幸":"光武系","第四弦光":"光武系","第四光重":"光武系","鶴光重":"光武系","幸泉":"重波系","第九栄豊":"朝栄系","隆光重":"光武系","光重星":"光武系","光重球磨五":"重波系","春山都":"春玉系","菊光丸":"光武系","菊光浦":"光武系","光重球磨":"重波系","菊鶴ETI":"光武系","第七波丸":"重波系","第十六光重":"光武系"},"roots":{"光武":"光武系","重波":"重波系","朝栄":"朝栄系","春玉":"春玉系","重川":"重川系","重宝":"重宝系","球光":"球光系","第二初丸":"第二初丸系"},"order":["光武系","重波系","春玉系","朝栄系","重川系","重宝系","球光系","第二初丸系","その他"],"fa":{"秋桜":"鶴光重","秋光重":"第十六光重","泉丸ET":"第三光丸","菊鶴ETI":"菊光丸","菊光二ET":"第三光丸","菊光ET":"第三光丸","菊光浦":"菊光丸","菊光丸":"第三光丸","菊幸":"菊鶴ETI","重雄":"第六重宝","重川6の4":"第六玉波","重川栄":"第二十八重川","重北":"第一重川","重球磨":"重常","重玉":"重幸","重鶴":"光重川","重利":"重丸","重波":"重宮","重波泉":"波泉","重福":"福花","重丸川":"第三重川","重光玉":"光玉波","第十重川":"第二重川","第十光丸":"第二光丸","第十一光重":"光重ET","第十三重川":"第一重川","第十四光重":"光重ET","第十六光重":"光重ET","第十八光重":"光重ET","第一重川":"第二重川","第一光花":"光花","第一光晴":"光晴重","第二十二光重":"光重ET ","第二重波":"重波","第二弦光":"第四光重","第二波丸":"波丸","第二光重":"光重ET","第二光晴":"光晴重","第二光福":"光武","第二光丸":"光武","第三光重":"光重ET","第三光丸":"光武","第四栄豊":"第三栄豊","第四重波":"第二重波","第四弦光":"第四光重","第四光重":"光重ET","第五玉波":"玉波","第五波丸":"波丸","第六玉波":"第十三重川","第六春玉ET":"春玉","第七波丸":"波丸","第九栄豊":"第四栄豊","高花":"高一","隆光重":"第十六光重","武栄":"光栄","武光丸":"第三光丸","竜明":"竜栄","玉栄豊":"第四栄豊","玉雄":"玉波","玉君ETI2":"光玉波","球五月":"光重球磨","球月":"第五球月","玉波":"重波","玉波重":"第五玉波","玉波重二":"第五玉波","玉波姫":"第五玉波","球光重ETI":"第十六光重","鶴球磨":"鶴光重","鶴重":"鶴光重","弦球":"第四弦光","鶴光浦":"菊光浦","鶴光重":"第三光重","弦光晴":"第二弦光","弦幸":"第四弦光","寿泉":"第十四光重","富重":"第十六光重","豊泉ET":"波泉","波泉":"光玉波","波中島":"波丸","波中島ETI":"波中島","波福":"波丸","波丸":"第二重波","波丸ET":"波丸","波光":"第三光丸","波光豊":"波豊","波豊":"波丸","春綾":"春山都","春五月":"春山都","春久":"第五春玉","春姫":"第五春玉","春福ET":"第三光丸","春光":"花峯","春光栄":"春山都","春山栄":"春山都","春山重":"春山都","春山都":"第六春玉ET","久光重":"第十六光重","姫光重":"第十六光重","福栄豊":"玉栄豊","福光重":"第十六光重","藤玉":"重藤","光栄":"光重川","光重ET":"第二光丸","光重球磨":"重球磨","光重球磨七":"光重球磨","光重球磨五":"光重球磨","光重球磨二":"光重球磨","光重球磨六":"光重球磨","光重星":"第三光重","光宝":"第八光武","光武":"光優","光玉重ET":"光玉波","光玉波":"第五玉波","光利":"第十光丸","光長":"第十光丸","光春ET":"第三光丸","光晴重":"第十六光重","光優":"第五光浦","光義ET":"光重川","優泉":"第二光泉","幸泉":"波泉","ー":"ー","菊波泉ET":"菊光丸","重波弦ET":"重波泉","幸弦光":"幸泉"},"alias":{"十六光重":"第十六光重"}};
+// 黒毛：田尻系（但馬系）・気高系・藤良系（糸桜系）。父をさかのぼって祖に当たったところ。父のつながりは ジェネティクス北海道・家畜改良事業団・青森県・大分県・島根県 の種雄牛資料で確かめたものだけ
+const BLK_LINE = {"order":["田尻系","気高系","藤良系","その他"],"off":{"暁之藤":"藤良系"},"roots":{"土井":"田尻系","但馬":"田尻系","安福(岐阜)":"田尻系","気高":"気高系","第5平茂":"気高系","第20平茂":"気高系","第7糸桜":"藤良系","藤良":"藤良系"},"fa":{"勝早桜5":"勝忠平","勝忠平":"平茂勝","百合茂":"平茂勝","平茂勝":"第5平茂","貴隼桜":"勝早桜5","勝俊桜":"勝早桜5","博紅葉":"勝早桜5","咲早桜5":"勝早桜5","英貞":"勝早桜5","勝吾":"勝早桜5","義早桜":"勝早桜5","勝夢桜":"勝早桜5","蓬萊桜":"勝早桜5","北愛莉":"勝早桜5","奈美桜":"勝早桜5","北美咲":"勝早桜5","勝百合華":"勝早桜5","百合美桜":"勝早桜5","勝美桜":"勝早桜5","北美津久":"美津照重","美津照重":"美津照","美津照":"美津福","美津福":"谷福土井","勝美糸":"美津照重","百合照重":"美津照重","照重久":"美津照重","北宝翔":"美津照重","北朱音":"美津照重","知恵久":"菊知恵","菊知恵":"美津照","清金幸":"美津金幸","美津金幸":"美津照重","福之姫":"芳之国","芳之国":"第1花国","第1花国":"北国7の8","北国7の8":"第7糸桜","茂之姫":"福之姫","北福姫":"福之姫","隆之姫":"福之姫","姫勝久":"福之姫","花福姫":"福之姫","千夏姫":"福之姫","福之蔵":"福之姫","第1花藤":"第1花国","第2花国":"第1花国","百合花国":"第1花国","桜花久":"第1花国","白之鶴":"福之鶴","美国白清":"美国桜","暁之藤":"美国桜","美津百合":"百合茂","琥珀":"美津百合","輝百合":"美津百合","美津利奈":"美津百合","美津樹":"美津百合","美津浩":"美津百合","百合洋道":"美津百合","幸紀雄":"百合茂","拓百合":"百合茂","姫茂":"百合茂","夜桜":"百合茂","奈美百合":"百合茂","百合勝1":"百合茂","北乃大福":"安福","安福":"安福(岐阜)","梅栄福":"北乃大福","北平安":"安平","安平":"安福(宮崎)","安平照":"安平","勝俊久":"勝忠平","北百合忠":"勝忠平","桜大地":"勝忠平","福忠勝":"勝忠平","光忠平":"勝忠平","鈴音":"勝忠平","北昇龍":"勝忠平","安福165の9":"安福(岐阜)","福栄":"安福(岐阜)","高栄":"安福(岐阜)","紋次郎":"安美土井","北国茂":"北国7の8","茂勝":"平茂勝","安茂勝":"平茂勝","茂勝栄":"平茂勝","平茂晴":"第20平茂"}};
+function _lnNorm(n) { let x = String(n || '').trim().replace(/Ⅰ/g, 'I').replace(/Ⅱ/g, 'II'); try { x = x.normalize('NFKC'); } catch (e) {} x = x.replace(/ノ/g, 'の').replace(/[♂♀]/g, '').trim(); return (AKA_LINE.alias && AKA_LINE.alias[x]) || x; }
+function _lnTable(breed) { return breed === '褐毛' ? AKA_LINE : breed === '黒毛' ? BLK_LINE : null; }
+function _lnFatherOf(name, T) { const n = _lnNorm(name); const s = semenInventory.find(x => _lnNorm(x.name) === n && x.sire); if (s) return _lnNorm(s.sire); const ex = (window._kxFa || {})[n]; return ex || T.fa[n] || ''; }
+function sireLineAuto(name, breed) {
+  const T = _lnTable(breed); if (!T) return '';
+  let cur = _lnNorm(name); const seen = {};
+  for (let i = 0; i < 30 && cur && !seen[cur]; i++) {
+    seen[cur] = 1;
+    if (T.off[cur]) return T.off[cur];
+    if (i > 0) for (const k in T.roots) if (cur.indexOf(k) >= 0) return T.roots[k];
+    cur = _lnFatherOf(cur, T);
+  }
+  return '';
+}
+function sireLineOf(s) { return (s && s.line) || sireLineAuto(s && s.name, s && s.breed) || ''; }
+function _lnOrder(breed) { const T = _lnTable(breed); const base = T ? T.order.filter(x => x !== 'その他') : []; const mine = semenInventory.filter(x => x.breed === breed && x.line).map(x => x.line); return [...new Set([...base, ...mine])]; }
+// 交配くんDXで足した牛の父も使う（同じクラウド。読めないときはそのまま）
+function _kxLoad() {
+  if (window._kxTried || !window._fbDb) return; window._kxTried = true;
+  try { window._fbDb.ref('koubai/farms/obara').once('value').then(sn => { let d = sn.val(); if (typeof d === 'string') { try { d = JSON.parse(d); } catch (e) { d = null; } } if (!d) return;
+    const fa = {}; (d.addedMaster || []).forEach(m => { if (m && m.name && m.s1) fa[_lnNorm(m.name)] = _lnNorm(m.s1); }); Object.values(d.masterEdits || {}).forEach(m => { if (m && m.name && m.s1) fa[_lnNorm(m.name)] = _lnNorm(m.s1); });
+    window._kxFa = fa; try { renderSemen(); } catch (e) {} }).catch(() => {}); } catch (e) {}
+}
+function openSireLine(id) {
+  const s = semenInventory.find(x => x.id === id); if (!s) return;
+  const auto = sireLineAuto(s.name, s.breed), cur = s.line || '';
+  const L = _lnOrder(s.breed || '黒毛');
+  let w = document.getElementById('ln-sheet'); if (w) w.remove();
+  w = document.createElement('div'); w.id = 'ln-sheet'; w.style.cssText = 'position:fixed;inset:0;z-index:9400;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;'; w.onclick = e => { if (e.target === w) w.remove(); };
+  const chip = (v, l, on) => `<button onclick="_setSireLine('${id}',${v === null ? 'null' : `'${String(v).replace(/'/g, '')}'`})" style="border:1px solid ${on ? '#93c5fd' : '#2a3050'};color:${on ? '#93c5fd' : '#cbd5e1'};font-weight:${on ? 700 : 400};background:none;border-radius:999px;padding:6px 12px;font-size:13px;margin:0 5px 7px 0;cursor:pointer;font-family:inherit;">${l}</button>`;
+  w.innerHTML = `<div style="background:#1a1f2e;border:1px solid #2a3050;border-radius:16px 16px 0 0;padding:16px;width:100%;max-width:560px;color:#e2e8f0;">
+    <div style="font-size:15px;font-weight:700;margin-bottom:4px;">🧬 ${_stEsc(s.name)} の系統</div>
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:10px;line-height:1.6;">${auto ? `自動では <b style="color:#e2e8f0;">${_stEsc(auto)}</b>（${s.breed === '褐毛' ? '交配くんDXと同じ分け方' : '父の系をさかのぼって'}）` : '自動では分かりませんでした（父のつながりが入っていません）'}</div>
+    <div>${chip(null, '自動にまかせる', !cur)}${L.map(x => chip(x, x, cur === x)).join('')}</div>
+    <div style="display:flex;gap:6px;margin-top:6px;"><input id="ln-new" placeholder="新しい系統の名前（例：〇〇系）" style="flex:1;font-size:14px;padding:7px 10px;border-radius:9px;"><button class="nui-chip" style="font-size:13px;padding:6px 12px;" onclick="const v=(document.getElementById('ln-new').value||'').trim();if(v)_setSireLine('${id}',/系$/.test(v)?v:v+'系')">足す</button></div>
+    <div style="display:flex;gap:6px;margin-top:10px;align-items:center;font-size:12.5px;color:#94a3b8;">父<input id="ln-sire" value="${_stEsc(s.sire || '')}" placeholder="父の名前（わかれば）" style="flex:1;font-size:14px;padding:7px 10px;border-radius:9px;"><button class="nui-chip" style="font-size:13px;padding:6px 12px;" onclick="_setSireFather('${id}',document.getElementById('ln-sire').value)">父を入れる</button></div>
+    <div style="font-size:11.5px;color:#64748b;margin-top:8px;line-height:1.6;">父を入れておくと、父の系統から自動で決まります。新しく入れた種も、父が分かれば自動で分かれます。</div></div>`;
+  document.body.appendChild(w);
+}
+function _setSireLine(id, v) { const s = semenInventory.find(x => x.id === id); if (!s) return; if (v) s.line = v; else delete s.line; s._mt = Date.now(); save(); const w = document.getElementById('ln-sheet'); if (w) w.remove(); renderSemen(); }
+function _setSireFather(id, v) { const s = semenInventory.find(x => x.id === id); if (!s) return; v = String(v || '').trim(); if (v) s.sire = v; else delete s.sire; s._mt = Date.now(); save(); openSireLine(id); renderSemen(); }
 
 function deleteInventoryHistory(kind, id, idx) {
   const item = kind === 'semen'
@@ -36765,7 +36821,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112713';
+const APP_BUILD = '2026112715';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
