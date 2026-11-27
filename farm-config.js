@@ -29,7 +29,8 @@ window.FARM_CONFIG = {
     vetRegNo: '',
     license: '',
     clinicName: '',
-    aiStationName: ''
+    aiStationName: '',
+    aiStationNo: '十第2325号'   // ★ 2026/11/27：家畜人工授精所の番号（様式第28号の「管理番号」）
   },
   // 授精証明書の証明者の欄（家畜人工授精師）
   aiCertSigner: [
