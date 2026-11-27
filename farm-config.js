@@ -2,6 +2,8 @@
 // このファイルの名前を「farm-config.js」に変えて、長島牧場の index.html と同じ場所（GitHub）に置きます。
 window.FARM_CONFIG = {
   farmId: 'nagashima',
+  newUI: true,   // ★ 2026/11/27：小原農場と同じ新しい画面（下のメニュー5つ・＋記録・ホーム・その他）
+  noSetupPrompt: true,   // 「はじめの設定」は出さない（長島牧場はこの設定ファイルで決めてあるので）
   firebase: {
     apiKey: "AIzaSyB-18xHVDPOUXbZgNK0myFlVCrwmAfUZbU",
     authDomain: "nagashima-breeding.firebaseapp.com",
