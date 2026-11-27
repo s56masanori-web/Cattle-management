@@ -28396,7 +28396,9 @@ async function exportExcelAll() {
 // 印刷したときの中身（紙に出たHTML）をそのまま、クラウドの certCopies/<農場>/ に残す
 //   m/<id> … 一覧用の短い情報　h/<id> … 中身（見るときだけ読む）。いつもの同期（data/…）には入れないので、同期は重くならない
 //   送れなかった分は端末に取っておき、次に開いたときに送る
-function _ccBase() { try { return window._fbDb && window._dbRef ? window._fbDb.ref('certCopies/' + window._dbRef.key) : null; } catch (e) { return null; } }
+// ★ 2026/11/27：クラウドの決まり（書いてよい場所）で certCopies/ は断られたので、毎日の自動バックアップと同じ backups/<農場>/ の中の「_certCopies」にしまう
+//   （自動バックアップの古い日付を消す処理は日付の名前だけを消すので、「_certCopies」は消えない）
+function _ccBase() { try { return window._fbDb && window._dbRef ? window._fbDb.ref('backups/' + window._dbRef.key + '/_certCopies') : null; } catch (e) { return null; } }
 function _ccKindOf(txt) {
   if (/家畜体内受精卵証明書|家畜体外受精卵証明書/.test(txt)) return 'egg';
   if (/体外受精卵移植証明書/.test(txt)) return 'etivf';
@@ -28437,7 +28439,8 @@ function _certCopySave(pages, title) {
 async function _ccLoadMeta() {
   try { await _ccFlush(); } catch (e) {}
   const B = _ccBase(); const out = [];
-  if (B) { const v = (await B.child('m').once('value')).val() || {}; Object.keys(v).forEach(id => out.push({ id, ...v[id] })); }
+  window._ccErr = '';
+  if (B) { try { const v = (await B.child('m').once('value')).val() || {}; Object.keys(v).forEach(id => out.push({ id, ...v[id] })); } catch (e) { window._ccErr = String(e && e.message || e); } }
   _ccQueue().forEach(it => { if (!out.some(o => o.id === it.id)) out.push({ id: it.id, ...it.m, _local: true }); });
   return out.sort((a, b) => (b.at || 0) - (a.at || 0));
 }
@@ -28446,7 +28449,7 @@ async function openCertCopies() {
   let w = document.getElementById('cc-sheet');
   if (!w) { w = document.createElement('div'); w.id = 'cc-sheet'; w.style.cssText = 'position:fixed;inset:0;z-index:9300;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;'; w.onclick = e => { if (e.target === w) w.remove(); }; document.body.appendChild(w); }
   w.innerHTML = `<div style="background:#1a1f2e;border:1px solid #2a3050;border-radius:16px 16px 0 0;padding:14px;width:100%;max-width:820px;max-height:88vh;overflow:auto;color:#e2e8f0;"><div style="color:#94a3b8;font-size:13px;">読みこみ中…</div></div>`;
-  let L = []; try { L = await _ccLoadMeta(); } catch (e) { w.firstChild.innerHTML = '<div style="color:#fbbf24;font-size:13px;">控えを読めませんでした（電波のある所で、もう一度開いてください）：' + _stEsc(e.message || e) + '</div>'; return; }
+  let L = []; try { L = await _ccLoadMeta(); } catch (e) { w.firstChild.innerHTML = '<div style="color:#fbbf24;font-size:13px;">控えを読めませんでした' + (/permission/i.test(String(e && e.message || e)) ? '（クラウドの決まりで読めない場所でした。印刷した控えはこの端末に取ってあります）' : '（電波のある所で、もう一度開いてください）') + '：' + _stEsc(e.message || e) + '</div>'; return; }
   window._ccList = L; _ccRender();
 }
 function _ccRender() {
@@ -28469,6 +28472,7 @@ function _ccRender() {
     <div>${chip('kind', 'all', '全て ' + cnt('all'))}${chip('kind', 'ai', '授精 ' + cnt('ai'))}${chip('kind', 'et', '移植 ' + cnt('et'))}${chip('kind', 'egg', '受精卵 ' + cnt('egg'))}</div>
     <div>${chip('y', 'all', 'すべての年')}${years.map(y => chip('y', y, y + '年')).join('')}</div>
     <input value="${_stEsc(F.q || '')}" placeholder="🔍 番号・耳標・個体識別番号・名前" oninput="window._ccF.q=this.value;clearTimeout(window._ccT);window._ccT=setTimeout(()=>{_ccRender();const i=document.querySelector('#cc-sheet input');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}},300)" style="width:100%;font-size:14px;padding:8px 10px;border-radius:10px;margin:2px 0 6px;">
+    ${window._ccErr ? `<div style="font-size:12px;color:#fbbf24;margin:4px 0 6px;line-height:1.6;">⚠ クラウドの控えを読めませんでした（${_stEsc(window._ccErr.slice(0, 80))}）。この端末で印刷した分だけ出しています。</div>` : ''}
     ${V.length ? V.map(row).join('') : `<div style="color:#94a3b8;font-size:13px;padding:14px 2px;">${L.length ? '当てはまる控えがありません' : 'まだ控えはありません。これから証明書を印刷すると、ここに残ります。'}</div>`}
     <div style="font-size:11.5px;color:#64748b;margin-top:10px;line-height:1.7;">証明書を印刷すると、そのとき紙に出た中身をそのまま残します（あとで牛の記録を直しても、控えは変わりません）。出した証明書の写しは5年間とっておく決まりです。5年たっても勝手には消しません。この機能を入れる前に出した分の控えはありません。</div>`;
 }
@@ -29137,7 +29141,18 @@ function _cesSet(k, n) {
   document.querySelectorAll(`[data-ces="${k}"]`).forEach(b => { const on = +b.dataset.n === V[k]; b.style.background = on ? 'var(--accent2)' : 'transparent'; b.style.color = on ? '#000' : 'var(--text)'; b.style.borderColor = on ? 'var(--accent2)' : 'var(--border)'; });
 }
 function calfMoves(calf) { return (calf.moves || []).map((m, i) => ({ ...m, _idx: i })).sort((a, b) => a.date.localeCompare(b.date)); }
-function calfLocation(calf) { const m = calfMoves(calf); return m.length ? m[m.length - 1].to : ''; }
+function calfLocation(calf) { const m = calfMoves(calf); return m.length ? m[m.length - 1].to : _calfDefaultLoc(calf); }
+// ★ 2026/11/27：まだ一度も移動を記録していない子牛は、離乳の頃までは「母牛と同じ牛舎」にいることにする
+//   （子牛の牛舎を決めている農場は、その牛舎）。移動を1回でも記録したら、そちらが優先
+function _calfDefaultLoc(calf) {
+  if (!calf || !calf.dob || calf.deathDate || calf.status === 'dead' || calf.shipDate) return '';
+  const A = window.FARM_CFG && FARM_CFG.calfAuto, lim = (A && +A.wean > 0) ? +A.wean : 120;
+  if (diffDays(today(), calf.dob) > lim) return '';
+  const cb = (typeof farmTargets !== 'undefined' && farmTargets && farmTargets._calfBarn) || (window.FARM_CFG && FARM_CFG.calfBarn);
+  if (cb) return cb;
+  const dam = calf.damId && cows.find(c => c.id === calf.damId);
+  return dam ? cowLocation(dam) : '';
+}
 // 子牛の体格の移り変わり（育成舎①・育成舎②・出荷の節目だけ。生時の体格は評価に入れない）
 function calfScores(calf) {
   const out = [];
@@ -31370,9 +31385,9 @@ function _rptGroupRows(entries, oldHtmls, isEmbryo, inventory) {
     const rest = isEmbryo ? _rptEmbMemo(h.memo, nos) : String(h.memo || '').replace(/術者:[^／\s]+/g, '').replace(/\s*[／/]\s*$/, '').trim();
     const dest = (h.type === 'use') ? '' : rest;
     const usage = h.usage || '';
-    const key = [h.date, h.itemName, h.type, usage, h.type === 'use' ? op : dest].join('|');   // 新鮮胚は1個ずつ別の在庫になっているので、ロットの名前でまとめる
+    const key = [h.date, h.itemName, h.type, _rptIsInsp(h) ? 'insp' : '', usage, h.type === 'use' ? op : dest].join('|');   // 新鮮胚は1個ずつ別の在庫になっているので、ロットの名前でまとめる
     let g = gm.get(key);
-    if (!g) { g = { key, date: h.date, type: h.type, usage, name: h.itemName, itemId: h.itemId, count: 0, cows: [], nos: [], ops: new Set(), rests: new Set(), old: [], pairs: [] }; gm.set(key, g); G.push(g); }
+    if (!g) { g = { key, date: h.date, type: h.type, insp: _rptIsInsp(h), usage, name: h.itemName, itemId: h.itemId, count: 0, cows: [], nos: [], ops: new Set(), rests: new Set(), old: [], pairs: [] }; gm.set(key, g); G.push(g); }
     g.count += (+h.count || 0);
     if (h.cowId) g.cows.push(h.cowId);
     nos.forEach(n => { if (!g.nos.includes(n)) g.nos.push(n); });
@@ -31386,7 +31401,7 @@ function _rptGroupRows(entries, oldHtmls, isEmbryo, inventory) {
   return `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">` + G.map((g, i) => {
     const gid = 'g' + _syncHashLite(g.key + '|' + g.pairs.join(','));
     window._rptG[gid] = { title: `${fmtDate(g.date)}　${g.name}`, old: g.old.join(''), pairs: g.pairs };
-    const tl = (g.usage === 'ET委託' ? '🧬📤 ET委託' : g.usage === 'AI委託' ? '💉📤 AI委託' : { restock: '🤝 譲受', carryover: '📦 繰越', selfcollect: '🥚 生産', use: isEmbryo ? '🧬 使用' : '💉 使用', transfer: '📤 譲渡', discard: '🗑 廃棄' }[g.type] || g.type);
+    const tl = (g.usage === 'ET委託' ? '🧬📤 ET委託' : g.usage === 'AI委託' ? '💉📤 AI委託' : g.insp ? '🔬 検査使用' : { restock: '🤝 譲受', carryover: '📦 繰越', selfcollect: '🥚 生産', use: isEmbryo ? '🧬 使用' : '💉 使用', transfer: '📤 譲渡', discard: '🗑 廃棄' }[g.type] || g.type);
     // 行き先：牛（同じ牛は ×2）か、メモの残り（牧場名など）
     const cc = {}; g.cows.forEach(c => cc[c] = (cc[c] || 0) + 1);
     const cowStr = Object.keys(cc).map(c => `<span style="color:var(--accent);font-weight:700;font-family:'JetBrains Mono',monospace;">${_stEsc(c)}</span> ${_stEsc(cowDisplayName(c) || '')}${cc[c] > 1 ? '×' + cc[c] : ''}`).join('・');
@@ -31401,6 +31416,7 @@ function _rptGroupRows(entries, oldHtmls, isEmbryo, inventory) {
     </div>`;
   }).join('') + `</div>`;
 }
+function _rptIsInsp(h) { return h && (h.type === 'discard' || h.type === 'use') && !h.cowId && /検査/.test(String(h.memo || '')); }   // 精液検査などに使った分（様式第28号では「利用」）
 function md2(d) { const m = String(d || '').match(/^\d{4}-(\d{2})-(\d{2})/); return m ? (+m[1]) + '/' + (+m[2]) : ''; }
 function _syncHashLite(str) { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(36); }
 // 直す画面（下から出る）。中身は前の明細の行（種類・日付・本数・術者を直せる）
@@ -31429,10 +31445,10 @@ function _rptLotView(year) {
       .sort((a, b) => (b.bad - a.bad) || ((Number(b.it.stock) > 0) - (Number(a.it.stock) > 0)) || String(isEmb ? (a.it.dam || '') + a.it.sire : a.it.name).localeCompare(String(isEmb ? (b.it.dam || '') + b.it.sire : b.it.name), 'ja'));
     const rowOf = ({ it, rec, bad }, i) => {
       const nm = isEmb ? `${it.dam ? it.dam + '×' : ''}${it.sire || ''}` : it.name;
-      const parts = [['受けた', sum(it, ['restock', 'carryover'])], ['できた', sum(it, ['selfcollect'])], ['使用', sum(it, ['use'])], ['譲渡', sum(it, ['transfer'])], ['廃棄', sum(it, ['discard'])]].filter(x => x[1]).map(x => x[0] + ' ' + x[1]).join(' ・ ');
+      const parts = [['受けた', sum(it, ['restock', 'carryover'])], ['できた', sum(it, ['selfcollect'])], ['使用', sum(it, ['use']) - (it.history || []).filter(h => h.type === 'use' && _rptIsInsp(h)).reduce((a, h) => a + (Number(h.count) || 0), 0)], ['検査使用', (it.history || []).filter(_rptIsInsp).reduce((a, h) => a + (Number(h.count) || 0), 0)], ['譲渡', sum(it, ['transfer'])], ['廃棄', sum(it, ['discard']) - (it.history || []).filter(h => h.type === 'discard' && _rptIsInsp(h)).reduce((a, h) => a + (Number(h.count) || 0), 0)]].filter(x => x[1]).map(x => x[0] + ' ' + x[1]).join(' ・ ');
       let left = '';
       if (isEmb) { try { let det = it.embryoDetails; if (!det || !det.length) det = getSheet2DetailsForLot(it.lot); const { recv, used } = _embUseCounts(it, det); const rem = Object.keys(recv).filter(n => (used[n] || 0) < recv[n]); if (rem.length) left = `<div style="margin-top:6px;font-size:11px;color:var(--muted);">まだ使っていない胚番号：${rem.map(n => `<span style="font-family:'JetBrains Mono',monospace;color:var(--purple);">${_stEsc(n)}</span>`).join('　')}</div>`; } catch (e) {} }
-      const hist = (it.history || []).slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).map((h, j) => { let nos = isEmb ? _rptEmbNos(h.memo) : []; const rest = isEmb ? _rptEmbMemo(h.memo, nos) : String(h.memo || ''); if (isEmb && !nos.length && ['restock', 'carryover', 'selfcollect'].includes(h.type)) nos = _rptInNos(it, h); const tl = { restock: '🤝 譲受', carryover: '📦 繰越', selfcollect: '🥚 生産', use: isEmb ? '🧬 使用' : '💉 使用', transfer: '📤 譲渡', discard: '🗑 廃棄' }[h.type] || h.type;
+      const hist = (it.history || []).slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).map((h, j) => { let nos = isEmb ? _rptEmbNos(h.memo) : []; const rest = isEmb ? _rptEmbMemo(h.memo, nos) : String(h.memo || ''); if (isEmb && !nos.length && ['restock', 'carryover', 'selfcollect'].includes(h.type)) nos = _rptInNos(it, h); const tl = _rptIsInsp(h) ? '🔬 検査使用' : { restock: '🤝 譲受', carryover: '📦 繰越', selfcollect: '🥚 生産', use: isEmb ? '🧬 使用' : '💉 使用', transfer: '📤 譲渡', discard: '🗑 廃棄' }[h.type] || h.type;
         return `<div class="rpt-r" style="background:${_rptZebra(j)};"><span class="rpt-dt2">${_stEsc(fmtDate(h.date || ''))}</span><span class="rpt-ty" style="color:${_RPT_TC[h.type] || 'var(--text)'};">${tl}</span><span class="rpt-ct">${Number(h.count) || 0}</span><span class="rpt-ds">${h.cowId ? `<span style="color:var(--accent);font-weight:700;">${_stEsc(h.cowId)}</span> ` : ''}${_rptChips(nos)} ${_stEsc(rest)}</span></div>`; }).join('');
       return `<details style="background:${_rptZebra(i)};border-bottom:1px solid var(--bg);"><summary style="display:flex;align-items:center;gap:10px;padding:10px;cursor:pointer;list-style:none;">
         <span style="width:20px;font-weight:900;color:${bad ? '#fbbf24' : 'var(--accent)'};">${bad ? '⚠' : '✓'}</span>
@@ -31537,11 +31553,15 @@ function renderReport() {
           monthData[m].carryover += h.count;
           monthData[m].breakdown[name].in += h.count; // 内訳はinに含める
         } else if (h.type === 'use') {
-          monthData[m].use += h.count;
+          monthData[m].use += h.count; if (_rptIsInsp(h)) monthData[m].insp = (monthData[m].insp || 0) + h.count;
           monthData[m].breakdown[name].use += h.count;
         } else if (h.type === 'transfer') {
           monthData[m].transfer += h.count;
           monthData[m].breakdown[name].transfer += h.count;
+        } else if (h.type === 'discard' && _rptIsInsp(h)) {
+          // ★ 2026/11/27：検査に使った分は、様式第28号と同じく「使用（利用）」に入れる。どれだけが検査かは別に数えて見せる
+          monthData[m].use += h.count; monthData[m].insp = (monthData[m].insp || 0) + h.count;
+          monthData[m].breakdown[name].use += h.count;
         } else if (h.type === 'discard') {
           monthData[m].discard += h.count;
           monthData[m].breakdown[name].discard += h.count;
@@ -31571,6 +31591,7 @@ function renderReport() {
     const totalUse      = months.reduce((a,m)=>a+monthData[m].use,0);
     const totalTransfer = months.reduce((a,m)=>a+monthData[m].transfer,0);
     const totalDiscard  = months.reduce((a,m)=>a+monthData[m].discard,0);
+    const totalInsp     = months.reduce((a,m)=>a+(monthData[m].insp||0),0);
     const allNames = [...new Set(inventory.map(nameOf))];
 
     const rows = months.map(m => {
@@ -31603,6 +31624,7 @@ function renderReport() {
       const tLabel = (t, h) => {
         if (t === 'transfer' && h?.usage === 'AI委託') return '💉📤AI委託';
         if (t === 'transfer' && h?.usage === 'ET委託') return '🧬📤ET委託';
+        if (_rptIsInsp(h)) return '🔬検査使用';
         return {restock:'🤝譲受',carryover:'📦繰越',selfcollect:'🥚生産',use:isEmbryo?'🧬使用':'💉使用',transfer:'📤譲渡',discard:'🗑廃棄'}[t]||t;
       };
       const tColor = t => t==='use'?'var(--danger)':t==='transfer'?'var(--warn)':t==='discard'?'var(--muted)':'var(--accent)';
@@ -31685,7 +31707,7 @@ function renderReport() {
         ${isEmbryo ? (d.production ? `<td style="padding:5px 3px;font-size:13px;text-align:center;border:1px solid var(--border);color:var(--accent2);">${d.production}</td>` : `<td style="padding:5px 3px;text-align:center;border:1px solid var(--border);color:var(--muted);">—</td>`) : ''}
         <td style="padding:5px 3px;font-size:13px;text-align:center;border:1px solid var(--border);color:var(--accent);">${d.in||'—'}</td>
         <td style="padding:5px 3px;font-size:13px;text-align:center;border:1px solid var(--border);color:var(--warn);">${d.transfer||'—'}</td>
-        <td style="padding:5px 3px;font-size:13px;text-align:center;border:1px solid var(--border);color:var(--danger);">${d.use||'—'}</td>
+        <td style="padding:5px 3px;font-size:13px;text-align:center;border:1px solid var(--border);color:var(--danger);">${d.use||'—'}${d.insp ? `<div style="font-size:10px;color:var(--muted);white-space:nowrap;">うち検査${d.insp}</div>` : ''}</td>
         <td style="padding:5px 3px;font-size:13px;text-align:center;border:1px solid var(--border);color:var(--muted);">${d.discard||'—'}</td>
         <td style="padding:5px 3px;font-size:14px;font-weight:900;text-align:center;border:1px solid var(--border);">${runStock}</td>
       </tr>${detailHTML}`;
@@ -31696,7 +31718,7 @@ function renderReport() {
       ${isEmbryo ? `<td style="padding:6px 3px;font-size:15px;font-weight:900;text-align:center;border:1px solid var(--border);color:var(--accent2);">${totalProduction||'—'}</td>` : ''}
       <td style="padding:6px 3px;font-size:15px;font-weight:900;text-align:center;border:1px solid var(--border);color:var(--accent);">${totalIn||'—'}</td>
       <td style="padding:6px 3px;font-size:15px;font-weight:900;text-align:center;border:1px solid var(--border);color:var(--warn);">${totalTransfer}</td>
-      <td style="padding:6px 3px;font-size:15px;font-weight:900;text-align:center;border:1px solid var(--border);color:var(--danger);">${totalUse}</td>
+      <td style="padding:6px 3px;font-size:15px;font-weight:900;text-align:center;border:1px solid var(--border);color:var(--danger);">${totalUse}${totalInsp ? `<div style="font-size:10px;font-weight:400;color:var(--muted);white-space:nowrap;">うち検査${totalInsp}</div>` : ''}</td>
       <td style="padding:6px 3px;font-size:15px;font-weight:900;text-align:center;border:1px solid var(--border);color:var(--muted);">${totalDiscard}</td>
       <td style="padding:6px 3px;font-size:11px;color:var(--muted);text-align:center;border:1px solid var(--border);">期首${startStock}本</td>
     </tr>`);
@@ -31785,6 +31807,7 @@ function renderReport() {
 
     return `<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px;">
       <div style="font-size:13px;font-weight:700;color:${accent};margin-bottom:2px;">${emoji} ${label} 月別集計（全${bkdColLabel}合計）</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">数え方は様式第28号と同じです。精液検査などに使った分は「使用」に入れて、「うち検査◯」と出します。</div>
       <details style="font-size:11px;color:var(--muted);margin-bottom:10px;"><summary style="cursor:pointer;user-select:none;">対象 ${allNames.length}種類 ▼</summary><div style="margin-top:4px;line-height:1.7;">${allNames.map(n=>{const it=inventory.find(x=>nameOf(x)===n);return n+(it?.breed?" ("+it.breed+")":"");}).join("、")}</div></details>
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;">
@@ -36739,7 +36762,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112707';
+const APP_BUILD = '2026112709';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
