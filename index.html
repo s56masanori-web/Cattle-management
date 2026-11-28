@@ -7274,8 +7274,7 @@ function renderCowList() {
       const _sub = [[cow.sire, cow.maternalSire].filter(Boolean).join(' × '), _ageTxt, cow.lactation ? cow.lactation + '産' : ''].filter(Boolean).join(' ・ ');
       let _key = '';
       if (cow.status === 'pregnant' && cow.dueDate) { const dl = diffDays(cow.dueDate, today()); _key = `<div class="nui-cc-key">🍼 分娩予定 <b style="color:var(--purple);">${fmtDate(cow.dueDate)}</b> <span style="color:${dl < 0 ? 'var(--danger)' : 'var(--muted)'};">${dl < 0 ? '（' + (-dl) + '日超過）' : '（あと' + dl + '日）'}</span></div>`; }
-      // ★ 2026/11/28：妊娠中でない経産牛は「最終分娩日（分娩後◯日）」を出す（空胎の牛は日数を色分け）
-      else if (openDays !== null && openDays >= 0) { const _op = cow.status === 'open' && !isPregWaiting; _key = `<div class="nui-cc-key">🐄 最終分娩 <b>${fmtDate(cow.calvingDate)}</b> <span style="color:var(--muted);">（分娩後</span><b style="color:${_op && openDays > 90 ? 'var(--danger)' : _op && openDays > 60 ? 'var(--warn)' : 'var(--text)'};">${openDays}日</b><span style="color:var(--muted);">）</span>${_op && nextEstrusLabel ? ' ・ ' + nextEstrusLabel.replace(/<\/?div[^>]*>/g, '') : ''}</div>`; }
+      else if (openDays !== null && cow.status === 'open' && !isPregWaiting) _key = `<div class="nui-cc-key">空胎 <b style="color:${openDays > 90 ? 'var(--danger)' : openDays > 60 ? 'var(--warn)' : 'var(--text)'};">${openDays}日</b>${nextEstrusLabel ? ' ・ ' + nextEstrusLabel.replace(/<\/?div[^>]*>/g, '') : ''}</div>`;
       return `<div class="cow-card nui-cc" data-cowid="${cow.id}" style="${cardStyle}cursor:pointer;" onclick="cowCardClick('${cow.id}')">
         ${(cow.tags || []).length ? `<div class="nui-tags nui-tags-top" onclick="event.stopPropagation()">${sortTagsByColor(cow.tags).map(t => `<button class="nui-tagc" style="${nuiTagStyle(t)}" onclick="nuiTagFilter('${String(t).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')}')">🏷 ${_stEsc(t)}</button>`).join('')}</div>` : ''}
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
@@ -7285,7 +7284,7 @@ function renderCowList() {
         ${_sub ? `<div style="font-size:12px;color:var(--muted);margin-top:3px;">${_sub}</div>` : ''}
         ${_key}
         ${cowCalvingIntervalText(cow)}
-        ${cow.status === 'pregnant' || (lastAiEt && cow.calvingDate && lastAiEt.date < cow.calvingDate) ? '' : lastInsemLabel}
+        ${cow.status === 'pregnant' ? '' : lastInsemLabel}
         ${insemHistoryLabel}
         ${donorStopBanner(cow)}
         ${cow.memo ? `<div style="background:var(--bg3);border-left:3px solid var(--accent);padding:6px 10px;font-size:12px;color:var(--muted);margin:6px 0;border-radius:0 6px 6px 0;">📌 ${cow.memo}</div>` : ''}
@@ -15774,15 +15773,12 @@ function _echoRender() {
   const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const sd = _EC.side, A = _EC.A[sd], sc = _EC.scan[sd];
   const chip = (on, oc, l) => `<button type="button" onclick="${oc}" style="border:1px solid ${on ? '#4ade80' : '#2a3050'};color:${on ? '#4ade80' : '#cbd5e1'};font-weight:${on ? 700 : 400};background:#1e2333;border-radius:999px;padding:7px 13px;font-size:13px;cursor:pointer;font-family:inherit;">${l}</button>`;
-  const hint = { cl: '黄体のふちを4か所（上・下・左・右）タップしてください', fl: '卵胞（黒い所）の中をタップしてください。うまく囲めないときは、まん中→ふちの2回タップ', del: '消したい印をタップしてください', scale: '目盛りの1マス（1cm）の両はしを、2回タップしてください' }[_EC.mode] || '';
+  const hint = { cl: _EC.taps.length >= 4 ? '4点そろいました。ずれている点は指で動かせます。よければ「✓ この4点で黄体にする」' : `黄体のふちを4か所（上・下・左・右）タップしてください（${_EC.taps.length}/4）。打った点は指で動かせます`, fl: '卵胞（黒い所）の中をタップしてください。うまく囲めないときは、まん中→ふちの2回タップ', del: '消したい印をタップしてください', scale: '目盛りの1マス（1cm）の両はしを、2回タップしてください' }[_EC.mode] || '';
   let pic = '';
   if (A && !A.err) {
-    const shapes = sc.shapes.map((s, i) => { const cx = s.x * A.ppc, cy = s.y * A.ppc, rx = s.rx * A.ppc, ry = s.ry * A.ppc, c = s.t === 'cl' ? '#4ade80' : '#38bdf8';
-      return `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="none" stroke="${c}" stroke-width="${2.5 / (_EC.zoom || 1)}" ${s.t === 'cl' ? 'stroke-dasharray="9 5"' : ''}/><text x="${cx}" y="${cy - ry - 5}" fill="${c}" font-size="15" font-weight="700" text-anchor="middle" style="paint-order:stroke;stroke:#000;stroke-width:3px;">${s.t === 'cl' ? '黄体' : ''} ${_ecR(s.rx * 2)}×${_ecR(s.ry * 2)}</text>`; }).join('');
-    const taps = _EC.taps.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="6" fill="#4ade80"/>`).join('');
     pic = `<div style="position:relative;width:100%;max-width:640px;margin:0 auto;">
-      <svg id="echo-svg" viewBox="0 0 ${A.W} ${A.H}" style="display:block;width:100%;height:auto;touch-action:manipulation;" onclick="_echoTap(event)">
-        <image href="${_EC.url[sd]}" x="0" y="${-A.oy * A.s}" width="${A.W0 * A.s}" height="${A.H0 * A.s}" preserveAspectRatio="none"/>${shapes}${taps}
+      <svg id="echo-svg" viewBox="0 0 ${A.W} ${A.H}" style="display:block;width:100%;height:auto;touch-action:manipulation;" onclick="_echoTap(event)" onpointerdown="_echoPD(event)" onpointermove="_echoPM(event)" onpointerup="_echoPU(event)" onpointercancel="_echoPU(event)">
+        <image href="${_EC.url[sd]}" x="0" y="${-A.oy * A.s}" width="${A.W0 * A.s}" height="${A.H0 * A.s}" preserveAspectRatio="none"/><g id="echo-g">${_echoShapesSvg()}</g>
         ${A.ppc ? `<rect x="8" y="${A.H - 30}" width="190" height="22" rx="5" fill="rgba(15,17,23,.85)"/><text x="16" y="${A.H - 14}" fill="#e2e8f0" font-size="13">目盛り 1cm＝${Math.round(A.ppc0)}px${A.manual ? '（手で）' : '（自動）'}</text>` : ''}
       </svg></div>`;
   } else if (A && A.err) pic = `<div style="color:#f87171;font-size:13px;padding:10px 0;">${E(A.err)}</div>`;
@@ -15796,7 +15792,9 @@ function _echoRender() {
     <label style="display:block;text-align:center;border:1.5px dashed #2a3050;border-radius:12px;padding:${A ? '8px' : '28px'} 10px;cursor:pointer;font-size:14px;color:#cbd5e1;margin-bottom:10px;">📷 ${A ? '画像をかえる' : (sd === 'R' ? '右' : '左') + 'の卵巣のスクショを読み込む'}<input type="file" accept="image/*" style="display:none;" onchange="_echoLoad(this.files[0])"></label>
     ${pic}
     ${A && !A.err ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${chip(_EC.mode === 'cl', "_echoMode('cl')", '＋ 黄体')}${chip(_EC.mode === 'fl', "_echoMode('fl')", '＋ 卵胞')}${chip(_EC.mode === 'del', "_echoMode('del')", '− 消す')}${chip(_EC.mode === 'scale', "_echoMode('scale')", '📏 目盛りを手で')}</div>
-      ${hint ? `<div style="font-size:12.5px;color:#4ade80;margin-top:6px;">${hint}</div>` : `<div style="font-size:12px;color:#94a3b8;margin-top:6px;line-height:1.6;">水色＝自動で見つけた黒い所（腔・卵胞）。ちがうものは「− 消す」。黄体は「＋ 黄体」でふちを4か所タップ。</div>`}
+      ${hint ? `<div style="font-size:12.5px;color:#4ade80;margin-top:6px;">${hint}</div>` : `<div style="font-size:12px;color:#94a3b8;margin-top:6px;line-height:1.6;">水色＝自動で見つけた黒い所（腔・卵胞）。ちがうものは「− 消す」。黄体は「＋ 黄体」でふちを4か所タップ。<b style="color:#cbd5e1;">印を押すと、大きさを直せます。</b></div>`}
+      ${_EC.mode === 'cl' && _EC.taps.length ? `<div style="display:flex;gap:6px;margin-top:6px;">${_EC.taps.length >= 4 ? `<button type="button" onclick="_echoClOk()" style="flex:1;height:42px;border-radius:10px;border:none;background:#22c55e;color:#0f1117;font-weight:900;font-size:14px;cursor:pointer;font-family:inherit;">✓ この4点で黄体にする</button>` : ''}<button type="button" onclick="_EC.taps.pop();_echoRender()" style="height:42px;padding:0 14px;border-radius:10px;border:1px solid #475569;background:none;color:#cbd5e1;font-size:13px;cursor:pointer;font-family:inherit;">↩ 1つ戻す</button></div>` : ''}
+      ${_echoSelPanel()}
       ${A.ppc ? '' : '<div style="font-size:12.5px;color:#fbbf24;margin-top:6px;">目盛りが自動で見つかりませんでした。「📏 目盛りを手で」で1マスの両はしをタップしてください</div>'}
       <label style="display:flex;align-items:center;justify-content:flex-start;text-align:left;gap:8px;font-size:12px;color:#94a3b8;margin-top:8px;"><input type="checkbox" style="width:18px;height:18px;flex:none;margin:0;" ${_EC.scan[sd].seen ? 'checked' : ''} onchange="_EC.scan['${sd}'].seen=this.checked;_echoRender()">この卵巣は見た（黄体も卵胞もなくても、見たら入れる）</label>` : `<label style="display:flex;align-items:center;justify-content:flex-start;text-align:left;gap:8px;font-size:12px;color:#94a3b8;"><input type="checkbox" style="width:18px;height:18px;flex:none;margin:0;" ${_EC.scan[sd].seen ? 'checked' : ''} onchange="_EC.scan['${sd}'].seen=this.checked;_echoRender()">画像はないが、この卵巣は見た（なにもなかった）</label>`}
     <details ${A ? '' : 'open'} style="margin-top:10px;border:1px solid #2a3050;border-radius:10px;padding:8px 10px;"><summary style="cursor:pointer;font-size:13px;color:#cbd5e1;">✏ 画像がないとき：数字で入れる（${sd === 'R' ? '右' : '左'}）</summary>
@@ -15810,6 +15808,7 @@ function _echoRender() {
       <div style="font-size:13px;font-weight:700;color:#94a3b8;">結果</div>${_echoSvg(_EC.scan, 300)}${_echoSumHTML(_EC.scan, J)}</div>
     <button type="button" onclick="_echoSave()" ${_EC.scan.R.seen || _EC.scan.L.seen ? '' : 'disabled'} style="width:100%;margin-top:14px;height:50px;border-radius:12px;border:none;background:${_EC.scan.R.seen || _EC.scan.L.seen ? '#22c55e' : '#334155'};color:#0f1117;font-weight:900;font-size:15px;cursor:pointer;font-family:inherit;">この所見を保存する</button>
   </div>`;
+  { const g = document.getElementById('echo-g'); if (g) g.innerHTML = _echoShapesSvg(); }   // 画面の大きさが決まってから、点の大きさをそろえる
 }
 // 画像がないとき：数字から形を作る（黄体と腔はだ円、卵胞は円。位置は並べて描くための仮の位置）
 function _echoNum() {
@@ -15818,22 +15817,27 @@ function _echoNum() {
   let x = 0.5;
   if (c1) { sh.push({ t: 'cl', x: x + c1 / 2, y: 1.5, rx: c1 / 2, ry: c2 / 2 }); if (k1) sh.push({ t: 'fl', x: x + c1 / 2, y: 1.5, rx: k1 / 2, ry: k2 / 2, a: Math.PI * k1 * k2 / 4 }); x += c1 + 0.3; }
   String((document.getElementById('ecn-fl') || {}).value || '').normalize('NFKC').split(/[\s,、・]+/).map(parseFloat).filter(d => d > 0 && d < 10).forEach(d => { sh.push({ t: 'fl', x: x + d / 2, y: 1.5, rx: d / 2, ry: d / 2, a: Math.PI * d * d / 4 }); x += d + 0.2; });
-  _EC.scan[sd] = { seen: true, ppc: 0, shapes: sh, num: 1 }; _EC.mode = ''; _EC.taps = []; _echoRender();
+  _EC.scan[sd] = { seen: true, ppc: 0, shapes: sh, num: 1 }; _EC.mode = ''; _EC.taps = []; _EC.sel = null; _echoRender();
 }
-function _echoTab(k) { _EC.side = k; _EC.mode = ''; _EC.taps = []; _echoRender(); }
-function _echoMode(m) { _EC.mode = _EC.mode === m ? '' : m; _EC.taps = []; _echoRender(); }
+function _echoTab(k) { _EC.side = k; _EC.mode = ''; _EC.taps = []; _EC.sel = null; _echoRender(); }
+function _echoMode(m) { _EC.mode = _EC.mode === m ? '' : m; _EC.taps = []; _EC.sel = null; _echoRender(); }
 function _echoLoad(f) {
   if (!f || !_EC) return; const sd = _EC.side;
   try { if (_EC.url[sd]) URL.revokeObjectURL(_EC.url[sd]); } catch (e) {}
   const url = URL.createObjectURL(f), img = new Image();
   img.onload = () => { let A; try { A = _echoAnalyze(img); } catch (e) { console.error('echo', e); A = { err: '画像を読めませんでした' }; }
     _EC.url[sd] = url; _EC.A[sd] = A; _EC.scan[sd] = { seen: !A.err, ppc: A.ppc0 || 0, shapes: (A.regions || []).map(r => ({ t: r.t, x: _ecR(r.x, 3), y: _ecR(r.y, 3), rx: _ecR(r.rx, 3), ry: _ecR(r.ry, 3), a: _ecR(r.a, 3), auto: 1 })) };
-    _EC.mode = A.ppc ? '' : 'scale'; _EC.taps = []; _echoRender(); };
+    _EC.mode = A.ppc ? '' : 'scale'; _EC.taps = []; _EC.sel = null; _echoRender(); };
   img.onerror = () => { appAlert('画像を読めませんでした'); };
   img.src = url;
 }
 function _echoTap(ev) {
-  if (!_EC || !_EC.mode) return; const sd = _EC.side, A = _EC.A[sd]; if (!A) return;
+  if (!_EC) return; if (_EC.justDrag) { _EC.justDrag = false; return; }
+  const sd = _EC.side, A = _EC.A[sd]; if (!A) return;
+  if (!_EC.mode) {   // ★ 2026/11/28：印を押すと選んで、大きさを直せる
+    if (!A.ppc) return; const p = _echoPt(ev), cm = { x: p[0] / A.ppc, y: p[1] / A.ppc }, sc0 = _EC.scan[sd];
+    const hit = sc0.shapes.map((s, i) => [s, i]).filter(([s]) => _inEll(cm, { ...s, rx: s.rx + 0.15, ry: s.ry + 0.15 })).sort((a, b) => a[0].rx * a[0].ry - b[0].rx * b[0].ry)[0];
+    _EC.sel = hit ? hit[1] : null; return _echoRender(); }
   const svg = document.getElementById('echo-svg'), r = svg.getBoundingClientRect();
   const px = (ev.clientX - r.left) / r.width * A.W, py = (ev.clientY - r.top) / r.height * A.H;
   const sc = _EC.scan[sd];
@@ -15845,16 +15849,74 @@ function _echoTap(ev) {
   if (!A.ppc) return;
   const cm = [px / A.ppc, py / A.ppc];
   if (_EC.mode === 'del') { const hit = sc.shapes.map((s, i) => [s, i]).filter(([s]) => _inEll({ x: cm[0], y: cm[1] }, s)).sort((a, b) => a[0].rx * a[0].ry - b[0].rx * b[0].ry)[0];
-    if (hit) sc.shapes.splice(hit[1], 1); return _echoRender(); }
+    if (hit) sc.shapes.splice(hit[1], 1); _EC.sel = null; return _echoRender(); }
   if (_EC.mode === 'fl') {
     if (!_EC.taps.length) { const f = _echoFlood(A, px, py); if (f) { sc.shapes.push(f); sc.seen = true; return _echoRender(); } _EC.taps.push([px, py]); return _echoRender(); }
     const [a] = _EC.taps, rr = Math.hypot(px - a[0], py - a[1]) / A.ppc; if (rr > 0.05) { sc.shapes.push({ t: 'fl', x: a[0] / A.ppc, y: a[1] / A.ppc, rx: rr, ry: rr, a: Math.PI * rr * rr }); sc.seen = true; }
     _EC.taps = []; return _echoRender(); }
-  if (_EC.mode === 'cl') { _EC.taps.push([px, py]); if (_EC.taps.length === 4) { const xs = _EC.taps.map(t => t[0]), ys = _EC.taps.map(t => t[1]);
-      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-      if (x1 - x0 > 5 && y1 - y0 > 5) { sc.shapes.push({ t: 'cl', x: (x0 + x1) / 2 / A.ppc, y: (y0 + y1) / 2 / A.ppc, rx: (x1 - x0) / 2 / A.ppc, ry: (y1 - y0) / 2 / A.ppc }); sc.seen = true; }
-      _EC.taps = []; } return _echoRender(); }
+  if (_EC.mode === 'cl') { if (_EC.taps.length < 4) _EC.taps.push([px, py]); return _echoRender(); }   // 4点そろっても、すぐには決めない（点を動かしてから「✓」）
 }
+// ★ 2026/11/28：スマホで打ちまちがえても直せるように、点や印のはしを指で動かす
+function _echoPt(ev) { const A = _EC.A[_EC.side], svg = document.getElementById('echo-svg'), r = svg.getBoundingClientRect(); return [(ev.clientX - r.left) / r.width * A.W, (ev.clientY - r.top) / r.height * A.H]; }
+function _echoHR() { const A = _EC.A[_EC.side], svg = document.getElementById('echo-svg'); const w = svg ? svg.getBoundingClientRect().width : 0; return w ? A.W / w : 1; }   // 画面の1pxが画像の何pxか
+function _echoHandles() {   // 選んだ印の、上下左右のはし＋まん中
+  const A = _EC.A[_EC.side], sc = _EC.scan[_EC.side], s = _EC.sel != null ? sc.shapes[_EC.sel] : null; if (!s || !A || !A.ppc) return [];
+  // 小さい印では点が重なるので、まん中から少なくとも指1本ぶん外に出す（はしとは細い線でつなぐ）
+  const p = A.ppc, cx = s.x * p, cy = s.y * p, rx = s.rx * p, ry = s.ry * p, m = 40 * _echoHR(), ox = Math.max(rx, m), oy = Math.max(ry, m);
+  return [['t', cx, cy - oy, cx, cy - ry], ['b', cx, cy + oy, cx, cy + ry], ['l', cx - ox, cy, cx - rx, cy], ['r', cx + ox, cy, cx + rx, cy], ['c', cx, cy]];
+}
+function _echoShapesSvg() {
+  const A = _EC.A[_EC.side], sc = _EC.scan[_EC.side], k = _echoHR();
+  const sh = sc.shapes.map((s, i) => { const cx = s.x * A.ppc, cy = s.y * A.ppc, rx = s.rx * A.ppc, ry = s.ry * A.ppc, c = s.t === 'cl' ? '#4ade80' : '#38bdf8', on = _EC.sel === i;
+    return `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${on ? 'rgba(255,255,255,.08)' : 'none'}" stroke="${on ? '#fbbf24' : c}" stroke-width="${(on ? 3 : 2.5) * Math.max(1, k * 0.8)}" ${s.t === 'cl' ? 'stroke-dasharray="9 5"' : ''}/><text x="${cx}" y="${cy - ry - 5}" fill="${on ? '#fbbf24' : c}" font-size="${15 * Math.max(1, k * 0.8)}" font-weight="700" text-anchor="middle" style="paint-order:stroke;stroke:#000;stroke-width:3px;pointer-events:none;">${s.t === 'cl' ? '黄体' : ''} ${_ecR(s.rx * 2)}×${_ecR(s.ry * 2)}</text>`; }).join('');
+  let pre = '';
+  if (_EC.mode === 'cl' && _EC.taps.length >= 2) { const xs = _EC.taps.map(t => t[0]), ys = _EC.taps.map(t => t[1]); const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    pre = `<ellipse cx="${(x0 + x1) / 2}" cy="${(y0 + y1) / 2}" rx="${(x1 - x0) / 2}" ry="${(y1 - y0) / 2}" fill="rgba(74,222,128,.10)" stroke="#4ade80" stroke-width="${2 * Math.max(1, k * 0.8)}" stroke-dasharray="4 4" style="pointer-events:none;"/>`; }
+  const R = 9 * k, H = 22 * k;   // 見える点は画面で9px、さわれる所は22px
+  const tp = _EC.mode === 'cl' ? _EC.taps.map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="${H}" fill="transparent" data-h="p${i}" style="touch-action:none;cursor:grab;"/><circle cx="${x}" cy="${y}" r="${R}" fill="#4ade80" stroke="#0f1117" stroke-width="${2 * k}" style="pointer-events:none;"/><text x="${x}" y="${y + 4 * k}" font-size="${11 * k}" font-weight="900" text-anchor="middle" fill="#0f1117" style="pointer-events:none;">${i + 1}</text>`).join('')
+    : _EC.mode === 'scale' || _EC.mode === 'fl' ? _EC.taps.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="${R * 0.7}" fill="#4ade80"/>`).join('') : '';
+  const hd = _EC.mode ? '' : _echoHandles().map(([h, x, y, ex, ey]) => (ex != null && Math.hypot(ex - x, ey - y) > 1 ? `<line x1="${ex}" y1="${ey}" x2="${x}" y2="${y}" stroke="#fbbf24" stroke-width="${1.5 * k}" style="pointer-events:none;"/>` : '') + `<circle cx="${x}" cy="${y}" r="${H}" fill="transparent" data-h="${h}" style="touch-action:none;cursor:grab;"/>` + (h === 'c'
+    ? `<path d="M${x - R} ${y}H${x + R}M${x} ${y - R}V${y + R}" stroke="#fbbf24" stroke-width="${2.5 * k}" style="pointer-events:none;"/>`
+    : `<circle cx="${x}" cy="${y}" r="${R}" fill="#fbbf24" stroke="#0f1117" stroke-width="${2 * k}" style="pointer-events:none;"/>`)).join('');
+  return sh + pre + tp + hd;
+}
+function _echoPD(ev) {
+  if (!_EC) return; const h = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-h'); if (!h) return;
+  ev.preventDefault(); _EC.drag = { h, p0: _echoPt(ev), moved: false, s0: _EC.sel != null ? { ..._EC.scan[_EC.side].shapes[_EC.sel] } : null, t0: _EC.taps.map(t => t.slice()) };
+  try { document.getElementById('echo-svg').setPointerCapture(ev.pointerId); } catch (e) {}
+}
+function _echoPM(ev) {
+  const D = _EC && _EC.drag; if (!D) return; ev.preventDefault();
+  const A = _EC.A[_EC.side], p = _echoPt(ev), dx = p[0] - D.p0[0], dy = p[1] - D.p0[1]; if (Math.abs(dx) + Math.abs(dy) > 2) D.moved = true;
+  if (D.h[0] === 'p') { const i = +D.h.slice(1); _EC.taps[i] = [D.t0[i][0] + dx, D.t0[i][1] + dy]; }
+  else if (D.s0) { const s = _EC.scan[_EC.side].shapes[_EC.sel], o = D.s0, ux = dx / A.ppc, uy = dy / A.ppc, mn = 0.05;
+    if (D.h === 'c') { s.x = o.x + ux; s.y = o.y + uy; }
+    else if (D.h === 'l' || D.h === 'r') { const L = o.x - o.rx + (D.h === 'l' ? ux : 0), Rr = o.x + o.rx + (D.h === 'r' ? ux : 0), a = Math.min(L, Rr), b = Math.max(L, Rr); s.rx = Math.max(mn, (b - a) / 2); s.x = (a + b) / 2; }
+    else { const T = o.y - o.ry + (D.h === 't' ? uy : 0), B = o.y + o.ry + (D.h === 'b' ? uy : 0), a = Math.min(T, B), b = Math.max(T, B); s.ry = Math.max(mn, (b - a) / 2); s.y = (a + b) / 2; }
+    if (s.t === 'fl') s.a = Math.PI * s.rx * s.ry; delete s.auto; }
+  const g = document.getElementById('echo-g'); if (g) g.innerHTML = _echoShapesSvg();
+}
+function _echoPU(ev) { const D = _EC && _EC.drag; if (!D) return; _EC.drag = null; if (D.moved) { _EC.justDrag = true; setTimeout(() => { if (_EC) _EC.justDrag = false; }, 400); } _echoRender(); }
+function _echoClOk() {
+  const sd = _EC.side, A = _EC.A[sd], sc = _EC.scan[sd]; if (!A || _EC.taps.length < 4) return;
+  const xs = _EC.taps.map(t => t[0]), ys = _EC.taps.map(t => t[1]); const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (x1 - x0 > 5 && y1 - y0 > 5) { sc.shapes.push({ t: 'cl', x: (x0 + x1) / 2 / A.ppc, y: (y0 + y1) / 2 / A.ppc, rx: (x1 - x0) / 2 / A.ppc, ry: (y1 - y0) / 2 / A.ppc }); sc.seen = true; _EC.sel = sc.shapes.length - 1; }
+  _EC.taps = []; _EC.mode = ''; _echoRender();
+}
+// 選んだ印の直し：よこ・たて（cm）を数字で、種類の入れかえ、消す
+function _echoSelPanel() {
+  const sc = _EC.scan[_EC.side], s = _EC.sel != null ? sc.shapes[_EC.sel] : null; if (!s || _EC.mode) return '';
+  const ip = (k, v) => `<input inputmode="decimal" value="${_ecR(v, 2)}" onchange="_echoSetSize('${k}',this.value)" style="width:70px;margin:0;height:38px;font-size:15px;text-align:center;">`;
+  const b = (oc, l, st) => `<button type="button" onclick="${oc}" style="height:38px;padding:0 12px;border-radius:9px;border:1px solid ${st || '#475569'};background:none;color:${st || '#cbd5e1'};font-size:13px;cursor:pointer;font-family:inherit;">${l}</button>`;
+  return `<div style="border:1.5px solid #fbbf24;border-radius:10px;padding:10px 12px;margin-top:8px;">
+    <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:6px;">選んだ印：${s.t === 'cl' ? '黄体' : '卵胞・腔'}</div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;">よこ${ip('w', s.rx * 2)}×たて${ip('h', s.ry * 2)}cm</div>
+    <div style="font-size:11.5px;color:#94a3b8;margin:6px 0;line-height:1.6;">黄色い点（上下左右のはし）を指で動かしても直せます。＋はまん中で、印ごと動かせます。</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">${b("_echoSetType()", s.t === 'cl' ? '卵胞・腔にする' : '黄体にする')}${b("_echoDelSel()", '− 消す', '#f87171')}${b("_EC.sel=null;_echoRender()", '選ぶのをやめる')}</div></div>`;
+}
+function _echoSetSize(k, v) { const s = _EC.scan[_EC.side].shapes[_EC.sel]; const x = parseFloat(String(v).normalize('NFKC')); if (!s || !(x > 0 && x < 10)) return _echoRender(); if (k === 'w') s.rx = x / 2; else s.ry = x / 2; if (s.t === 'fl') s.a = Math.PI * s.rx * s.ry; delete s.auto; _echoRender(); }
+function _echoSetType() { const s = _EC.scan[_EC.side].shapes[_EC.sel]; if (!s) return; s.t = s.t === 'cl' ? 'fl' : 'cl'; if (s.t === 'fl') s.a = Math.PI * s.rx * s.ry; delete s.auto; _echoRender(); }
+function _echoDelSel() { const sc = _EC.scan[_EC.side]; if (_EC.sel == null) return; sc.shapes.splice(_EC.sel, 1); _EC.sel = null; _echoRender(); }
 function _echoSave() {
   if (!_EC) return; const tbr = _EC.tb ? (transferBook || []).find(x => x.id === _EC.tb) : null;
   const cow = tbr ? null : cows.find(c => c.id === _EC.cowId); if (!cow && !tbr) return;
@@ -32087,11 +32149,11 @@ function renderSemen() {
         return `
         <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.5px;margin:14px 0 6px;padding-left:2px;">${g.label} ${live.length}種${zero.length ? `<span style="font-weight:400;">（在庫0 ${zero.length}種）</span>` : ''}</div>
         ${g.breed === 'その他' ? live.map(renderCard).join('') : (() => {
-          // ★ 2026/11/27：品種の中を系統ごとにまとめる（見出しだけ。折りたたまず、いつも全部見せる）
+          // ★ 2026/11/27：品種の中を系統ごとにまとめる（折りたたみ）
           const by = {}; live.forEach(x => { const l = sireLineOf(x) || ''; (by[l] = by[l] || []).push(x); });
           const ord = [..._lnOrder(g.breed).filter(l => by[l]), ...Object.keys(by).filter(l => l && !_lnOrder(g.breed).includes(l)), ...(by[''] ? [''] : [])];
           return ord.map(l => { const a = by[l], st = a.reduce((t, x) => t + (Number(x.stock) || 0), 0);
-            return `<div style="margin:0 0 6px;"><div style="padding:7px 4px;font-size:13px;font-weight:700;color:${l ? 'var(--text)' : 'var(--warn)'};">${l ? _stEsc(l) : '系統が分からない'} <span style="font-weight:400;font-size:11.5px;color:var(--muted);">${a.length}種・在庫${st}本</span></div>${a.map(renderCard).join('')}</div>`; }).join('');
+            return `<details ${l ? '' : 'open'} style="margin:0 0 6px;"><summary style="cursor:pointer;padding:7px 4px;font-size:13px;font-weight:700;color:${l ? 'var(--text)' : 'var(--warn)'};">${l ? _stEsc(l) : '系統が分からない'} <span style="font-weight:400;font-size:11.5px;color:var(--muted);">${a.length}種・在庫${st}本</span></summary>${a.map(renderCard).join('')}</details>`; }).join('');
         })()}
         ${zero.length ? `<details style="margin:2px 0 8px;"><summary style="font-size:11px;color:var(--muted);cursor:pointer;padding:4px 2px;">📦 在庫0の種雄牛 ${zero.length}種（タップで表示）</summary>${zero.map(renderCard).join('')}</details>` : ''}`;
       }).join('');
@@ -36850,7 +36912,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112717';
+const APP_BUILD = '2026112801';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
