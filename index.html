@@ -37025,7 +37025,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112811';
+const APP_BUILD = '2026112812';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -38538,8 +38538,22 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     return fr.concat(fs).concat(cu).map((x, i) => ({ idx: i, no: String(x.e.no || x.e.embryoNo || ''), cane: x.e.cane || x.e.caneNo || '', stage: x.e.stage || '', rank: x.e.rank || '', kind: x.k })).filter(x => x.no);
   }
   const yAgo = () => addDays(today(), -365);
+  // ★ 2026/11/28：🏛 農協に提出（長島牧場）。証明書を出した・もらったあと、農協に持っていったかを子牛ごとに残す（提出日つき）
+  const SUB_FROM = '2026-10-01';
+  const subOn = () => !!((window.FARM_FEAT && FARM_FEAT.certSubmit) || (window.FARM_CFG && FARM_CFG.farmId === 'nagashima'));
+  const subIss = c => c.authCertIssued || c.etCertIssued || c.certReqGot || '';
+  window._certSubInit = function () {   // はじめの1回：長島さんは 11/21 生まれまでは提出済み（言われたとおり）
+    try { if (!subOn() || (farmTargets && farmTargets._certSubInit)) return;
+      let n = 0; calves.forEach(c => { if (!c.certSubmitted && (c.dob || '') && c.dob <= '2026-11-21') { c.certSubmitted = '2026-11-21'; c.certSubInit = true; n++; } });
+      farmTargets = farmTargets || {}; farmTargets._certSubInit = today(); save(); console.log('certSubInit', n);
+    } catch (e) { console.warn('certSubInit', e); } };
   function cpItems(tab, done) {
     const B = cpBook();
+    if (tab === 'sub') {
+      const L = calves.filter(c => c.status !== 'dead' && !c.deathDate && (c.dob || '') >= (done ? yAgo() : SUB_FROM) && (done ? !!c.certSubmitted : !c.certSubmitted));
+      return L.sort((a, b) => done ? String(b.certSubmitted).localeCompare(String(a.certSubmitted)) || (a.dob || '').localeCompare(b.dob || '') : (subIss(b) ? 1 : 0) - (subIss(a) ? 1 : 0) || (a.dob || '').localeCompare(b.dob || '') || _tagCmpAsc(a, b))
+        .map(c => ({ key: c.id, c, row: true, et: cpIsEtCalf(c), sub: true }));
+    }
     if (tab === 'ai' && aiCertOnInsem()) {   // 授精した日に出す農場：授精簿の行ごと
       const T = today(), opOf = r => String(r.op || '').replace(/在庫反映.*$/, '').trim();
       return B.filter(r => r.d && r.d >= (done ? yAgo() : AI_CERT_INSEM_FROM) && r.d <= T && !cpIsEtRow(r) && !opOf(r) && (done ? !!r.certAt : !r.certAt))
@@ -38593,6 +38607,16 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
           ? `<button class="nui-chip" style="font-size:11px;padding:4px 8px;" onclick="nuiCpReq('${k}','undo')">まだに戻す</button>`
           : `${c.certReqAsked ? '' : `<button class="nui-chip" onclick="nuiCpReq('${k}','ask')">📨 頼んだ</button>`}<button class="nui-chip" onclick="nuiCpReq('${k}','got')">✓ 届いた</button>`}</span></div>`;
     }
+    if (it.sub) {
+      const c = it.c, iss = subIss(c), on = CP.sel.has(it.key);
+      return `<div class="cp-r" data-k="${esc(it.key)}" ${CP.done ? '' : `onclick="nuiCpT('${k}')"`} style="display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid rgba(255,255,255,.06);cursor:${CP.done ? 'default' : 'pointer'};">${CP.done ? '' : cpBox(on)}
+        <span style="flex:1;min-width:0;">
+          <span class="nui-mono" style="font-weight:700;font-size:15px;">${esc(c.earTagId || '耳標なし')}</span> <span style="color:#4ade80;font-weight:700;">${esc(damNameOf(c.damId, c) || '')}</span><span style="font-size:12px;color:#94a3b8;"> の子</span>
+          <div style="font-size:12px;color:#94a3b8;margin-top:1px;">${esc([c.dob ? md(c.dob) + '生まれ' : '', (it.et ? '移植' : '授精') + (c.insemDate ? ' ' + md(c.insemDate) : ''), c.sire || ''].filter(Boolean).join('・'))}</div>
+          <div style="font-size:12px;margin-top:3px;color:${CP.done ? '#4ade80' : iss ? '#cbd5e1' : '#fbbf24'};">${CP.done ? `✓ ${esc(md(c.certSubmitted))} 農協に提出${c.certSubInit ? '（11/21までまとめて入れた分）' : ''}` : iss ? `📄 ${it.et ? '移植' : '授精'}証明書あり（${esc(md(String(iss).slice(0, 10)))}）・まだ出していない` : `⚠ ${it.et ? '移植' : '授精'}証明書がまだ`}</div>
+        </span>
+        ${CP.done ? `<button class="nui-chip" style="font-size:11px;padding:4px 8px;flex-shrink:0;" onclick="event.stopPropagation();nuiCpSubUndo('${k}')">まだに戻す</button>` : ''}</div>`;
+    }
     if (it.ins) {   // 授精した日に出す農場：授精簿の1行
       const r = it.row;
       return `<div class="cp-r" data-k="${esc(it.key)}" onclick="nuiCpT('${k}')" style="display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer;">${cpBox(on)}
@@ -38620,6 +38644,10 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
   }
   function cpFoot() {
     if (CP.tab === 'req') return `<div style="font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;">ほかの術者が授精した子です。こちらで証明書は出さずに、その術者に送ってもらいます。<br>「📄 依頼リスト」で術者に送る表を作れます（印刷、または印刷の画面から PDF にして送れます）。<br>頼んだら「📨 頼んだ」、届いたら「✓ 届いた」を押すと一覧から消えます。</div>`;
+    if (CP.tab === 'sub') { const n = CP.sel.size; if (CP.done) return `<div style="font-size:12px;color:#94a3b8;text-align:center;">まちがえて提出済みにしたときは「まだに戻す」</div>`;
+      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;color:#94a3b8;"><span>提出した日</span><input type="date" id="cp-subd" value="${esc(CP.subd || today())}" max="${today()}" onchange="CP_setSubd(this.value)" style="flex:1;height:38px;margin:0;font-size:14px;"></div>
+        <button onclick="nuiCpSub()" ${n ? '' : 'disabled'} style="width:100%;height:52px;border-radius:12px;border:none;background:${n ? '#16a34a' : '#1e2333'};color:${n ? '#fff' : '#64748b'};font-size:17px;font-weight:900;font-family:inherit;cursor:${n ? 'pointer' : 'default'};">🏛 ${n ? n + '頭を農協に提出済みにする' : '提出した子牛を選んでください'}</button>
+        <div style="font-size:11px;color:#64748b;text-align:center;margin-top:6px;">提出済みにすると、この一覧から消えて「提出済みを見る」に入ります</div>`; }
     const n = CP.sel.size, blank = CP.tab === 'ai' && !CP.done ? cpBlank().length : 0;
     return `${blank ? `<button onclick="nuiCpFill()" style="width:100%;height:42px;border-radius:10px;border:1.5px solid #b45309;background:#1a0f00;color:#fbbf24;font-size:14px;font-weight:700;margin-bottom:8px;font-family:inherit;cursor:pointer;">No. を続き番号で入れる（${blank}か所）</button>` : ''}
       <button id="cp-print" onclick="nuiCpPrint()" ${n ? '' : 'disabled'} style="width:100%;height:52px;border-radius:12px;border:none;background:${n ? '#16a34a' : '#1e2333'};color:${n ? '#fff' : '#64748b'};font-size:17px;font-weight:900;font-family:inherit;cursor:${n ? 'pointer' : 'default'};">📄 ${n ? n + '枚を印刷する' : '印刷するものを選んでください'}</button>
@@ -38631,13 +38659,13 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
     return out.sort((a, b) => (a.d || '').localeCompare(b.d || ''));
   }
   function vCert(keepScroll) {
-    const tabs = [cpOn.ai() ? ['ai', '💉 授精'] : null, cpOn.et() ? ['et', '🧬 移植'] : null, cpOn.egg() ? ['egg', '🥚 受精卵'] : null, ['req', '📨 依頼']].filter(Boolean);
+    const tabs = [subOn() ? ['sub', '🏛 農協提出'] : null, cpOn.ai() ? ['ai', '💉 授精'] : null, cpOn.et() ? ['et', '🧬 移植'] : null, cpOn.egg() ? ['egg', '🥚 受精卵'] : null, ['req', '📨 依頼']].filter(Boolean);
     if (!tabs.some(t => t[0] === CP.tab)) CP.tab = tabs[0][0];
     const I = cpItems(CP.tab, CP.done);
     const okKeys = new Set(I.filter(it => CP.tab === 'egg' || (CP.tab !== 'req' && it.row)).map(it => it.key));
     CP.sel = new Set([...CP.sel].filter(k => okKeys.has(k)));
     let list = '';
-    if (!I.length) list = `<div style="text-align:center;color:#64748b;padding:40px 10px;font-size:14px;">${CP.done ? (CP.tab === 'req' ? '届いたものはありません' : '発行済みのものはありません') : CP.tab === 'req' ? '✓ 頼むものはありません' : '✓ まだ出していない証明書はありません'}</div>`;
+    if (!I.length) list = `<div style="text-align:center;color:#64748b;padding:40px 10px;font-size:14px;">${CP.done ? (CP.tab === 'req' ? '届いたものはありません' : CP.tab === 'sub' ? '提出済みの子牛はありません' : '発行済みのものはありません') : CP.tab === 'req' ? '✓ 頼むものはありません' : CP.tab === 'sub' ? '✓ 農協に出していない子牛はありません' : '✓ まだ出していない証明書はありません'}</div>`;
     else if (CP.tab === 'req') {
       const G = []; I.forEach(it => { const g = G[G.length - 1]; if (g && g.op === it.op) g.L.push(it); else G.push({ op: it.op, L: [it] }); });
       list = G.map(g => { const notAsked = g.L.filter(it => !it.c.certReqAsked && !it.c.certReqGot).length;
@@ -38667,18 +38695,25 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       `<div style="padding:12px 14px 30px;">
         ${tabs.length > 1 ? `<div class="nui-seg" style="margin-bottom:10px;">${tabs.map(([k, l]) => { const n = cpCount(k); return `<button class="${CP.tab === k ? 'on' : ''}" onclick="nuiCpTab('${k}')">${l}${n ? ` <span style="color:#fbbf24;">${n}</span>` : ''}</button>`; }).join('')}</div>` : ''}
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-          <span style="flex:1;font-size:12px;color:#94a3b8;">${CP.done ? 'この1年に発行したもの' : (CP.tab === 'req' ? 'ほかの術者に証明書を送ってもらう子牛（10/1から後に生まれた子）' : CP.tab === 'ai' ? (aiCertOnInsem() ? '授精証明書がまだの授精（授精した日に出します）' : '授精証明書がまだの子牛') : CP.tab === 'et' ? '移植証明書がまだの子牛（自分で移植した子）' : '受精卵証明書　ロットを開いて、発行する胚を選んでください')}${I.length && CP.tab !== 'egg' ? `　${I.length}${CP.tab === 'egg' ? '個' : CP.tab === 'ai' && aiCertOnInsem() ? '件' : '頭'}` : ''}</span>
-          ${I.length && CP.tab !== 'req' && !(CP.tab === 'egg' && !CP.done) ? `<button class="nui-chip" onclick="nuiCpAll()">${I.filter(it => okKeys.has(it.key)).every(it => CP.sel.has(it.key)) && CP.sel.size ? '選ぶのをやめる' : '全部えらぶ'}</button>` : ''}</div>
+          <span style="flex:1;font-size:12px;color:#94a3b8;">${CP.done ? (CP.tab === 'sub' ? 'この1年に農協へ提出した子牛' : 'この1年に発行したもの') : (CP.tab === 'sub' ? '農協に証明書を提出していない子牛（10/1から後に生まれた子）' : CP.tab === 'req' ? 'ほかの術者に証明書を送ってもらう子牛（10/1から後に生まれた子）' : CP.tab === 'ai' ? (aiCertOnInsem() ? '授精証明書がまだの授精（授精した日に出します）' : '授精証明書がまだの子牛') : CP.tab === 'et' ? '移植証明書がまだの子牛（自分で移植した子）' : '受精卵証明書　ロットを開いて、発行する胚を選んでください')}${I.length && CP.tab !== 'egg' ? `　${I.length}${CP.tab === 'egg' ? '個' : CP.tab === 'ai' && aiCertOnInsem() ? '件' : '頭'}` : ''}</span>
+          ${I.length && CP.tab !== 'req' && !(CP.tab === 'egg' && !CP.done) && !(CP.tab === 'sub' && CP.done) ? `<button class="nui-chip" onclick="nuiCpAll()">${I.filter(it => okKeys.has(it.key)).every(it => CP.sel.has(it.key)) && CP.sel.size ? '選ぶのをやめる' : '全部えらぶ'}</button>` : ''}</div>
         ${CP.tab === 'et' && !CP.done ? '<div style="font-size:11px;color:#64748b;margin:-4px 0 8px;">証明書の番号は今までどおり自動で付きます</div>' : ''}
         ${CP.tab === 'egg' && !CP.done ? `<input id="nui-egg-q" class="nui-in" type="search" value="${esc(CP.eq || '')}" placeholder="🔍 ドナー・種雄牛・ロットでさがす（例：にわか）" oninput="window._nuiEggQ(this.value)" style="width:100%;margin-bottom:10px;">` : ''}
         ${list}${other}
-        ${CP.tab === 'egg' && !CP.done ? '' : `<button onclick="nuiCpDone()" style="display:block;margin:18px auto 0;background:none;border:none;color:#94a3b8;font-size:13px;cursor:pointer;font-family:inherit;">${CP.done ? '‹ まだのものに戻る' : CP.tab === 'req' ? '届いたものを見る ›' : '発行済みを見る ›'}</button>`}
+        ${CP.tab === 'egg' && !CP.done ? '' : `<button onclick="nuiCpDone()" style="display:block;margin:18px auto 0;background:none;border:none;color:#94a3b8;font-size:13px;cursor:pointer;font-family:inherit;">${CP.done ? '‹ まだのものに戻る' : CP.tab === 'req' ? '届いたものを見る ›' : CP.tab === 'sub' ? '提出済みを見る ›' : '発行済みを見る ›'}</button>`}
         <button onclick="nuiClose();switchTab('insembook')" style="display:block;margin:8px auto 0;background:none;border:none;color:#64748b;font-size:12px;cursor:pointer;font-family:inherit;">📋 授精簿を開く（記録を見る・直す）</button>
       </div>`, cpFoot());
     if (st) { const s2 = document.querySelector('#nui-scr .sb'); if (s2) s2.scrollTop = st; }
   }
   function cpRefreshFoot() { const f = document.querySelector('#nui-scr .sf .wrap'); if (f) f.innerHTML = cpFoot(); }
-  window.nuiCert = function (tab) { CP = { tab: tab || (CP && CP.tab) || 'ai', done: false, sel: new Set() }; vCert(); try { sideMark('cert'); } catch (e) {} };
+  window.nuiCert = function (tab) { try { window._certSubInit(); } catch (e) {} CP = { tab: tab || (CP && CP.tab) || (subOn() ? 'sub' : 'ai'), done: false, sel: new Set() }; vCert(); try { sideMark('cert'); } catch (e) {} };
+  window.CP_setSubd = v => { if (CP) CP.subd = v; };
+  window.nuiCpSub = function () {
+    if (!CP || !CP.sel.size) return; const d = (document.getElementById('cp-subd') || {}).value || CP.subd || today();
+    let n = 0; CP.sel.forEach(id => { const c = calves.find(x => x.id === id); if (c) { c.certSubmitted = d; delete c.certSubInit; n++; } });
+    save(); CP.sel = new Set(); vCert(true);
+  };
+  window.nuiCpSubUndo = function (id) { const c = calves.find(x => x.id === id); if (!c) return; delete c.certSubmitted; delete c.certSubInit; save(); vCert(true); };
   window.nuiCpTab = t => { CP.tab = t; CP.sel = new Set(); vCert(); };
   window.nuiCpDone = () => { CP.done = !CP.done; CP.sel = new Set(); vCert(); };
   window.nuiCpT = function (k) {
