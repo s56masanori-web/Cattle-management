@@ -3649,6 +3649,7 @@ function loadData() {
   collectionRecords = JSON.parse(_store.getItem('collectionRecords') || '[]');
   calvingRecords  = JSON.parse(_store.getItem('calvingRecords') || '[]');
   calves          = JSON.parse(_store.getItem('calves') || '[]');
+  try { resetCalfSnap(); } catch (e) {}   // 読み直した子牛も「今変更した」扱いにしない
   etRecords       = JSON.parse(_store.getItem('etRecords') || '[]');
   semenInventory  = JSON.parse(_store.getItem('semenInventory') || '[]');
   embryoInventory = JSON.parse(_store.getItem('embryoInventory') || '[]');
@@ -4143,7 +4144,17 @@ async function pushInsemBookAsTruth() {
   save();
   appAlert('送りました。ほかの端末は、開き直す（または数秒待つ）と、この端末と同じ内容になります。');
 }
-function resetCowSnap() { _cowSnap = new Map(cows.map(c => [c.id, _cowKey(c)])); }
+function resetCowSnap() { _cowSnap = new Map(cows.map(c => [c.id, _cowKey(c)])); try { resetCalfSnap(); } catch (e) {} }
+// ★ 2026/11/28：子牛にも「最後に変えた時刻（_mt）」を付ける（親牛と同じ）。
+//   前は子牛に _mt が付かなかったので、別の端末が古い子牛のまま送ってくると、同じ欄を両方で変えた扱いになったときに
+//   「どちらが新しいか」が分からず、手元に入れた個体識別番号などが古い値に戻ることがあった
+let _calfSnap = null;
+function resetCalfSnap() { _calfSnap = new Map((calves || []).map(c => [c.id, _cowKey(c)])); }
+function stampChangedCalves() {
+  if (!_calfSnap) { resetCalfSnap(); return; }
+  const now = Date.now();
+  (calves || []).forEach(c => { if (!c || c.id == null) return; const k = _cowKey(c); if (_calfSnap.get(c.id) !== k) { c._mt = now; _calfSnap.set(c.id, k); } });
+}
 function stampChangedCows() {
   if (!_cowSnap) { resetCowSnap(); return; }
   const now = Date.now();
@@ -4435,6 +4446,7 @@ function save() {
   try { if (typeof _histOnSave === 'function') _histOnSave(); } catch (e) { console.error('history', e); }
   try { if (typeof _taskJournalOnSave === 'function') _taskJournalOnSave(); } catch (e) { console.error('taskJournal', e); }
   try { stampChangedCows(); } catch (e) { console.error('stampChangedCows', e); }
+  try { stampChangedCalves(); } catch (e) { console.error('stampChangedCalves', e); }
   try { dedupeInsemDupRows(); } catch (e) { console.error('dedupeInsemDupRows', e); }
   try { ensureInsemIds(); } catch (e) { console.error('ensureInsemIds', e); }
   try { stampChangedInsem(); } catch (e) { console.error('stampChangedInsem', e); }
@@ -36861,6 +36873,7 @@ function _syncLegacyMerge(k, rv, lv) {
   if (lv == null) return rv;
   try {
     if (k === 'cows') return mergeCowsJSON(rv, lv);
+    if (k === 'calves') return mergeCowsJSON(rv, lv);   // ★ 2026/11/28：子牛も1頭ずつ、後から変えた方（_mt）を残す（前はクラウドの方で丸ごと上書き）
     if (k === 'staticDonorAIFlags') return mergeDonorFlagsJSON(rv, lv);
     if (k === 'insemBookEdits') return mergeInsemEditsJSON(rv, lv);
     if (k === 'insemBookRecords') return mergeInsemRecordsJSON(rv, lv);
@@ -37012,7 +37025,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112810';
+const APP_BUILD = '2026112811';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
@@ -40227,6 +40240,7 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
       </div>
       <div class="sec">⚙ 設定・使い方</div><div class="lst">
         <div onclick="openHelpGuide()"><span>📖 使い方</span><span style="color:#64748b;">›</span></div>
+        <div onclick="startTour(true)"><span>🎓 はじめての案内をもう一度見る</span><span style="color:#64748b;">›</span></div>
         <div onclick="openFarmSetup(true)"><span>⚙ 牧場の設定（はじめの設定）</span><span style="color:#64748b;">›</span></div>
         <div onclick="openModal('modal-settings')"><span>⚙ 設定・データ管理</span><span style="color:#64748b;">›</span></div>
         <div onclick="exportExcelAll()"><span>📊 全部のデータをExcelで持ち帰る</span><span style="color:#64748b;">›</span></div>
@@ -40603,6 +40617,59 @@ html.nui #page-home #barn-board{margin-bottom:0 !important;}
 })();
 </script>
 <script>
+
+// ===== ★ 2026/11/28：はじめて開いた人への案内（よく使う6か所を、吹き出しで順番に）=====
+//   新しい画面（nui）で、小原農場・長島牧場以外の農場に、1回だけ出す。「とばす」でやめられる。その他 → 🎓 からもう一度見られる
+const TOUR_STEPS = [
+  { el: null, t: 'ようこそ 🐄', d: 'はじめに、よく使うところを6つだけ案内します（1分くらい）。', btn: 'はじめる' },
+  { el: 'bb-home', t: '🏠 ホーム', d: '今日やること（発情の予定・授精・妊娠鑑定・お産など）が出ます。まずはここを見ます。' },
+  { el: 'bb-rec', t: '＋ 記録', d: '発情・授精・移植・妊娠鑑定・お産・治療は、全部ここから入れます。牛をえらんで、やったことを押すだけです。' },
+  { el: 'bb-cows', t: '🐄 牛', d: '親牛・子牛・育成・肥育の一覧です。カードを押すと、その牛の📖ストーリー（これまでの記録）が見られます。' },
+  { el: 'bb-ib', t: '📒 授精簿', d: '授精と移植の記録です。授精証明書・移植証明書もここから出せます。' },
+  { el: 'bb-more', t: '☰ その他', d: '成績・精液と受精卵の在庫・書類の印刷・設定はここにあります。' },
+  { el: 'hlp-hdr', t: 'こまったら ？', d: 'どの画面でも、ここを押すとその画面の使い方が出ます。この案内は「その他 → 🎓 はじめての案内」からもう一度見られます。', btn: 'おわり' },
+];
+function _tourShouldShow() {
+  try {
+    if (!document.documentElement.classList.contains('nui')) return false;
+    const C = window.FARM_CFG || {}; if (C.legacyFixes || C.farmId === 'obara' || C.farmId === 'nagashima' || C.noTour) return false;
+    return !localStorage.getItem('_tourDone');
+  } catch (e) { return false; }
+}
+function startTour(force) { window._tour = { i: 0 }; if (force) try { localStorage.removeItem('_tourDone'); } catch (e) {} _tourDraw(); }
+function _tourEnd() { try { localStorage.setItem('_tourDone', String(Date.now())); } catch (e) {} const w = document.getElementById('tour-w'); if (w) w.remove(); window._tour = null; window.removeEventListener('resize', _tourDraw); }
+function _tourGo(d) { if (!window._tour) return; window._tour.i += d; if (window._tour.i >= TOUR_STEPS.length) return _tourEnd(); if (window._tour.i < 0) window._tour.i = 0; _tourDraw(); }
+function _tourDraw() {
+  if (!window._tour) return; const S = TOUR_STEPS[window._tour.i], n = TOUR_STEPS.length;
+  let w = document.getElementById('tour-w'); if (!w) { w = document.createElement('div'); w.id = 'tour-w'; w.style.cssText = 'position:fixed;inset:0;z-index:99990;'; document.body.appendChild(w); window.addEventListener('resize', _tourDraw); }
+  const el = S.el && document.getElementById(S.el), r = el && el.offsetParent !== null ? el.getBoundingClientRect() : null;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let hole = '', bubPos = `top:${Math.round(vh * 0.28)}px;`;
+  if (r) { const pad = 6, cx = r.left + r.width / 2, cy = r.top + r.height / 2, rad = Math.max(r.width, r.height) / 2 + pad;
+    hole = `<div style="position:fixed;left:${cx - rad}px;top:${cy - rad}px;width:${rad * 2}px;height:${rad * 2}px;border-radius:50%;box-shadow:0 0 0 4000px rgba(0,0,0,.62);border:2.5px solid #4ade80;pointer-events:none;"></div>`;
+    bubPos = cy > vh / 2 ? `bottom:${Math.round(vh - (cy - rad) + 12)}px;` : `top:${Math.round(cy + rad + 12)}px;`; }
+  const dots = TOUR_STEPS.map((_, k) => `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:4px;background:${k === window._tour.i ? '#4ade80' : '#334155'};"></span>`).join('');
+  const last = window._tour.i === n - 1;
+  w.innerHTML = (r ? hole : '<div style="position:fixed;inset:0;background:rgba(0,0,0,.62);"></div>') +
+    `<div style="position:fixed;left:14px;right:14px;${bubPos}max-width:420px;margin:0 auto;background:#1a1f2e;border:1.5px solid #4ade80;border-radius:14px;padding:12px 14px;color:#e2e8f0;font-size:13.5px;line-height:1.65;box-shadow:0 8px 30px rgba(0,0,0,.5);">
+      <div style="font-size:15px;font-weight:800;margin-bottom:2px;">${S.t}</div><div>${S.d}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:8px;">
+        ${last ? '<span></span>' : `<button type="button" onclick="_tourEnd()" style="background:none;border:none;color:#94a3b8;font-size:12.5px;cursor:pointer;font-family:inherit;padding:6px 2px;">とばす</button>`}
+        <span>${dots}</span>
+        <span style="display:flex;gap:6px;">${window._tour.i > 0 && !last ? `<button type="button" onclick="_tourGo(-1)" style="background:none;border:1px solid #475569;color:#cbd5e1;border-radius:9px;padding:7px 10px;font-size:13px;cursor:pointer;font-family:inherit;">‹</button>` : ''}<button type="button" onclick="_tourGo(1)" style="border:none;background:#22c55e;color:#0f1117;font-weight:900;border-radius:9px;padding:7px 14px;font-size:13px;cursor:pointer;font-family:inherit;">${S.btn || '次へ ›'}</button></span></div></div>`;
+}
+// 開いてしばらくして、ほかの画面（はじめの設定など）が出ていなければ始める
+(function _tourAuto() {
+  let tries = 0;
+  const tick = () => {
+    if (!_tourShouldShow()) return;
+    const busy = document.querySelector('.modal-overlay.open, #fsw') || (document.getElementById('login-screen') && getComputedStyle(document.getElementById('login-screen')).display !== 'none');
+    if (busy || !document.getElementById('bb-rec')) { if (++tries < 40) setTimeout(tick, 3000); return; }
+    startTour(false);
+  };
+  setTimeout(tick, 2500);
+})();
+
 // ===== ★ 2026/11/24：ヘルプ（① 画面ごとの「？」 ② その他 → 📖 使い方 ③ はじめの設定の「？」） =====
 (function () {
   const isObara = () => (window.FARM_CFG || {}).role === 'vet';   // 獣医さんのツール（つなぐ質問を出さない）
