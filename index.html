@@ -15743,6 +15743,29 @@ function _echoSvg(scan, w) {
   };
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;max-width:100%;">${one(scan.L, bL, 0, '左')}${one(scan.R, bR, half, '右')}</svg>`;
 }
+// ★ 2026/11/28：判定の決まり（いまの数字）を折りたたみで見せる
+function _echoRuleNote() {
+  const R = _echoRule(), li = (a, b) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px solid rgba(255,255,255,.05);"><span style="white-space:nowrap;">${a}</span><span style="text-align:right;">${b}</span></div>`;
+  return `<details style="margin-top:10px;border:1px solid #2a3050;border-radius:10px;padding:6px 10px;"><summary style="cursor:pointer;font-size:12.5px;color:#94a3b8;">📏 判定の決まり（どの数字で決めているか）</summary>
+    <div style="font-size:12px;color:#cbd5e1;line-height:1.6;margin-top:4px;">
+      <div style="font-weight:700;color:#94a3b8;margin:6px 0 2px;">黄体（移植してよいか）　※面積は腔をのぞいた黄体の組織</div>
+      ${li('◎ 移植してよい', `組織 ${R.tisOk}cm²以上（黄体化嚢腫の疑いがないとき）`)}
+      ${li('△ 境目', `組織 ${R.tisMin}〜${R.tisOk}cm²、黄体の直径 ${R.dMin}cm以上`)}
+      ${li('✕ 見送り', `組織 ${R.tisMin}cm²未満、または直径 ${R.dMin}cm未満`)}
+      <div style="font-weight:700;color:#94a3b8;margin:8px 0 2px;">黄体化嚢腫を疑う（どれか1つ）</div>
+      ${li('腔のしめる割合', `${R.cavMax}%をこえる`)}
+      ${li('黄体の壁の厚さ', `${Math.round(R.wallMin * 10)}mm未満`)}
+      ${li('腔の直径', `${R.cavDiaMax}cmをこえる`)}
+      <div style="font-weight:700;color:#94a3b8;margin:8px 0 2px;">卵胞</div>
+      ${li('卵胞嚢腫を疑う', `黄体がなく、卵胞 ${R.cyst}cm以上`)}
+      ${li('様子を見る（排卵前かも）', `黄体がなく、卵胞 ${R.cystMaybe}〜${R.cyst}cm`)}
+      ${li('卵巣静止を疑う', `左右とも黄体がなく、卵胞 ${R.staticFol}cm未満`)}
+      <div style="font-weight:700;color:#94a3b8;margin:8px 0 2px;">そのほか</div>
+      ${li('卵胞の大きさ', 'たてとよこの平均（直径）')}
+      ${li('再検査の予定', `嚢腫・静止などを疑ったとき、${R.recheckDays}日後に「🔍 卵巣の再検査」を入れる`)}
+      <div style="font-size:11px;color:#64748b;margin-top:6px;">目安です。決めるのは先生です。数字を変えたいときは言ってください。</div>
+    </div></details>`;
+}
 function _echoSumHTML(scan, J) {
   J = J || _echoJudge(scan); const E = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const col = { ok: '#4ade80', warn: '#fbbf24', ng: '#f87171', info: '#94a3b8' };
@@ -15805,10 +15828,14 @@ function _echoRender() {
         <button type="button" onclick="_echoNum()" style="margin-top:8px;width:100%;height:40px;border-radius:10px;border:1px solid #4ade80;background:none;color:#4ade80;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;">この数字で${sd === 'R' ? '右' : '左'}の卵巣に入れる</button>
         <div style="font-size:11px;color:#64748b;margin-top:4px;">入れると、この卵巣の印は数字の分に入れかわります。黄体も卵胞もなかったときは、空のまま押してください。</div>`; })()}</details>
     <div class="nui-card" style="padding:12px;margin-top:14px;background:#1a1f2e;border:1px solid #2a3050;border-radius:12px;">
-      <div style="font-size:13px;font-weight:700;color:#94a3b8;">結果</div>${_echoSvg(_EC.scan, 300)}${_echoSumHTML(_EC.scan, J)}</div>
+      <div style="font-size:13px;font-weight:700;color:#94a3b8;">結果</div>${_EC.mode === 'cl' && _EC.taps.length ? `<div style="font-size:12.5px;color:#fbbf24;margin:4px 0;">⚠ 打っている4点は、まだ黄体に入っていません。「✓ この4点で黄体にする」を押すと、ここに入ります</div>` : ''}${_echoSvg(_EC.scan, 300)}${_echoSumHTML(_EC.scan, J)}${_echoRuleNote()}</div>
     <button type="button" onclick="_echoSave()" ${_EC.scan.R.seen || _EC.scan.L.seen ? '' : 'disabled'} style="width:100%;margin-top:14px;height:50px;border-radius:12px;border:none;background:${_EC.scan.R.seen || _EC.scan.L.seen ? '#22c55e' : '#334155'};color:#0f1117;font-weight:900;font-size:15px;cursor:pointer;font-family:inherit;">この所見を保存する</button>
   </div>`;
   { const g = document.getElementById('echo-g'); if (g) g.innerHTML = _echoShapesSvg(); }   // 画面の大きさが決まってから、点の大きさをそろえる
+  // ★ 2026/11/28：iPhoneでは点をつかんでも画面がスクロールしてしまうので、点をさわったときと動かしているあいだはスクロールを止める
+  { const sv = document.getElementById('echo-svg'); if (sv) {
+    sv.addEventListener('touchstart', e => { const t = e.target; if (t && t.getAttribute && t.getAttribute('data-h')) e.preventDefault(); }, { passive: false });
+    sv.addEventListener('touchmove', e => { if (_EC && _EC.drag) e.preventDefault(); }, { passive: false }); } }
 }
 // 画像がないとき：数字から形を作る（黄体と腔はだ円、卵胞は円。位置は並べて描くための仮の位置）
 function _echoNum() {
@@ -15870,8 +15897,8 @@ function _echoShapesSvg() {
   const sh = sc.shapes.map((s, i) => { const cx = s.x * A.ppc, cy = s.y * A.ppc, rx = s.rx * A.ppc, ry = s.ry * A.ppc, c = s.t === 'cl' ? '#4ade80' : '#38bdf8', on = _EC.sel === i;
     return `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${on ? 'rgba(255,255,255,.08)' : 'none'}" stroke="${on ? '#fbbf24' : c}" stroke-width="${(on ? 3 : 2.5) * Math.max(1, k * 0.8)}" ${s.t === 'cl' ? 'stroke-dasharray="9 5"' : ''}/><text x="${cx}" y="${cy - ry - 5}" fill="${on ? '#fbbf24' : c}" font-size="${15 * Math.max(1, k * 0.8)}" font-weight="700" text-anchor="middle" style="paint-order:stroke;stroke:#000;stroke-width:3px;pointer-events:none;">${s.t === 'cl' ? '黄体' : ''} ${_ecR(s.rx * 2)}×${_ecR(s.ry * 2)}</text>`; }).join('');
   let pre = '';
-  if (_EC.mode === 'cl' && _EC.taps.length >= 2) { const xs = _EC.taps.map(t => t[0]), ys = _EC.taps.map(t => t[1]); const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-    pre = `<ellipse cx="${(x0 + x1) / 2}" cy="${(y0 + y1) / 2}" rx="${(x1 - x0) / 2}" ry="${(y1 - y0) / 2}" fill="rgba(74,222,128,.10)" stroke="#4ade80" stroke-width="${2 * Math.max(1, k * 0.8)}" stroke-dasharray="4 4" style="pointer-events:none;"/>`; }
+  if (_EC.mode === 'cl' && _EC.taps.length >= 2) { const e = _echoFit4(_EC.taps);
+    pre = `<ellipse cx="${e.cx}" cy="${e.cy}" rx="${e.rx}" ry="${e.ry}" fill="rgba(74,222,128,.10)" stroke="#4ade80" stroke-width="${2 * Math.max(1, k * 0.8)}" stroke-dasharray="4 4" style="pointer-events:none;"/>`; }
   const R = 9 * k, H = 22 * k;   // 見える点は画面で9px、さわれる所は22px
   const tp = _EC.mode === 'cl' ? _EC.taps.map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="${H}" fill="transparent" data-h="p${i}" style="touch-action:none;cursor:grab;"/><circle cx="${x}" cy="${y}" r="${R}" fill="#4ade80" stroke="#0f1117" stroke-width="${2 * k}" style="pointer-events:none;"/><text x="${x}" y="${y + 4 * k}" font-size="${11 * k}" font-weight="900" text-anchor="middle" fill="#0f1117" style="pointer-events:none;">${i + 1}</text>`).join('')
     : _EC.mode === 'scale' || _EC.mode === 'fl' ? _EC.taps.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="${R * 0.7}" fill="#4ade80"/>`).join('') : '';
@@ -15897,10 +15924,28 @@ function _echoPM(ev) {
   const g = document.getElementById('echo-g'); if (g) g.innerHTML = _echoShapesSvg();
 }
 function _echoPU(ev) { const D = _EC && _EC.drag; if (!D) return; _EC.drag = null; if (D.moved) { _EC.justDrag = true; setTimeout(() => { if (_EC) _EC.justDrag = false; }, 400); } _echoRender(); }
+// ★ 2026/11/28：4点を通るだ円を求める（前は4点の上下左右のはしを囲む四角から作っていたので、点が斜めにあると点からずれた）
+//   A·x² + B·y² + C·x + D·y = 1（たて・よこまっすぐのだ円）に4点を入れて解く。解けない・だ円にならないときは前のやり方
+function _echoFit4(P) {
+  const xs = P.map(t => t[0]), ys = P.map(t => t[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const box = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, rx: (x1 - x0) / 2, ry: (y1 - y0) / 2 };
+  if (P.length < 4) return box;
+  const mx = box.cx, my = box.cy, sc = Math.max(x1 - x0, y1 - y0) || 1;   // 計算がくずれないよう、まん中を0・大きさを1にそろえる
+  const M = P.map(([x, y]) => { const u = (x - mx) / sc, v = (y - my) / sc; return [u * u, v * v, u, v, 1]; });
+  for (let c = 0; c < 4; c++) { let piv = c; for (let r = c + 1; r < 4; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    if (Math.abs(M[piv][c]) < 1e-9) return box; [M[c], M[piv]] = [M[piv], M[c]];
+    for (let r = 0; r < 4; r++) if (r !== c) { const f = M[r][c] / M[c][c]; for (let k = c; k < 5; k++) M[r][k] -= f * M[c][k]; } }
+  const [A, B, C, D] = M.map((r, i) => r[4] / r[i]);
+  if (!(A > 0 && B > 0)) return box;
+  const cu = -C / (2 * A), cv = -D / (2 * B), K = 1 + A * cu * cu + B * cv * cv; if (!(K > 0)) return box;
+  const f = { cx: mx + cu * sc, cy: my + cv * sc, rx: Math.sqrt(K / A) * sc, ry: Math.sqrt(K / B) * sc };
+  if (!(f.rx > 2 && f.ry > 2) || f.rx > box.rx * 3 + 20 || f.ry > box.ry * 3 + 20) return box;   // とんでもなく大きくなるとき（点がほぼ一直線など）は前のやり方
+  return f;
+}
 function _echoClOk() {
   const sd = _EC.side, A = _EC.A[sd], sc = _EC.scan[sd]; if (!A || _EC.taps.length < 4) return;
-  const xs = _EC.taps.map(t => t[0]), ys = _EC.taps.map(t => t[1]); const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-  if (x1 - x0 > 5 && y1 - y0 > 5) { sc.shapes.push({ t: 'cl', x: (x0 + x1) / 2 / A.ppc, y: (y0 + y1) / 2 / A.ppc, rx: (x1 - x0) / 2 / A.ppc, ry: (y1 - y0) / 2 / A.ppc }); sc.seen = true; _EC.sel = sc.shapes.length - 1; }
+  const e = _echoFit4(_EC.taps);
+  if (e.rx > 2.5 && e.ry > 2.5) { sc.shapes.push({ t: 'cl', x: e.cx / A.ppc, y: e.cy / A.ppc, rx: e.rx / A.ppc, ry: e.ry / A.ppc }); sc.seen = true; _EC.sel = sc.shapes.length - 1; }
   _EC.taps = []; _EC.mode = ''; _echoRender();
 }
 // 選んだ印の直し：よこ・たて（cm）を数字で、種類の入れかえ、消す
@@ -15909,7 +15954,7 @@ function _echoSelPanel() {
   const ip = (k, v) => `<input inputmode="decimal" value="${_ecR(v, 2)}" onchange="_echoSetSize('${k}',this.value)" style="width:70px;margin:0;height:38px;font-size:15px;text-align:center;">`;
   const b = (oc, l, st) => `<button type="button" onclick="${oc}" style="height:38px;padding:0 12px;border-radius:9px;border:1px solid ${st || '#475569'};background:none;color:${st || '#cbd5e1'};font-size:13px;cursor:pointer;font-family:inherit;">${l}</button>`;
   return `<div style="border:1.5px solid #fbbf24;border-radius:10px;padding:10px 12px;margin-top:8px;">
-    <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:6px;">選んだ印：${s.t === 'cl' ? '黄体' : '卵胞・腔'}</div>
+    <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:6px;">選んだ印：${s.t === 'cl' ? '黄体' : sc.shapes.some(c => c.t === 'cl' && _inEll(s, c)) ? '黄体の腔' : '卵胞'}</div>
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;">よこ${ip('w', s.rx * 2)}×たて${ip('h', s.ry * 2)}cm</div>
     <div style="font-size:11.5px;color:#94a3b8;margin:6px 0;line-height:1.6;">黄色い点（上下左右のはし）を指で動かしても直せます。＋はまん中で、印ごと動かせます。</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;">${b("_echoSetType()", s.t === 'cl' ? '卵胞・腔にする' : '黄体にする')}${b("_echoDelSel()", '− 消す', '#f87171')}${b("_EC.sel=null;_echoRender()", '選ぶのをやめる')}</div></div>`;
@@ -15918,7 +15963,8 @@ function _echoSetSize(k, v) { const s = _EC.scan[_EC.side].shapes[_EC.sel]; cons
 function _echoSetType() { const s = _EC.scan[_EC.side].shapes[_EC.sel]; if (!s) return; s.t = s.t === 'cl' ? 'fl' : 'cl'; if (s.t === 'fl') s.a = Math.PI * s.rx * s.ry; delete s.auto; _echoRender(); }
 function _echoDelSel() { const sc = _EC.scan[_EC.side]; if (_EC.sel == null) return; sc.shapes.splice(_EC.sel, 1); _EC.sel = null; _echoRender(); }
 function _echoSave() {
-  if (!_EC) return; const tbr = _EC.tb ? (transferBook || []).find(x => x.id === _EC.tb) : null;
+  if (!_EC) return;
+  if (_EC.mode === 'cl' && _EC.taps.length >= 4) _echoClOk();   // 4点打って「✓」を押さずに保存したときは、その黄体も入れる const tbr = _EC.tb ? (transferBook || []).find(x => x.id === _EC.tb) : null;
   const cow = tbr ? null : cows.find(c => c.id === _EC.cowId); if (!cow && !tbr) return;
   const J = _echoJudge(_EC.scan), r3 = n => _ecR(n, 3);
   const clean = sd => ({ seen: !!sd.seen, ppc: Math.round(sd.ppc || 0), shapes: (sd.shapes || []).map(s => ({ t: s.t, x: r3(s.x), y: r3(s.y), rx: r3(s.rx), ry: r3(s.ry), ...(s.a != null ? { a: r3(s.a) } : {}) })) });
@@ -15971,6 +16017,7 @@ function echoEtStatsHTML(from, to) {
       const tbRows = NT.slice(0, 60).map(t => `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:12.5px;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);"><span>🏠 ${_stEsc(t.farmName || '')} <b class="nui-mono">${_stEsc(tbEarTag(t) || t.recipientEarTag || '')}</b> ${_stEsc(t.recipientName || '')}　${fmtDate(t.transferDate)}　<span style="color:${t.pregResult === '+' ? '#4ade80' : '#94a3b8'};">${t.pregResult === '+' ? '受胎' : t.pregResult === '-' ? '不受胎' : '妊鑑まだ'}</span></span><button class="nui-chip" style="font-size:12px;padding:4px 10px;white-space:nowrap;" onclick="openEchoScan('','${t.transferDate}','et',${reNui},{tb:'${t.id}'})">入れる</button></div>`).join('');
       return `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:#94a3b8;">🔬 黄体をまだ入れていない移植（${N.length + NT.length}回）→ あとから入れる</summary>${tbRows}${N.slice(0, 60).map(o => { const d = o.rec.date || o.rec.d;
         return `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:12.5px;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);"><span><b class="nui-mono">${o.cowId}</b> ${cowDisplayName(o.cowId) || ''}　${fmtDate(d)}　<span style="color:${o.pos ? '#4ade80' : '#94a3b8'};">${o.pos ? '受胎' : '不受胎'}</span></span><button class="nui-chip" style="font-size:12px;padding:4px 10px;white-space:nowrap;" onclick="openEchoScan('${o.cowId}','${d}','et',()=>{try{nuiYear((document.getElementById('stats-year')||{}).value||'all')}catch(e){}})">入れる</button></div>`; }).join('')}</details>`; })()}
+    ${_echoRuleNote()}
     <div style="font-size:11px;color:#64748b;margin-top:8px;line-height:1.6;">移植の日か前日に測った黄体（組織がいちばん大きいもの）で数えます。受胎・不受胎は「🎯 受胎率（記録ベース）」のETと同じ数え方です。</div>`;
 }
 
@@ -36912,7 +36959,7 @@ function _syncAfterLocalChange() {
 }
 // ★ 2026/11/15：古い版の画面を開いたままの端末があると、その端末が古い記録で上書き・削除してしまうことがある。
 //   クラウドに「いちばん新しい版の番号」を置き、それより古い版の画面は自動で開き直す（10分に1回まで）
-const APP_BUILD = '2026112801';
+const APP_BUILD = '2026112804';
 window.APP_BUILD = APP_BUILD;   // 同期のようすの画面などで使う
 window._syncBaseOf = k => _syncBase[k];
 function _checkAppBuild(remote, dbRef) {
